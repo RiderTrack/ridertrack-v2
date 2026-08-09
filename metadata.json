@@ -1,0 +1,6 @@
+{
+  "name": "RiderTrack V2",
+  "description": "Sistema profesional para gestión de repartidores, pedidos, clientes y WhatsApp API",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
