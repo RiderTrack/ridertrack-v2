@@ -22,8 +22,13 @@ import { ProfileView } from './components/ProfileView';
 import { WhatsAppModal } from './components/WhatsAppModal';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
+import { useAuth } from './hooks/useAuth';
+import { LoginScreen } from './components/LoginScreen';
 
 export default function App() {
+  // 🔐 Autenticación
+  const { user, profile, loading: authLoading } = useAuth();
+
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -236,6 +241,23 @@ export default function App() {
 
   const activeOrdersCount = orders.filter((o) => o.estado === 'en_camino').length;
   const activeDriversCount = drivers.filter((d) => d.estado !== 'inactivo').length;
+
+  // 🔄 Mostrar loading mientras verifica auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin" />
+          <p className="text-slate-400 text-sm">Cargando RiderTrack V2...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 🔐 Mostrar login si no hay sesión
+  if (!user) {
+    return <LoginScreen />;
+  }
 
   return (
     <div
