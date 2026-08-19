@@ -24,6 +24,7 @@ import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './hooks/useAuth';
 import { LoginScreen } from './components/LoginScreen';
+import { RutaView } from './components/RutaView';
 
 export default function App() {
   // 🔐 Autenticación
@@ -308,6 +309,10 @@ export default function App() {
               onUpdateOrderStatus={handleUpdateOrderStatus}
               onNavigateTab={setActiveTab}
             />
+          )}
+
+          {activeTab === 'ruta' && (
+            <RutaView onShowToast={showToast} />
           )}
 
           {activeTab === 'pedidos' && (

@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard,
+  Route,
   Package,
   Users,
   Bike,
@@ -41,11 +42,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuItems = [
     { id: 'dashboard' as NavigationTab, label: 'Dashboard', icon: LayoutDashboard },
     {
+      id: 'ruta' as NavigationTab,
+      label: 'Mi Ruta',
+      icon: Route,
+      badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
+      badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    },
+    {
       id: 'pedidos' as NavigationTab,
       label: 'Pedidos',
       icon: Package,
-      badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
-      badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     },
     { id: 'clientes' as NavigationTab, label: 'Clientes', icon: Users },
     {

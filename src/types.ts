@@ -1,5 +1,6 @@
 export type NavigationTab =
   | 'dashboard'
+  | 'ruta'
   | 'pedidos'
   | 'clientes'
   | 'repartidores'
