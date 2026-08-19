@@ -1,0 +1,109 @@
+name: Build RiderTrack V2 APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps react-is
+
+      - name: Build React App
+        run: npm run build
+
+
+
+      - name: Add Android platform
+        run: npx cap add android || true
+
+      - name: Copy web assets to Android
+        run: npx cap copy android
+
+      - name: Sync Capacitor plugins
+        run: npx cap sync android
+
+      - name: Configure GoogleAuth plugin
+        run: |
+          mkdir -p android/app/src/main/res/values
+          echo '<?xml version="1.0" encoding="utf-8"?><resources><string name="app_name">RiderTrack V2</string><string name="title_activity_main">RiderTrack V2</string><string name="package_name">com.ridertrack.v2</string><string name="custom_url_scheme">com.ridertrack.v2</string><string name="server_client_id">851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com</string></resources>' > android/app/src/main/res/values/strings.xml
+
+      - name: Add Google Auth dependency to app build.gradle
+        run: |
+          GRADLE="android/app/build.gradle"
+          sed -i '/dependencies {/a\    implementation "com.google.android.gms:play-services-auth:20.7.0"' "$GRADLE"
+
+      - name: Update AndroidManifest permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <application|' "$MANIFEST"
+
+      - name: Set Gradle permissions
+        run: chmod +x android/gradlew
+
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Restore or generate keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "✅ Usando keystore guardado en Secrets"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          else
+            echo "⚠️ No hay KEYSTORE_BASE64 — generando nuevo keystore"
+            keytool -genkeypair \
+              -keystore release.keystore \
+              -alias ridertrack \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass ridertrack123 \
+              -keypass ridertrack123 \
+              -dname "CN=RiderTrack, OU=Dev, O=RiderTrack, L=Lima, S=Lima, C=PE"
+            echo "SHA-1 del keystore nuevo:"
+            keytool -list -v -keystore release.keystore -alias ridertrack -storepass ridertrack123 | grep "SHA1:"
+          fi
+
+      - name: Zipalign APK
+        run: |
+          ZIPALIGN=$(find $ANDROID_SDK_ROOT -name "zipalign" | head -1)
+          $ZIPALIGN -v -p 4 android/app/build/outputs/apk/debug/app-debug.apk RiderTrackV2-aligned.apk
+
+      - name: Sign APK
+        run: |
+          APKSIGNER=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -1)
+          $APKSIGNER sign --ks release.keystore --ks-key-alias ridertrack --ks-pass pass:ridertrack123 --key-pass pass:ridertrack123 --out RiderTrackV2.apk RiderTrackV2-aligned.apk
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiderTrackV2-APK
+          path: RiderTrackV2.apk
+          retention-days: 30

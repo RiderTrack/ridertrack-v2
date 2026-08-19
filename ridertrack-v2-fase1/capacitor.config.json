@@ -1,0 +1,39 @@
+{
+  "appId": "com.ridertrack.v2",
+  "appName": "RiderTrack V2",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "Geolocation": { "permissions": ["location", "coarseLocation"] },
+    "Camera": { "permissions": ["camera", "photos"] },
+    "Filesystem": { "permissions": ["publicStorage"] },
+    "Share": {},
+    "TextToSpeech": {},
+    "App": {},
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#7B2CBF",
+      "sound": "beep.wav"
+    },
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#0F172A",
+      "androidSplashResourceName": "splash",
+      "showSpinner": false
+    },
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "serverClientId": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    }
+  }
+}
