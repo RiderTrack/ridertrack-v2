@@ -45,6 +45,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
   const [controlModalId, setControlModalId] = useState<string | number | null>(null);
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
+  const [llegadaModalId, setLlegadaModalId] = useState<string | number | null>(null);
+  const [ventaModalId, setVentaModalId] = useState<string | number | null>(null);
+  const [cuentasModalId, setCuentasModalId] = useState<string | number | null>(null);
+  const [otrosMateModalId, setOtrosMateModalId] = useState<string | number | null>(null);
+  const [otrosMateTexto, setOtrosMateTexto] = useState('');
   const [importando, setImportando] = useState(false);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -692,20 +697,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={async () => {
-                                const minutos = prompt('¿En cuántos minutos llegás?', '15');
-                                if (!minutos) return;
-                                onShowToast?.('⏱️ Avisar llegada', `Enviando aviso: ${minutos} minutos`, 'info');
-                                await enviarAccionBot(c, 'avisar_siguiente', {
-                                  minutos: parseInt(minutos),
-                                });
+                              onClick={() => {
                                 setControlModalId(null);
+                                setLlegadaModalId(c.id);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all"
                             >
                               <span className="text-lg">⏱️</span>
                               <div className="text-left">
-                                <div>Avisar llegada</div>
+                                <div>Voy en camino</div>
                                 <div className="text-[10px] text-slate-500">Avisa en cuántos minutos llegás</div>
                               </div>
                             </button>
@@ -738,6 +738,401 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 <div>Pedir info a empresa</div>
                                 <div className="text-[10px] text-slate-500">Solicita información del pedido a la empresa</div>
                               </div>
+                            </button>
+
+                            {/* Avisar posición en la ruta */}
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📍 Posición', 'Enviando posición en la ruta...', 'info');
+                                await enviarAccionBot(c, 'avisar_posicion');
+                                setControlModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">📍</span>
+                              <div className="text-left">
+                                <div>Avisar posición en la ruta</div>
+                                <div className="text-[10px] text-slate-500">Le dice al cliente cuál es tu posición</div>
+                              </div>
+                            </button>
+
+                            {/* Llamar directo */}
+                            <button
+                              onClick={() => {
+                                const cel = String(c.cel || '').replace(/\D/g, '');
+                                const telCompleto = cel.length === 9 ? `51${cel}` : cel;
+                                window.open(`tel:+${telCompleto}`, '_self');
+                                setControlModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">📞</span>
+                              <div className="text-left">
+                                <div>Llamar directo</div>
+                                <div className="text-[10px] text-slate-500">Abre el marcador para llamar al cliente</div>
+                              </div>
+                            </button>
+
+                            {/* Chicos de venta */}
+                            <button
+                              onClick={() => {
+                                setControlModalId(null);
+                                setVentaModalId(c.id);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">🩷</span>
+                              <div className="text-left">
+                                <div>Chicos de venta</div>
+                                <div className="text-[10px] text-slate-500">Fabiana · Karla · Tocho</div>
+                              </div>
+                            </button>
+
+                            {/* Cuentas de la empresa */}
+                            <button
+                              onClick={() => {
+                                setControlModalId(null);
+                                setCuentasModalId(c.id);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">🏦</span>
+                              <div className="text-left">
+                                <div>Cuentas de la empresa</div>
+                                <div className="text-[10px] text-slate-500">BCP · BBVA · Interbank · Yape</div>
+                              </div>
+                            </button>
+
+                            {/* Otros temas a MATE */}
+                            <button
+                              onClick={() => {
+                                setControlModalId(null);
+                                setOtrosMateModalId(c.id);
+                                setOtrosMateTexto('');
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">💬</span>
+                              <div className="text-left">
+                                <div>Otros temas a MATE</div>
+                                <div className="text-[10px] text-slate-500">Envía un mensaje al grupo MATE</div>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Modal de Chicos de venta 📞 */}
+                    {ventaModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setVentaModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-bold text-white">🩷 Chicos de Venta</h3>
+                            <button onClick={() => setVentaModalId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mb-3">El bot le enviará el contacto al cliente</p>
+
+                          <div className="space-y-2">
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🩷 Ventas', 'Enviando contacto de Fabiana...', 'info');
+                                await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'fabiana' });
+                                setVentaModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">👩</span>
+                              <div className="text-left flex-1">
+                                <div>Fabiana</div>
+                                <div className="text-[10px] text-slate-500">📱 956 203 893</div>
+                              </div>
+                              <span className="text-[10px] bg-pink-500/20 px-2 py-0.5 rounded-full">Ventas</span>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🩷 Ventas', 'Enviando contacto de Karla...', 'info');
+                                await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'karla' });
+                                setVentaModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">👩</span>
+                              <div className="text-left flex-1">
+                                <div>Karla</div>
+                                <div className="text-[10px] text-slate-500">📱 936 579 046</div>
+                              </div>
+                              <span className="text-[10px] bg-pink-500/20 px-2 py-0.5 rounded-full">Ventas</span>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🩷 Ventas', 'Enviando contacto de Tocho...', 'info');
+                                await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'tocho' });
+                                setVentaModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">👨</span>
+                              <div className="text-left flex-1">
+                                <div>Tocho</div>
+                                <div className="text-[10px] text-slate-500">📱 900 510 126</div>
+                              </div>
+                              <span className="text-[10px] bg-pink-500/20 px-2 py-0.5 rounded-full">Ventas</span>
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => setVentaModalId(null)}
+                            className="w-full mt-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Modal de Cuentas de la empresa 🏦 */}
+                    {cuentasModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setCuentasModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-bold text-white">🏦 Cuentas de la Empresa</h3>
+                            <button onClick={() => setCuentasModalId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mb-3">El bot le enviará los datos bancarios al cliente</p>
+
+                          <div className="space-y-2">
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📲 Yape', 'Enviando QR de Yape...', 'info');
+                                await enviarAccionBot(c, 'yape_qr');
+                                setCuentasModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">📲</span>
+                              <div className="text-left flex-1">
+                                <div>Yape / Plin</div>
+                                <div className="text-[10px] text-slate-500">📱 980 811 297 · Lorenzo N. Tarazona T.</div>
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🏦 BCP', 'Enviando cuenta BCP...', 'info');
+                                await enviarAccionBot(c, 'cuentas_banco', { banco: 'bcp' });
+                                setCuentasModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">🏦</span>
+                              <div className="text-left flex-1">
+                                <div>BCP</div>
+                                <div className="text-[10px] text-slate-500">Cuenta corriente Soles y Dólares</div>
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🏦 BBVA', 'Enviando cuenta BBVA...', 'info');
+                                await enviarAccionBot(c, 'cuentas_banco', { banco: 'bbva' });
+                                setCuentasModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">🏦</span>
+                              <div className="text-left flex-1">
+                                <div>BBVA</div>
+                                <div className="text-[10px] text-slate-500">Cuenta de ahorros Soles</div>
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🏦 Interbank', 'Enviando cuenta Interbank...', 'info');
+                                await enviarAccionBot(c, 'cuentas_banco', { banco: 'interbank' });
+                                setCuentasModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">🏦</span>
+                              <div className="text-left flex-1">
+                                <div>Interbank</div>
+                                <div className="text-[10px] text-slate-500">Cuenta corriente Soles</div>
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📋 Todas', 'Enviando todas las cuentas...', 'info');
+                                await enviarAccionBot(c, 'cuentas_banco', { banco: 'todas' });
+                                setCuentasModalId(null);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-all"
+                            >
+                              <span className="text-lg">📋</span>
+                              <div className="text-left flex-1">
+                                <div>Enviar todas las cuentas</div>
+                                <div className="text-[10px] text-slate-500">Yape + BCP + BBVA + Interbank</div>
+                              </div>
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => setCuentasModalId(null)}
+                            className="w-full mt-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Modal de Otros temas a MATE 💬 */}
+                    {otrosMateModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setOtrosMateModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-bold text-white">💬 Otros temas a MATE</h3>
+                            <button onClick={() => setOtrosMateModalId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mb-3">Este mensaje se enviará al grupo MATE</p>
+
+                          {/* Card del cliente */}
+                          <div className="bg-slate-800 rounded-lg p-3 mb-3 text-[11px]">
+                            <div className="font-bold text-white">{c.nombre}</div>
+                            <div className="text-slate-400">{c.prod} · S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
+                          </div>
+
+                          {/* Textarea */}
+                          <textarea
+                            value={otrosMateTexto}
+                            onChange={e => setOtrosMateTexto(e.target.value)}
+                            placeholder="Escribe el mensaje para MATE..."
+                            rows={4}
+                            className="w-full bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-purple-500 outline-none resize-none mb-3"
+                          />
+
+                          {/* Vista previa */}
+                          {otrosMateTexto.trim() && (
+                            <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-2 mb-3">
+                              <div className="text-[9px] text-purple-400/70 uppercase mb-1">Vista previa</div>
+                              <div className="text-[11px] text-slate-300 whitespace-pre-wrap">
+                                📢 Reporte de {c.nombre}\n\n{otrosMateTexto}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Botones rápidos */}
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {[
+                              'Cliente no sabe la dirección exacta',
+                              'Producto en mal estado',
+                              'Cliente pide cambio de producto',
+                              'Dirección incorrecta en el sistema',
+                              'Cliente quiere hablar con ventas',
+                            ].map(frase => (
+                              <button
+                                key={frase}
+                                onClick={() => setOtrosMateTexto(frase)}
+                                className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-400 border border-slate-700"
+                              >
+                                {frase}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setOtrosMateModalId(null)}
+                              className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!otrosMateTexto.trim()) {
+                                  onShowToast?.('⚠️ Vacío', 'Escribe un mensaje', 'warning');
+                                  return;
+                                }
+                                onShowToast?.('💬 MATE', 'Enviando mensaje al grupo MATE...', 'info');
+                                await enviarAccionBot(c, 'otros_temas_mate', { mensaje: otrosMateTexto });
+                                setOtrosMateModalId(null);
+                                setOtrosMateTexto('');
+                              }}
+                              className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold"
+                            >
+                              📤 Enviar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Modal de Voy en camino (con botones de minutos) */}
+                    {llegadaModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setLlegadaModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h3 className="text-base font-bold text-white">🚀 Voy a: {c.nombre}</h3>
+                              <p className="text-[11px] text-slate-400 mt-0.5">El bot le va a avisar que vas en camino</p>
+                            </div>
+                            <button onClick={() => setLlegadaModalId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          {/* Botones de tiempo rápido */}
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            {['5', '10', '15', '20', '30', '45'].map(m => (
+                              <button
+                                key={m}
+                                onClick={async () => {
+                                  onShowToast?.('⏱️ En camino', `Avisando a ${c.nombre}: ${m} minutos`, 'info');
+                                  await enviarAccionBot(c, 'avisar_siguiente', { minutos: parseInt(m) });
+                                  setLlegadaModalId(null);
+                                }}
+                                className="py-3 rounded-xl border-2 border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-lg hover:bg-blue-500/20 transition-all active:scale-95"
+                              >
+                                {m} <span className="text-xs">min</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Input personalizado */}
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              type="number"
+                              id={`min-input-${c.id}`}
+                              placeholder="Otro..."
+                              min="1"
+                              max="120"
+                              className="flex-1 bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none text-center"
+                            />
+                            <button
+                              onClick={async () => {
+                                const input = document.getElementById(`min-input-${c.id}`) as HTMLInputElement;
+                                const val = input?.value;
+                                if (val && parseInt(val) > 0) {
+                                  onShowToast?.('⏱️ En camino', `Avisando: ${val} minutos`, 'info');
+                                  await enviarAccionBot(c, 'avisar_siguiente', { minutos: parseInt(val) });
+                                  setLlegadaModalId(null);
+                                } else {
+                                  onShowToast?.('⚠️ Error', 'Ingresa un número válido', 'warning');
+                                }
+                              }}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
+                            >
+                              Enviar
                             </button>
                           </div>
                         </div>
