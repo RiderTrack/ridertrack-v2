@@ -190,7 +190,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   }
 
   return (
-    <div className="space-y-4 pb-12">
+    <div className="space-y-3 pb-12">
       {/* Hidden file input */}
       <input
         type="file"
@@ -200,55 +200,53 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         className="hidden"
       />
 
-      {/* Header con stats */}
-      <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-4">
+      {/* Header con stats - Mobile optimized */}
+      <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 sm:p-4">
+        <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-              <MapPin className="w-6 h-6 text-emerald-400" />
-              Mi Ruta de Hoy
+            <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+              <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
+              Mi Ruta
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {new Date().toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })} · {stats.total} clientes
+            <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">
+              {new Date().toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} · {stats.total} clientes
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importando}
-              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center gap-1 px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
             >
-              {importando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              <span className="hidden sm:inline">Importar Excel</span>
-              <span className="sm:hidden">Excel</span>
+              {importando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              <span>Excel</span>
             </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95"
+              className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
             >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Agregar</span>
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        {/* Stats rápidas */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-700/50">
-            <div className="text-[10px] text-slate-500 uppercase">Total</div>
-            <div className="text-lg font-black text-white">{stats.total}</div>
+        {/* Stats rápidas - 4 columnas en móvil */}
+        <div className="grid grid-cols-4 gap-1.5">
+          <div className="p-2 rounded-lg bg-slate-900 border border-slate-700/50 text-center">
+            <div className="text-[9px] text-slate-500 uppercase">Total</div>
+            <div className="text-sm font-black text-white">{stats.total}</div>
           </div>
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-            <div className="text-[10px] text-emerald-400/70 uppercase">Entregados</div>
-            <div className="text-lg font-black text-emerald-400">{stats.entregados}</div>
+          <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
+            <div className="text-[9px] text-emerald-400/70 uppercase">Entreg</div>
+            <div className="text-sm font-black text-emerald-400">{stats.entregados}</div>
           </div>
-          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <div className="text-[10px] text-amber-400/70 uppercase">Pendientes</div>
-            <div className="text-lg font-black text-amber-400">{stats.pendientes}</div>
+          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-center">
+            <div className="text-[9px] text-amber-400/70 uppercase">Pend</div>
+            <div className="text-sm font-black text-amber-400">{stats.pendientes}</div>
           </div>
-          <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
-            <div className="text-[10px] text-blue-400/70 uppercase">Cobrado</div>
-            <div className="text-lg font-black text-blue-400">S/ {stats.cobrado.toFixed(2)}</div>
+          <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
+            <div className="text-[9px] text-blue-400/70 uppercase">S/</div>
+            <div className="text-sm font-black text-blue-400">{stats.cobrado.toFixed(0)}</div>
           </div>
         </div>
       </div>
@@ -276,28 +274,28 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         </div>
       )}
 
-      {/* Buscador y filtros */}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      {/* Buscador y filtros - Mobile optimized */}
+      <div className="flex flex-col gap-1.5">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar cliente, producto, distrito..."
-            className="w-full bg-slate-800 text-white text-sm rounded-xl pl-9 pr-3 py-2.5 border border-slate-700 focus:border-emerald-500 outline-none"
+            placeholder="Buscar..."
+            className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
           />
         </div>
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 overflow-x-auto scrollbar-none">
           {[
             { id: 'todos', label: 'Todos', count: stats.total },
-            { id: 'pendientes', label: 'Pendientes', count: stats.pendientes },
-            { id: 'entregados', label: 'Entregados', count: stats.entregados },
-            { id: 'fallidos', label: 'Fallidos', count: stats.fallidos },
+            { id: 'pendientes', label: 'Pend', count: stats.pendientes },
+            { id: 'entregados', label: 'Entreg', count: stats.entregados },
+            { id: 'fallidos', label: 'Fall', count: stats.fallidos },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setFiltroEstado(tab.id as any)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
                 filtroEstado === tab.id
                   ? 'bg-emerald-600 text-white'
                   : 'bg-slate-800 text-slate-400 hover:text-white'
@@ -334,71 +332,68 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             return (
               <div
                 key={c.id}
-                className={`rounded-xl border-l-4 ${getEstadoClase(c.st)} bg-slate-800 border-y border-r border-slate-700 overflow-hidden`}
+                className={`rounded-lg border-l-4 ${getEstadoClase(c.st)} bg-slate-800 border-y border-r border-slate-700 overflow-hidden`}
               >
-                {/* Fila principal */}
+                {/* Fila principal - Mobile optimized */}
                 <div
-                  className="flex items-center gap-3 p-3 cursor-pointer"
+                  className="flex items-center gap-2 p-2 cursor-pointer"
                   onClick={() => setClienteExpandido(expandido ? null : c.id)}
                 >
                   {/* Número de posición */}
-                  <div className="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
+                  <div className="w-7 h-7 rounded-md bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-300 shrink-0">
                     {c.num || idx + 1}
                   </div>
 
                   {/* Info del cliente */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white truncate">{c.nombre || 'Cliente'}</span>
-                      {c.hora && <span className="text-[10px] text-slate-500">🕐 {c.hora}</span>}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-white truncate">{c.nombre || 'Cliente'}</span>
+                      {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {c.prod && <span className="text-[11px] text-slate-400 truncate">📦 {c.prod}</span>}
-                      {c.dist && <span className="text-[11px] text-slate-500">· 📍 {c.dist}</span>}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      {c.prod && <span className="text-[10px] text-slate-400 truncate">{c.prod}</span>}
+                      {c.dist && <span className="text-[10px] text-slate-500">· {c.dist}</span>}
                     </div>
                   </div>
 
                   {/* Monto */}
                   <div className="text-right shrink-0">
-                    <div className="text-sm font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
-                    <div className="text-[10px] text-slate-500">{getEstadoTexto(c.st)}</div>
+                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</div>
+                    <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
 
                   {/* Botón expandir */}
-                  <button className="text-slate-400 shrink-0">
-                    {expandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
+                  <div className="text-slate-400 shrink-0">
+                    {expandido ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </div>
                 </div>
 
                 {/* Panel expandido */}
                 {expandido && (
-                  <div className="px-3 pb-3 space-y-3 border-t border-slate-700/50 pt-3">
+                  <div className="px-2 pb-2 space-y-2 border-t border-slate-700/50 pt-2">
                     {/* Datos del cliente */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-1 gap-1 text-[11px]">
                       {c.dir && (
                         <div className="text-slate-400">
-                          <span className="text-slate-500">📍 Dirección:</span>
-                          <div className="text-slate-300">{c.dir}</div>
+                          <span className="text-slate-500">📍</span> <span className="text-slate-300">{c.dir}</span>
                         </div>
                       )}
                       {c.cel && (
                         <div className="text-slate-400">
-                          <span className="text-slate-500">📱 Celular:</span>
-                          <div className="text-slate-300">{c.cel}</div>
+                          <span className="text-slate-500">📱</span> <span className="text-slate-300">{c.cel}</span>
                         </div>
                       )}
                       {c.obs && (
-                        <div className="text-slate-400 col-span-2">
-                          <span className="text-slate-500">📝 Obs:</span>
-                          <div className="text-amber-400">{c.obs}</div>
+                        <div className="text-amber-400">
+                          <span className="text-slate-500">📝</span> {c.obs}
                         </div>
                       )}
                     </div>
 
                     {/* Botones de pago - SIEMPRE visibles */}
                     <div>
-                        <div className="text-[10px] text-slate-500 uppercase mb-1.5">Forma de pago</div>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="text-[9px] text-slate-500 uppercase mb-1">Pago</div>
+                        <div className="grid grid-cols-3 gap-1">
                           {pagosList.map(([id, emoji, label]) => (
                             <button
                               key={id}
@@ -406,10 +401,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 cambiarEstado(c.id, id);
                                 onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
                               }}
-                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all active:scale-95 ${
-                                id === 'efectivo' ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30'
-                                : id === 'yape-rudy' || id === 'yape-efectivo' || id === 'yape-plin' ? 'bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 border border-purple-500/30'
-                                : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600'
+                              className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
+                                id === 'efectivo' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                : id === 'yape-rudy' || id === 'yape-efectivo' || id === 'yape-plin' ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+                                : 'bg-slate-700/50 text-slate-300 border border-slate-600'
                               }`}
                             >
                               {emoji} {label}
@@ -418,8 +413,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         </div>
 
                         {/* Estados fallidos */}
-                        <div className="text-[10px] text-slate-500 uppercase mt-2.5 mb-1.5">No entregado</div>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="text-[9px] text-slate-500 uppercase mt-1.5 mb-1">No entregado</div>
+                        <div className="grid grid-cols-3 gap-1">
                           {estadosFallidos.map(([id, emoji, label]) => (
                             <button
                               key={id}
@@ -427,7 +422,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 cambiarEstado(c.id, id);
                                 onShowToast?.('Estado actualizado', `${c.nombre}: ${label}`, 'warning');
                               }}
-                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all active:scale-95"
+                              className="px-1.5 py-1.5 rounded-md text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 transition-all active:scale-95"
                             >
                               {emoji} {label}
                             </button>
@@ -436,33 +431,33 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       </div>
 
                     {/* Botones de acción */}
-                    <div className="flex gap-1.5 pt-1">
+                    <div className="flex gap-1 pt-1">
                       {c.cel && (
                         <button
                           onClick={() => abrirWhatsApp(c)}
-                          className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
                         >
-                          <Bot className="w-3.5 h-3.5" />
-                          WhatsApp
+                          <Bot className="w-3 h-3" />
+                          WA
                         </button>
                       )}
                       <button
                         onClick={() => setControlModalId(controlModalId === c.id ? null : c.id)}
-                        className="flex items-center gap-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
                       >
-                        <Target className="w-3.5 h-3.5" />
+                        <Target className="w-3 h-3" />
                         Control
                       </button>
                       <button
                         onClick={() => {
-                          if (confirm('¿Eliminar este cliente?')) {
+                          if (confirm('¿Eliminar?')) {
                             eliminarCliente(c.id);
-                            onShowToast?.('Cliente eliminado', c.nombre, 'info');
+                            onShowToast?.('Eliminado', c.nombre, 'info');
                           }
                         }}
-                        className="flex items-center gap-1 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-bold border border-red-500/20 transition-all active:scale-95 ml-auto"
+                        className="flex items-center px-2 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-md border border-red-500/20 transition-all active:scale-95 ml-auto"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
 
@@ -569,23 +564,23 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
       {/* Resumen del día */}
       {clientes.length > 0 && (
-        <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+        <div className="rounded-xl bg-slate-800 border border-slate-700 p-3">
+          <div className="grid grid-cols-4 gap-2 text-center">
             <div>
-              <div className="text-[10px] text-slate-500 uppercase">Total Día</div>
-              <div className="text-lg font-black text-white">S/ {stats.totalDia.toFixed(2)}</div>
+              <div className="text-[9px] text-slate-500 uppercase">Total</div>
+              <div className="text-sm font-black text-white">S/ {stats.totalDia.toFixed(0)}</div>
             </div>
             <div>
-              <div className="text-[10px] text-emerald-400/70 uppercase">Cobrado</div>
-              <div className="text-lg font-black text-emerald-400">S/ {stats.cobrado.toFixed(2)}</div>
+              <div className="text-[9px] text-emerald-400/70 uppercase">Cobrado</div>
+              <div className="text-sm font-black text-emerald-400">S/ {stats.cobrado.toFixed(0)}</div>
             </div>
             <div>
-              <div className="text-[10px] text-amber-400/70 uppercase">Por Cobrar</div>
-              <div className="text-lg font-black text-amber-400">S/ {stats.porCobrar.toFixed(2)}</div>
+              <div className="text-[9px] text-amber-400/70 uppercase">Por Cobrar</div>
+              <div className="text-sm font-black text-amber-400">S/ {stats.porCobrar.toFixed(0)}</div>
             </div>
             <div>
-              <div className="text-[10px] text-slate-500 uppercase">Progreso</div>
-              <div className="text-lg font-black text-white">
+              <div className="text-[9px] text-slate-500 uppercase">Progreso</div>
+              <div className="text-sm font-black text-white">
                 {stats.total > 0 ? Math.round((stats.entregados / stats.total) * 100) : 0}%
               </div>
             </div>
