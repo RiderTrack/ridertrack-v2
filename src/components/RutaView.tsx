@@ -27,7 +27,7 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import { Cliente } from '../services/firestore';
+import { Cliente, encolarAccionBot, _botCel } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
 
@@ -178,6 +178,43 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const cel = String(cliente.cel || '').replace(/\D/g, '');
     const telCompleto = cel.length === 9 ? `51${cel}` : cel;
     window.open(`https://wa.me/${telCompleto}`, '_blank');
+  };
+
+  // 🤖 Enviar acción al bot de Baileys vía Firestore
+  const enviarAccionBot = async (cliente: Cliente, tipo: string, extra?: Record<string, any>) => {
+    if (!user) {
+      onShowToast?.('Error', 'No hay sesión activa', 'error');
+      return;
+    }
+
+    const telefono = _botCel(cliente.cel || '');
+    if (!telefono) {
+      onShowToast?.('Sin celular', `${cliente.nombre} no tiene celular válido`, 'warning');
+      return;
+    }
+
+    try {
+      await encolarAccionBot(user.uid, {
+        tipo: tipo,
+        clienteId: cliente.id,
+        telefono: telefono,
+        nombre: cliente.nombre || 'Cliente',
+        prod: cliente.prod || '',
+        cobrar: parseFloat(String(cliente.cobrar || 0)),
+        dir: cliente.dir || '',
+        dist: cliente.dist || '',
+        st: cliente.st || 'pendiente',
+        rider: {
+          nombre: profile?.nombre || 'Rudy',
+          telefono: profile?.email || '',
+          empresa: 'MATE',
+        },
+        ...extra,
+      });
+      onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
+    } catch (e: any) {
+      onShowToast?.('Error', e.message || 'No se pudo enviar', 'error');
+    }
   };
 
   if (loading) {
@@ -479,8 +516,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           {/* Opciones de Control */}
                           <div className="space-y-2">
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 onShowToast?.('🤖 Bot', 'Enviando aviso de entrega con imagen...', 'info');
+                                await enviarAccionBot(c, 'avisar_entrega', {
+                                  enviar_imagen: true,
+                                  modo_entrega: 'auto_imagen',
+                                });
                                 setControlModalId(null);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-sm font-bold transition-all"
@@ -493,8 +534,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 onShowToast?.('📝 Texto', 'Enviando aviso de entrega (solo texto)...', 'info');
+                                await enviarAccionBot(c, 'avisar_entrega', {
+                                  enviar_imagen: false,
+                                  modo_entrega: 'auto_texto',
+                                });
                                 setControlModalId(null);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-bold transition-all"
@@ -507,11 +552,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const minutos = prompt('¿En cuántos minutos llegás?', '15');
-                                if (minutos) {
-                                  onShowToast?.('⏱️ Avisar llegada', `Enviando aviso: ${minutos} minutos`, 'info');
-                                }
+                                if (!minutos) return;
+                                onShowToast?.('⏱️ Avisar llegada', `Enviando aviso: ${minutos} minutos`, 'info');
+                                await enviarAccionBot(c, 'avisar_siguiente', {
+                                  minutos: parseInt(minutos),
+                                });
                                 setControlModalId(null);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all"
@@ -524,8 +571,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 onShowToast?.('📍 Ubicación', 'Enviando solicitud de ubicación...', 'info');
+                                await enviarAccionBot(c, 'solicitar_ubicacion');
                                 setControlModalId(null);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-sm font-bold transition-all"
@@ -538,8 +586,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 onShowToast?.('📢 Info empresa', 'Enviando pedido de info a empresa...', 'info');
+                                await enviarAccionBot(c, 'pedir_info_empresa');
                                 setControlModalId(null);
                               }}
                               className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-all"
