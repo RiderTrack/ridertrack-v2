@@ -528,55 +528,105 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             Cliente: <span className="text-white font-bold">{c.nombre}</span> · 📱 {c.cel}
                           </div>
 
-                          <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'yape_qr'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📲</span> Enviar Yape (QR + datos)
-                          </button>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'yape_qr'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">📲</span>
+                              Enviar Yape
+                            </button>
 
-                          <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">🚀</span> Voy en camino (avisar llegada)
-                          </button>
+                            <button
+                              onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">🚀</span>
+                              Voy en camino
+                            </button>
 
-                          <button onClick={async () => { onShowToast?.('⏰ Posición', 'Enviando...', 'info'); await enviarAccionBot(c, 'avisar_posicion'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">⏰</span> Avisar su posición en la ruta
-                          </button>
+                            <button
+                              onClick={async () => { onShowToast?.('⏰ Posición', 'Enviando...', 'info'); await enviarAccionBot(c, 'avisar_posicion'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">⏰</span>
+                              Posición ruta
+                            </button>
 
-                          <button onClick={async () => { onShowToast?.('📍 Ubicación', 'Enviando...', 'info'); await enviarAccionBot(c, 'solicitar_ubicacion'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📍</span> Pedir ubicación
-                          </button>
+                            <button
+                              onClick={async () => { onShowToast?.('📍 Ubicación', 'Enviando...', 'info'); await enviarAccionBot(c, 'solicitar_ubicacion'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">📍</span>
+                              Pedir ubicación
+                            </button>
 
-                          <button onClick={async () => { onShowToast?.('✅ Entrega', 'Enviando...', 'info'); await enviarAccionBot(c, 'avisar_entrega', { enviar_imagen: true, modo_entrega: 'auto_imagen' }); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">✅</span> Avisar entrega (forzado)
-                          </button>
+                            <button
+                              onClick={async () => { onShowToast?.('✅ Entrega', 'Enviando...', 'info'); await enviarAccionBot(c, 'avisar_entrega', { enviar_imagen: true, modo_entrega: 'auto_imagen' }); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">✅</span>
+                              Entrega forzado
+                            </button>
 
-                          <button onClick={() => { const cel = String(c.cel || '').replace(/\D/g, ''); const t = cel.length === 9 ? `51${cel}` : cel; window.open(`tel:+${t}`, '_self'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📞</span> Llamar directo
-                          </button>
+                            <button
+                              onClick={() => { const cel = String(c.cel || '').replace(/\D/g, ''); const t = cel.length === 9 ? `51${cel}` : cel; window.open(`tel:+${t}`, '_self'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">📞</span>
+                              Llamar directo
+                            </button>
 
-                          <button onClick={() => { abrirWhatsApp(c); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">💬</span> Abrir WhatsApp
-                          </button>
+                            <button
+                              onClick={() => { abrirWhatsApp(c); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">💬</span>
+                              Abrir WhatsApp
+                            </button>
 
-                          <button onClick={() => { onShowToast?.('📸 Foto', 'Próximamente: reportar pago con foto', 'info'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📸</span> Reportar pago con foto
-                          </button>
+                            <button
+                              onClick={() => { onShowToast?.('📸 Foto', 'Próximamente: reportar pago con foto', 'info'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">📸</span>
+                              Pago con foto
+                            </button>
 
-                          <button onClick={() => { onShowToast?.('📤 Reporte', 'Próximamente: enviar reporte a MATE', 'info'); setBotModalId(null); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📤</span> Enviar reporte a MATE
-                          </button>
+                            <button
+                              onClick={() => { onShowToast?.('📤 Reporte', 'Próximamente: enviar reporte a MATE', 'info'); setBotModalId(null); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">📤</span>
+                              Reporte a MATE
+                            </button>
 
-                          <button onClick={() => { setBotModalId(null); setVentaModalId(c.id); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">📞</span> Chicos de venta
-                          </button>
+                            <button
+                              onClick={() => { setBotModalId(null); setVentaModalId(c.id); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">🩷</span>
+                              Chicos de venta
+                            </button>
 
-                          <button onClick={() => { setBotModalId(null); setCuentasModalId(c.id); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">🏦</span> Cuentas de la empresa
-                          </button>
+                            <button
+                              onClick={() => { setBotModalId(null); setCuentasModalId(c.id); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">🏦</span>
+                              Cuentas empresa
+                            </button>
 
-                          <button onClick={() => { setBotModalId(null); setOtrosMateModalId(c.id); setOtrosMateTexto(''); }} className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold mb-1.5">
-                            <span className="text-base">💬</span> Otros temas a MATE
-                          </button>
+                            <button
+                              onClick={() => { setBotModalId(null); setOtrosMateModalId(c.id); setOtrosMateTexto(''); }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-400 text-[11px] font-bold transition-all active:scale-95"
+                            >
+                              <span className="text-lg">💬</span>
+                              Otros a MATE
+                            </button>
+                          </div>
 
-                          <button onClick={() => setBotModalId(null)} className="w-full mt-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold">
+                          <button onClick={() => setBotModalId(null)} className="w-full mt-2 py-2 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 rounded-lg text-xs font-bold transition-all">
                             Cerrar
                           </button>
                         </div>
