@@ -18,6 +18,7 @@ import {
   Bot,
   Target,
   Camera,
+  MessageSquare,
   ChevronDown,
   ChevronUp,
   X,
@@ -43,6 +44,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
   const [controlModalId, setControlModalId] = useState<string | number | null>(null);
+  const [botModalId, setBotModalId] = useState<string | number | null>(null);
   const [importando, setImportando] = useState(false);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -470,21 +472,30 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">
                       {c.cel && (
-                        <button
-                          onClick={() => abrirWhatsApp(c)}
-                          className="flex items-center gap-1 px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
-                        >
-                          <Bot className="w-3 h-3" />
-                          WA
-                        </button>
+                        <>
+                          <button
+                            onClick={() => setBotModalId(botModalId === c.id ? null : c.id)}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
+                          >
+                            <Bot className="w-3 h-3" />
+                            Bot
+                          </button>
+                          <button
+                            onClick={() => abrirWhatsApp(c)}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            WA
+                          </button>
+                          <button
+                            onClick={() => setControlModalId(controlModalId === c.id ? null : c.id)}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
+                          >
+                            <Target className="w-3 h-3" />
+                            Control
+                          </button>
+                        </>
                       )}
-                      <button
-                        onClick={() => setControlModalId(controlModalId === c.id ? null : c.id)}
-                        className="flex items-center gap-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
-                      >
-                        <Target className="w-3 h-3" />
-                        Control
-                      </button>
                       <button
                         onClick={() => {
                           if (confirm('¿Eliminar?')) {
@@ -497,6 +508,135 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
+
+                    {/* Modal de Bot 🤖 */}
+                    {botModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setBotModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm space-y-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-base font-bold text-white">🤖 Acciones del Bot</h3>
+                            <button onClick={() => setBotModalId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mb-2">
+                            Cliente: <span className="text-white font-bold">{c.nombre}</span> · 📱 {c.cel}
+                          </div>
+
+                          {/* Grid de acciones rápidas */}
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📲 QR', 'Enviando QR de Yape...', 'info');
+                                await enviarAccionBot(c, 'yape_qr');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">📲</span>
+                              QR Yape
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🏦 Banco', 'Enviando cuentas bancarias...', 'info');
+                                await enviarAccionBot(c, 'cuentas_banco');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">🏦</span>
+                              Cuentas
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('💰 Pago', 'Enviando monto a pagar...', 'info');
+                                await enviarAccionBot(c, 'cuanto_pagar');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">💰</span>
+                              ¿Cuánto pago?
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🚚 ETA', 'Enviando hora de llegada...', 'info');
+                                await enviarAccionBot(c, 'hora_llegada');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">🚚</span>
+                              ¿A qué hora?
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📦 Pedido', 'Enviando info del producto...', 'info');
+                                await enviarAccionBot(c, 'que_me_traen');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">📦</span>
+                              ¿Qué me traen?
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('✅ Pago', 'Confirmando pago recibido...', 'info');
+                                await enviarAccionBot(c, 'ya_pague');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">✅</span>
+                              Ya pagué
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('🤝 Motorizado', 'Avisando que el motorizado llamará...', 'info');
+                                await enviarAccionBot(c, 'hablar_motorizado');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">🤝</span>
+                              Hablar moto
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                onShowToast?.('📅 Reprog', 'Enviando opción de reprogramar...', 'info');
+                                await enviarAccionBot(c, 'no_puedo_recibir');
+                                setBotModalId(null);
+                              }}
+                              className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[11px] font-bold transition-all"
+                            >
+                              <span className="text-lg">📅</span>
+                              No puedo recibir
+                            </button>
+                          </div>
+
+                          {/* Botón de menú completo */}
+                          <button
+                            onClick={async () => {
+                              onShowToast?.('📋 Menú', 'Enviando menú completo...', 'info');
+                              await enviarAccionBot(c, 'menu');
+                              setBotModalId(null);
+                            }}
+                            className="w-full mt-2 flex items-center justify-center gap-2 p-2.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-all"
+                          >
+                            <span className="text-base">📋</span>
+                            Enviar menú completo
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Modal de Control */}
                     {controlModalId === c.id && (
