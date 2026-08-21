@@ -71,6 +71,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [pagoFotoMonto, setPagoFotoMonto] = useState('');
   const [pagoFotoMetodo, setPagoFotoMetodo] = useState<'yape' | 'plin' | 'efectivo' | 'transferencia' | 'pos' | 'mixto'>('yape');
   const [pagoFotoSubiendo, setPagoFotoSubiendo] = useState(false);
+  const [pagoFotoTipo, setPagoFotoTipo] = useState<'comprobante' | 'entregado' | 'otro'>('comprobante');
   const pagoFotoInputRef = useRef<HTMLInputElement>(null);
 
   // Estados modal 📤 Enviar reporte a MATE (Modal completo tipo Modular)
@@ -599,7 +600,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <button onClick={() => { abrirWhatsApp(c); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">💬</span> Abrir WhatsApp
                             </button>
-                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoTipo('comprobante'); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📸</span> Pago con foto
                             </button>
                             <button onClick={() => { setBotModalId(null); setMateTab('estado'); setMateEstadoSel(''); setMateReprogramar(''); setMateMinutos(null); setMateMinutosCustom(''); setMatePlantillaSel(''); setMateMensaje(''); setMateMotivo(''); setMateMostrarAgregarFrase(false); setMateMostrarGuardarPlantilla(false); setMateNuevaFrase(''); setMateNuevoNombrePlantilla(''); setReporteMateModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all active:scale-95">
@@ -908,22 +909,96 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     )}
 
                     {/* ═══ Modal 📸 Reportar pago con foto ═══ */}
-                    {pagoFotoModalId === c.id && (
+                    {pagoFotoModalId === c.id && (() => {
+                      // Construir mensaje según tipo seleccionado
+                      const construirMensajeFoto = () => {
+                        const ahora = new Date();
+                        const fechaStr = ahora.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+                        const horaStr = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                        const precio = parseFloat(String(c.cobrar || 0)).toFixed(2);
+                        const nombre = c.nombre || '—';
+                        const producto = c.prod || '—';
+                        const direccion = c.dir || '—';
+                        const distrito = c.dist || '—';
+                        const telefono = c.cel || '—';
+                        const montoRecibido = parseFloat(pagoFotoMonto || '0').toFixed(2);
+
+                        let titulo = '';
+                        let intro = '';
+
+                        if (pagoFotoTipo === 'comprobante') {
+                          titulo = '📸 *COMPROBANTE DE PAGO*';
+                          intro = `Hola MATE, les adjunto el comprobante de pago de *${nombre}*`;
+                        } else if (pagoFotoTipo === 'entregado') {
+                          titulo = '✅ *ENTREGA CONFIRMADA*';
+                          intro = `Hola MATE, confirmo la entrega del cliente *${nombre}* de la dirección *${direccion}*`;
+                        } else {
+                          titulo = '📦 *REPORTE FOTO*';
+                          intro = `Hola MATE, les comparto esta foto del cliente *${nombre}*`;
+                        }
+
+                        const partes: string[] = [];
+                        partes.push(titulo);
+                        partes.push('');
+                        partes.push(intro);
+                        partes.push('');
+                        partes.push(`📅 _${fechaStr} · ${horaStr}_`);
+                        if (pagoFotoTipo === 'comprobante') {
+                          partes.push(`💵 *Monto recibido:* S/ ${montoRecibido}`);
+                          partes.push(`💳 *Método:* ${pagoFotoMetodo.toUpperCase()}`);
+                        }
+                        partes.push('');
+                        partes.push(`👤 *Cliente:* ${nombre}`);
+                        partes.push(`📦 *Producto:* ${producto}`);
+                        partes.push(`💰 *Precio:* S/ ${precio}`);
+                        partes.push(`💵 *A cobrar:* S/ ${precio}`);
+                        partes.push(`📍 *Dirección:* ${direccion}`);
+                        partes.push(`🏘️ *Distrito:* ${distrito}`);
+                        partes.push(`📞 *Teléfono:* ${telefono}`);
+                        partes.push('');
+                        partes.push('— _Reporte automático desde RiderTrack_');
+                        return partes.join('\n');
+                      };
+
+                      const mensajeFoto = construirMensajeFoto();
+
+                      return (
                       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)}>
                         <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-base font-bold text-white">📸 Reportar pago con foto</h3>
+                            <h3 className="text-base font-bold text-white">📸 Reporte con foto a MATE</h3>
                             <button onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)} disabled={pagoFotoSubiendo} className="text-slate-400 hover:text-white disabled:opacity-30">
                               <X className="w-5 h-5" />
                             </button>
                           </div>
 
+                          {/* Card del cliente */}
                           <div className="bg-slate-800 rounded-lg p-3 mb-3 text-xs">
                             <div className="font-bold text-white text-sm">{c.nombre}</div>
                             <div className="text-slate-400 mt-0.5">{c.prod || 'Sin producto'} · 📱 {c.cel || '—'}</div>
                             <div className="mt-1 text-emerald-400 font-bold">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                           </div>
 
+                          {/* Tipo de reporte (Comprobante / Entregado / Otro) */}
+                          <div className="mb-3">
+                            <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Tipo de reporte</label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <button onClick={() => setPagoFotoTipo('comprobante')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'comprobante' ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                                <span className="text-base">📸</span>
+                                Comprobante
+                              </button>
+                              <button onClick={() => setPagoFotoTipo('entregado')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'entregado' ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                                <span className="text-base">✅</span>
+                                Entregado
+                              </button>
+                              <button onClick={() => setPagoFotoTipo('otro')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'otro' ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                                <span className="text-base">📦</span>
+                                Otro
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Input de cámara (oculto) */}
                           <input
                             type="file"
                             accept="image/*"
@@ -940,6 +1015,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             className="hidden"
                           />
 
+                          {/* Preview de la foto */}
                           {pagoFotoPreview ? (
                             <div className="relative mb-3">
                               <img src={pagoFotoPreview} alt="Comprobante" className="w-full max-h-64 object-contain rounded-lg border border-slate-700" />
@@ -950,58 +1026,85 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           ) : (
                             <button onClick={() => pagoFotoInputRef.current?.click()} className="w-full mb-3 flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 text-rose-400 transition-all active:scale-95">
                               <Camera className="w-8 h-8" />
-                              <div className="text-sm font-bold">Tomar foto / Subir comprobante</div>
-                              <div className="text-[10px] text-slate-500">Yape, Plin, transferencia, POS...</div>
+                              <div className="text-sm font-bold">Tomar foto / Subir imagen</div>
+                              <div className="text-[10px] text-slate-500">Captura del comprobante o evidencia</div>
                             </button>
                           )}
 
-                          <div className="mb-3">
-                            <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Monto recibido (S/)</label>
-                            <input type="number" value={pagoFotoMonto} onChange={e => setPagoFotoMonto(e.target.value)} placeholder="0.00" step="0.01" min="0" disabled={pagoFotoSubiendo} className="w-full bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-rose-500 outline-none disabled:opacity-50" />
-                          </div>
+                          {/* Monto y método (solo si es comprobante) */}
+                          {pagoFotoTipo === 'comprobante' && (
+                            <>
+                              <div className="mb-3">
+                                <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Monto recibido (S/)</label>
+                                <input type="number" value={pagoFotoMonto} onChange={e => setPagoFotoMonto(e.target.value)} placeholder="0.00" step="0.01" min="0" disabled={pagoFotoSubiendo} className="w-full bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-rose-500 outline-none disabled:opacity-50" />
+                              </div>
 
+                              <div className="mb-3">
+                                <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Método de pago</label>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {([
+                                    ['yape', '📲', 'Yape'],
+                                    ['plin', '🔵', 'Plin'],
+                                    ['efectivo', '💵', 'Efectivo'],
+                                    ['transferencia', '🏦', 'Transf.'],
+                                    ['pos', '💳', 'POS'],
+                                    ['mixto', '🔀', 'Mixto'],
+                                  ] as const).map(([id, emoji, label]) => (
+                                    <button key={id} onClick={() => setPagoFotoMetodo(id)} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoMetodo === id ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                                      <span className="text-base">{emoji}</span>
+                                      {label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {/* Vista previa del mensaje */}
                           <div className="mb-3">
-                            <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Método de pago</label>
-                            <div className="grid grid-cols-3 gap-1.5">
-                              {([
-                                ['yape', '📲', 'Yape'],
-                                ['plin', '🔵', 'Plin'],
-                                ['efectivo', '💵', 'Efectivo'],
-                                ['transferencia', '🏦', 'Transf.'],
-                                ['pos', '💳', 'POS'],
-                                ['mixto', '🔀', 'Mixto'],
-                              ] as const).map(([id, emoji, label]) => (
-                                <button key={id} onClick={() => setPagoFotoMetodo(id)} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoMetodo === id ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
-                                  <span className="text-base">{emoji}</span>
-                                  {label}
-                                </button>
-                              ))}
+                            <label className="text-[10px] text-emerald-400 uppercase font-bold mb-1 block">👁️ Vista previa (lo que recibirá MATE)</label>
+                            <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-3 max-h-40 overflow-y-auto">
+                              <pre className="text-[10px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">{mensajeFoto}</pre>
                             </div>
                           </div>
 
+                          {/* Botones */}
                           <div className="flex gap-2">
                             <button onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)} disabled={pagoFotoSubiendo} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all disabled:opacity-50">
                               Cancelar
                             </button>
                             <button
                               onClick={async () => {
-                                if (!pagoFotoArchivo) { onShowToast?.('⚠️ Falta foto', 'Toma una foto del comprobante', 'warning'); return; }
-                                if (!pagoFotoMonto || parseFloat(pagoFotoMonto) <= 0) { onShowToast?.('⚠️ Monto', 'Ingresa el monto recibido', 'warning'); return; }
+                                if (!pagoFotoArchivo) { onShowToast?.('⚠️ Falta foto', 'Toma una foto primero', 'warning'); return; }
+                                if (pagoFotoTipo === 'comprobante' && (!pagoFotoMonto || parseFloat(pagoFotoMonto) <= 0)) { onShowToast?.('⚠️ Monto', 'Ingresa el monto recibido', 'warning'); return; }
                                 if (!user) { onShowToast?.('Error', 'No hay sesión activa', 'error'); return; }
                                 setPagoFotoSubiendo(true);
-                                onShowToast?.('📸 Subiendo', 'Subiendo comprobante a la nube...', 'info');
+                                onShowToast?.('📸 Subiendo', 'Subiendo foto a la nube...', 'info');
                                 try {
                                   const fotoUrl = await subirFotoPago(user.uid, c.id, pagoFotoArchivo);
                                   onShowToast?.('📤 Enviando', 'Enviando al grupo MATE...', 'info');
-                                  await enviarAccionBot(c, 'reportar_pago_foto', { fotoUrl, monto: parseFloat(pagoFotoMonto), metodo: pagoFotoMetodo, clienteNombre: c.nombre, clienteCel: c.cel, clienteProd: c.prod });
-                                  const estadoMap: Record<string, string> = { yape: 'yape-rudy', plin: 'yape-plin', efectivo: 'efectivo', transferencia: 'transferencia', pos: 'pos', mixto: 'mixto' };
-                                  cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
-                                  onShowToast?.('✅ Pago reportado', `S/ ${parseFloat(pagoFotoMonto).toFixed(2)} · ${pagoFotoMetodo.toUpperCase()}`, 'success');
+                                  await enviarAccionBot(c, 'reportar_pago_foto', {
+                                    fotoUrl,
+                                    tipo: pagoFotoTipo,
+                                    mensaje: mensajeFoto,
+                                    monto: parseFloat(pagoFotoMonto || '0'),
+                                    metodo: pagoFotoTipo === 'comprobante' ? pagoFotoMetodo : null,
+                                    clienteData: { nombre: c.nombre, cel: c.cel, prod: c.prod, cobrar: c.cobrar, dir: c.dir, dist: c.dist },
+                                  });
+                                  // Cambiar estado del cliente según tipo
+                                  if (pagoFotoTipo === 'entregado') {
+                                    cambiarEstado(c.id, 'efectivo');
+                                  } else if (pagoFotoTipo === 'comprobante') {
+                                    const estadoMap: Record<string, string> = { yape: 'yape-rudy', plin: 'yape-plin', efectivo: 'efectivo', transferencia: 'transferencia', pos: 'pos', mixto: 'mixto' };
+                                    cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
+                                  }
+                                  onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado a MATE`, 'success');
                                   setPagoFotoModalId(null);
                                   setPagoFotoArchivo(null);
                                   setPagoFotoPreview(null);
                                   setPagoFotoMonto('');
                                   setPagoFotoMetodo('yape');
+                                  setPagoFotoTipo('comprobante');
                                 } catch (e: any) {
                                   console.error('❌ Error subiendo foto:', e);
                                   onShowToast?.('❌ Error', e.message || 'No se pudo subir la foto', 'error');
@@ -1012,16 +1115,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               disabled={pagoFotoSubiendo || !pagoFotoArchivo}
                               className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                              {pagoFotoSubiendo ? (<><Loader2 className="w-3 h-3 animate-spin" /> Subiendo...</>) : (<>📤 Reportar pago</>)}
+                              {pagoFotoSubiendo ? (<><Loader2 className="w-3 h-3 animate-spin" /> Subiendo...</>) : (<>📤 Enviar a MATE</>)}
                             </button>
                           </div>
 
                           <div className="mt-2 text-[10px] text-slate-500 text-center">
-                            La foto se enviará al grupo MATE con los datos del cliente
+                            La foto y el mensaje se enviarán al grupo MATE
                           </div>
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {/* ═══ Modal 📤 Enviar reporte a MATE (completo tipo Modular) ═══ */}
                     {reporteMateModalId === c.id && (() => {
@@ -1040,32 +1144,69 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       const minutosOpciones = [5, 10, 15, 20, 25, 30, 45, 60];
 
                       const construirMensajeFinal = () => {
-                        const partes: string[] = [];
-                        partes.push(`📦 REPORTE - ${c.nombre.toUpperCase()}`);
-                        partes.push(`📍 ${c.dist || '—'} · 📱 ${c.cel || '—'}`);
-                        partes.push(`💰 S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} · ${c.st || 'pendiente'}`);
-                        if (c.prod) partes.push(`📦 Producto: ${c.prod}`);
-                        if (c.dir) partes.push(`🏠 ${c.dir}, ${c.dist || ''}`);
+                        const ahora = new Date();
+                        const fechaStr = ahora.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+                        const horaStr = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                        const precio = parseFloat(String(c.cobrar || 0)).toFixed(2);
+                        const producto = c.prod || '—';
+                        const nombre = c.nombre || '—';
+                        const direccion = c.dir || '—';
+                        const distrito = c.dist || '—';
+                        const telefono = c.cel || '—';
+
+                        // Título según estado
+                        let titulo = '📦 *REPORTE DE PEDIDO*';
+                        let emojiEstado = '⏳';
+                        let labelEstado = 'Pendiente';
+
                         if (mateEstadoSel) {
                           const est = estadosModular.find(e => e[0] === mateEstadoSel);
-                          if (est) { partes.push(`━━━━━━━━━━━━━━`); partes.push(`ESTADO: ${est[1]} ${est[2].toUpperCase()}`); }
+                          if (est) { emojiEstado = est[1]; labelEstado = est[2]; }
+                          if (mateEstadoSel === 'entregado') titulo = '✅ *PEDIDO ENTREGADO*';
+                          else if (['fallido', 'rechazo', 'devolucion', 'cancelado'].includes(mateEstadoSel)) titulo = '❌ *PEDIDO NO ENTREGADO*';
+                          else if (mateEstadoSel === 'en_camino') titulo = '🚀 *PEDIDO EN CAMINO*';
+                          else if (mateEstadoSel === 'reprogramar') titulo = '📅 *PEDIDO REPROGRAMADO*';
+                          else if (mateEstadoSel === 'ausente') titulo = '👤 *CLIENTE AUSENTE*';
+                          else if (mateEstadoSel === 'no_contesta') titulo = '📵 *CLIENTE NO CONTESTA*';
                         }
+
+                        const partes: string[] = [];
+                        partes.push(titulo);
+                        partes.push('');
+                        partes.push(`📅 _${fechaStr} · ${horaStr}_`);
+                        partes.push(`⚠️ *Estado:* ${emojiEstado} ${labelEstado}`);
+                        partes.push('');
+                        partes.push(`👤 *Cliente:* ${nombre}`);
+                        partes.push(`📦 *Producto:* ${producto}`);
+                        partes.push(`💰 *Precio:* S/ ${precio}`);
+                        partes.push(`💵 *A cobrar:* S/ ${precio}`);
+                        partes.push(`📍 *Dirección:* ${direccion}`);
+                        partes.push(`🏘️ *Distrito:* ${distrito}`);
+                        partes.push(`📞 *Teléfono:* ${telefono}`);
+
                         if (mateReprogramar) {
                           try {
                             const fecha = new Date(mateReprogramar);
-                            partes.push(`📅 Reprogramado para: ${fecha.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} a las ${fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`);
-                          } catch { partes.push(`📅 Reprogramado: ${mateReprogramar}`); }
+                            const fechaRep = fecha.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+                            const horaRep = fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                            partes.push(`📅 *Reprogramado para:* ${fechaRep} · ${horaRep}`);
+                          } catch { partes.push(`📅 *Reprogramado:* ${mateReprogramar}`); }
                         }
+
                         if (mateMinutos || (mateMinutosCustom && parseInt(mateMinutosCustom) > 0)) {
                           const min = mateMinutos || parseInt(mateMinutosCustom);
-                          partes.push(`⏱️ Llego en aproximadamente ${min} minutos`);
+                          partes.push(`⏱️ *Llego en:* ~${min} minutos~`);
                         }
-                        if (mateMensaje.trim()) {
-                          let msg = mateMensaje;
-                          if (mateMotivo.trim()) { msg = msg.replace(/\[motivo\]/gi, mateMotivo.trim()); }
-                          partes.push(`━━━━━━━━━━━━━━`);
-                          partes.push(`📝 ${msg}`);
+
+                        // Motivo (textarea) - siempre se incluye
+                        const motivoTexto = mateMotivo.trim() || mateMensaje.trim();
+                        if (motivoTexto) {
+                          partes.push('');
+                          partes.push(`📝 *Motivo:* \`${motivoTexto}\``);
                         }
+
+                        partes.push('');
+                        partes.push('— _Reporte automático desde RiderTrack_');
                         return partes.join('\n');
                       };
 
