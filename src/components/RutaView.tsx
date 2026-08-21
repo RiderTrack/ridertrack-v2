@@ -4,7 +4,7 @@
 // Con importar Excel, lista de clientes, botones de pago y control
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Upload,
   Plus,
@@ -28,7 +28,7 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import { Cliente, encolarAccionBot, _botCel } from '../services/firestore';
+import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
 
@@ -53,6 +53,45 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [importando, setImportando] = useState(false);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados modal 📸 Reportar pago con foto
+  const [pagoFotoModalId, setPagoFotoModalId] = useState<string | number | null>(null);
+  const [pagoFotoArchivo, setPagoFotoArchivo] = useState<File | null>(null);
+  const [pagoFotoPreview, setPagoFotoPreview] = useState<string | null>(null);
+  const [pagoFotoMonto, setPagoFotoMonto] = useState('');
+  const [pagoFotoMetodo, setPagoFotoMetodo] = useState<'yape' | 'plin' | 'efectivo' | 'transferencia' | 'pos' | 'mixto'>('yape');
+  const [pagoFotoSubiendo, setPagoFotoSubiendo] = useState(false);
+  const pagoFotoInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados modal 📤 Enviar reporte a MATE (Modal completo como el Modular)
+  const [reporteMateModalId, setReporteMateModalId] = useState<string | number | null>(null);
+  const [mateTab, setMateTab] = useState<'estado' | 'mensaje'>('estado');
+  const [mateEstadoSel, setMateEstadoSel] = useState<string>('');
+  const [mateReprogramar, setMateReprogramar] = useState<string>('');
+  const [mateMinutos, setMateMinutos] = useState<number | null>(null);
+  const [mateMinutosCustom, setMateMinutosCustom] = useState('');
+  const [matePlantillaSel, setMatePlantillaSel] = useState<string>('');
+  const [mateMensaje, setMateMensaje] = useState('');
+  const [mateMotivo, setMateMotivo] = useState('');
+  const [mateFrases, setMateFrases] = useState<string[]>([]);
+  const [mateNuevaFrase, setMateNuevaFrase] = useState('');
+  const [mateMostrarAgregarFrase, setMateMostrarAgregarFrase] = useState(false);
+  const [matePlantillas, setMatePlantillas] = useState<{ nombre: string; texto: string }[]>([]);
+  const [mateMostrarGuardarPlantilla, setMateMostrarGuardarPlantilla] = useState(false);
+  const [mateNuevoNombrePlantilla, setMateNuevoNombrePlantilla] = useState('');
+
+  // Cargar plantillas y frases de localStorage al montar
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const pls = localStorage.getItem(`mate_plantillas_${user.uid}`);
+      if (pls) setMatePlantillas(JSON.parse(pls));
+      const frs = localStorage.getItem(`mate_frases_${user.uid}`);
+      if (frs) setMateFrases(JSON.parse(frs));
+    } catch (e) {
+      console.error('Error cargando plantillas MATE:', e);
+    }
+  }, [user]);
 
   // Nuevo cliente manual
   const [nuevoNombre, setNuevoNombre] = useState('');
@@ -586,7 +625,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => { onShowToast?.('📸 Foto', 'Próximamente: reportar pago con foto', 'info'); setBotModalId(null); }}
+                              onClick={() => {
+                                setBotModalId(null);
+                                setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || ''));
+                                setPagoFotoArchivo(null);
+                                setPagoFotoPreview(null);
+                                setPagoFotoMetodo('yape');
+                                setPagoFotoModalId(c.id);
+                              }}
                               className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95"
                             >
                               <span className="text-lg">📸</span>
@@ -594,7 +640,22 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </button>
 
                             <button
-                              onClick={() => { onShowToast?.('📤 Reporte', 'Próximamente: enviar reporte a MATE', 'info'); setBotModalId(null); }}
+                              onClick={() => {
+                                setBotModalId(null);
+                                setMateTab('estado');
+                                setMateEstadoSel('');
+                                setMateReprogramar('');
+                                setMateMinutos(null);
+                                setMateMinutosCustom('');
+                                setMatePlantillaSel('');
+                                setMateMensaje('');
+                                setMateMotivo('');
+                                setMateMostrarAgregarFrase(false);
+                                setMateMostrarGuardarPlantilla(false);
+                                setMateNuevaFrase('');
+                                setMateNuevoNombrePlantilla('');
+                                setReporteMateModalId(c.id);
+                              }}
                               className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all active:scale-95"
                             >
                               <span className="text-lg">📤</span>
@@ -1009,6 +1070,652 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         </div>
                       </div>
                     )}
+
+                    {/* ═══ Modal 📸 Reportar pago con foto ═══ */}
+                    {pagoFotoModalId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-bold text-white">📸 Reportar pago con foto</h3>
+                            <button
+                              onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)}
+                              disabled={pagoFotoSubiendo}
+                              className="text-slate-400 hover:text-white disabled:opacity-30"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          {/* Card del cliente */}
+                          <div className="bg-slate-800 rounded-lg p-3 mb-3 text-xs">
+                            <div className="font-bold text-white text-sm">{c.nombre}</div>
+                            <div className="text-slate-400 mt-0.5">
+                              {c.prod || 'Sin producto'} · 📱 {c.cel || '—'}
+                            </div>
+                            <div className="mt-1 text-emerald-400 font-bold">
+                              S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}
+                            </div>
+                          </div>
+
+                          {/* Input oculto de cámara */}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            ref={pagoFotoInputRef}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setPagoFotoArchivo(file);
+                              const reader = new FileReader();
+                              reader.onload = ev => setPagoFotoPreview(ev.target?.result as string);
+                              reader.readAsDataURL(file);
+                            }}
+                            className="hidden"
+                          />
+
+                          {/* Área de foto: preview o botón para abrir cámara */}
+                          {pagoFotoPreview ? (
+                            <div className="relative mb-3">
+                              <img
+                                src={pagoFotoPreview}
+                                alt="Comprobante"
+                                className="w-full max-h-64 object-contain rounded-lg border border-slate-700"
+                              />
+                              <button
+                                onClick={() => {
+                                  setPagoFotoArchivo(null);
+                                  setPagoFotoPreview(null);
+                                  if (pagoFotoInputRef.current) pagoFotoInputRef.current.value = '';
+                                }}
+                                disabled={pagoFotoSubiendo}
+                                className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-1.5 transition-all disabled:opacity-50"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => pagoFotoInputRef.current?.click()}
+                              className="w-full mb-3 flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 text-rose-400 transition-all active:scale-95"
+                            >
+                              <Camera className="w-8 h-8" />
+                              <div className="text-sm font-bold">Tomar foto / Subir comprobante</div>
+                              <div className="text-[10px] text-slate-500">Yape, Plin, transferencia, POS...</div>
+                            </button>
+                          )}
+
+                          {/* Monto recibido */}
+                          <div className="mb-3">
+                            <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Monto recibido (S/)</label>
+                            <input
+                              type="number"
+                              value={pagoFotoMonto}
+                              onChange={e => setPagoFotoMonto(e.target.value)}
+                              placeholder="0.00"
+                              step="0.01"
+                              min="0"
+                              disabled={pagoFotoSubiendo}
+                              className="w-full bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-rose-500 outline-none disabled:opacity-50"
+                            />
+                          </div>
+
+                          {/* Método de pago */}
+                          <div className="mb-3">
+                            <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Método de pago</label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {([
+                                ['yape', '📲', 'Yape'],
+                                ['plin', '🔵', 'Plin'],
+                                ['efectivo', '💵', 'Efectivo'],
+                                ['transferencia', '🏦', 'Transf.'],
+                                ['pos', '💳', 'POS'],
+                                ['mixto', '🔀', 'Mixto'],
+                              ] as const).map(([id, emoji, label]) => (
+                                <button
+                                  key={id}
+                                  onClick={() => setPagoFotoMetodo(id)}
+                                  disabled={pagoFotoSubiendo}
+                                  className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${
+                                    pagoFotoMetodo === id
+                                      ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300'
+                                      : 'bg-slate-800 border border-slate-700 text-slate-400'
+                                  }`}
+                                >
+                                  <span className="text-base">{emoji}</span>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Botones */}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)}
+                              disabled={pagoFotoSubiendo}
+                              className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!pagoFotoArchivo) {
+                                  onShowToast?.('⚠️ Falta foto', 'Toma una foto del comprobante', 'warning');
+                                  return;
+                                }
+                                if (!pagoFotoMonto || parseFloat(pagoFotoMonto) <= 0) {
+                                  onShowToast?.('⚠️ Monto', 'Ingresa el monto recibido', 'warning');
+                                  return;
+                                }
+                                if (!user) {
+                                  onShowToast?.('Error', 'No hay sesión activa', 'error');
+                                  return;
+                                }
+
+                                setPagoFotoSubiendo(true);
+                                onShowToast?.('📸 Subiendo', 'Subiendo comprobante a la nube...', 'info');
+
+                                try {
+                                  // 1. Subir foto a Storage
+                                  const fotoUrl = await subirFotoPago(user.uid, c.id, pagoFotoArchivo);
+
+                                  // 2. Encolar acción al bot para que reenvíe al grupo MATE
+                                  onShowToast?.('📤 Enviando', 'Enviando al grupo MATE...', 'info');
+                                  await enviarAccionBot(c, 'reportar_pago_foto', {
+                                    fotoUrl: fotoUrl,
+                                    monto: parseFloat(pagoFotoMonto),
+                                    metodo: pagoFotoMetodo,
+                                    clienteNombre: c.nombre,
+                                    clienteCel: c.cel,
+                                    clienteProd: c.prod,
+                                  });
+
+                                  // 3. Marcar como pagado según método
+                                  const estadoMap: Record<string, string> = {
+                                    yape: 'yape-rudy',
+                                    plin: 'yape-plin',
+                                    efectivo: 'efectivo',
+                                    transferencia: 'transferencia',
+                                    pos: 'pos',
+                                    mixto: 'mixto',
+                                  };
+                                  cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
+
+                                  onShowToast?.('✅ Pago reportado', `S/ ${parseFloat(pagoFotoMonto).toFixed(2)} · ${pagoFotoMetodo.toUpperCase()}`, 'success');
+
+                                  // Limpiar
+                                  setPagoFotoModalId(null);
+                                  setPagoFotoArchivo(null);
+                                  setPagoFotoPreview(null);
+                                  setPagoFotoMonto('');
+                                  setPagoFotoMetodo('yape');
+                                } catch (e: any) {
+                                  console.error('❌ Error subiendo foto:', e);
+                                  onShowToast?.('❌ Error', e.message || 'No se pudo subir la foto', 'error');
+                                } finally {
+                                  setPagoFotoSubiendo(false);
+                                }
+                              }}
+                              disabled={pagoFotoSubiendo || !pagoFotoArchivo}
+                              className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                              {pagoFotoSubiendo ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Subiendo...
+                                </>
+                              ) : (
+                                <>📤 Reportar pago</>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Nota informativa */}
+                          <div className="mt-2 text-[10px] text-slate-500 text-center">
+                            La foto se enviará al grupo MATE con los datos del cliente
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ═══ Modal 📤 Enviar reporte a MATE (Modal completo tipo Modular) ═══ */}
+                    {reporteMateModalId === c.id && (() => {
+                      // 10 estados del Modular
+                      const estadosModular = [
+                        ['pendiente', '⏳', 'Pendiente', 'amber'],
+                        ['entregado', '✅', 'Entregado', 'emerald'],
+                        ['fallido', '❌', 'Fallido', 'red'],
+                        ['reprogramar', '📅', 'Reprogramar', 'orange'],
+                        ['ausente', '👤', 'Ausente', 'yellow'],
+                        ['rechazo', '🚫', 'Rechazó', 'rose'],
+                        ['no_contesta', '📵', 'No contesta', 'slate'],
+                        ['en_camino', '🚀', 'En camino', 'blue'],
+                        ['devolucion', '📦', 'Devolución', 'purple'],
+                        ['cancelado', '⛔', 'Cancelado', 'red'],
+                      ] as const;
+                      const minutosOpciones = [5, 10, 15, 20, 25, 30, 45, 60];
+
+                      // Construir mensaje final con variables sustituidas
+                      const construirMensajeFinal = () => {
+                        const partes: string[] = [];
+                        partes.push(`📦 REPORTE - ${c.nombre.toUpperCase()}`);
+                        partes.push(`📍 ${c.dist || '—'} · 📱 ${c.cel || '—'}`);
+                        partes.push(`💰 S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} · ${c.st || 'pendiente'}`);
+                        if (c.prod) partes.push(`📦 Producto: ${c.prod}`);
+                        if (c.dir) partes.push(`🏠 ${c.dir}, ${c.dist || ''}`);
+                        if (mateEstadoSel) {
+                          const est = estadosModular.find(e => e[0] === mateEstadoSel);
+                          if (est) partes.push(`━━━━━━━━━━━━━━`);
+                          if (est) partes.push(`ESTADO: ${est[1]} ${est[2].toUpperCase()}`);
+                        }
+                        if (mateReprogramar) {
+                          try {
+                            const fecha = new Date(mateReprogramar);
+                            partes.push(`📅 Reprogramado para: ${fecha.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} a las ${fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`);
+                          } catch {
+                            partes.push(`📅 Reprogramado: ${mateReprogramar}`);
+                          }
+                        }
+                        if (mateMinutos || (mateMinutosCustom && parseInt(mateMinutosCustom) > 0)) {
+                          const min = mateMinutos || parseInt(mateMinutosCustom);
+                          partes.push(`⏱️ Llego en aproximadamente ${min} minutos`);
+                        }
+                        if (mateMensaje.trim()) {
+                          let msg = mateMensaje;
+                          if (mateMotivo.trim()) {
+                            msg = msg.replace(/\[motivo\]/gi, mateMotivo.trim());
+                          }
+                          partes.push(`━━━━━━━━━━━━━━`);
+                          partes.push(`📝 ${msg}`);
+                        }
+                        return partes.join('\n');
+                      };
+
+                      const mensajeFinal = construirMensajeFinal();
+                      const tieneContenido = mateEstadoSel || mateReprogramar || mateMinutos || mateMinutosCustom || mateMensaje.trim() || mateMotivo.trim();
+
+                      return (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setReporteMateModalId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                          {/* Header */}
+                          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between z-10">
+                            <div>
+                              <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                                📦 MENSAJE PARA EMPRESA
+                              </h3>
+                              <p className="text-[10px] text-slate-400">Envía directo al grupo MATE — sin abrir WhatsApp</p>
+                            </div>
+                            <button onClick={() => setReporteMateModalId(null)} className="text-slate-400 hover:text-white p-1">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          <div className="p-4 space-y-4">
+                            {/* Card del cliente */}
+                            <div className="bg-slate-800 rounded-lg p-3 text-xs">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="font-bold text-white text-sm">{c.nombre}</div>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  c.st === 'pendiente' ? 'bg-amber-500/20 text-amber-400' :
+                                  ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st || '') ?
+                                  'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {c.st || 'pendiente'}
+                                </span>
+                              </div>
+                              {c.prod && <div className="text-slate-400">📦 {c.prod}</div>}
+                              <div className="mt-1 text-emerald-400 font-bold">💰 S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
+                              {c.dir && <div className="text-slate-500 mt-1 text-[10px]">📍 {c.dir} · {c.dist}</div>}
+                            </div>
+
+                            {/* Pestañas */}
+                            <div className="flex gap-1 bg-slate-800 p-1 rounded-lg">
+                              <button
+                                onClick={() => setMateTab('estado')}
+                                className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${mateTab === 'estado' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                              >
+                                ⚡ Estado rápido
+                              </button>
+                              <button
+                                onClick={() => setMateTab('mensaje')}
+                                className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${mateTab === 'mensaje' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                              >
+                                ✏️ Mensaje
+                              </button>
+                            </div>
+
+                            {/* TAB 1: Estado rápido */}
+                            {mateTab === 'estado' && (
+                              <div className="space-y-3">
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1.5 block">⚡ ESTADO RÁPIDO</label>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    {estadosModular.map(([id, emoji, label, color]) => (
+                                      <button
+                                        key={id}
+                                        onClick={() => setMateEstadoSel(mateEstadoSel === id ? '' : id)}
+                                        className={`flex items-center gap-1.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 border ${
+                                          mateEstadoSel === id
+                                            ? `bg-${color}-500/20 border-${color}-500 text-${color}-300`
+                                            : 'bg-slate-800 border-slate-700 text-slate-400'
+                                        }`}
+                                        style={{
+                                          backgroundColor: mateEstadoSel === id ? `var(--color-${color}, rgba(99,102,241,0.2))` : undefined,
+                                          borderColor: mateEstadoSel === id ? `var(--color-${color}-border, rgba(99,102,241,0.5))` : undefined,
+                                        }}
+                                      >
+                                        <span className="text-sm">{emoji}</span>
+                                        {label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Reprogramar para (calendario) */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block flex items-center gap-1">
+                                    📅 Reprogramar para
+                                    <span className="text-slate-500 normal-case font-normal">(opcional)</span>
+                                  </label>
+                                  <input
+                                    type="datetime-local"
+                                    value={mateReprogramar}
+                                    onChange={e => setMateReprogramar(e.target.value)}
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-orange-500 outline-none"
+                                  />
+                                  {mateReprogramar && (
+                                    <button
+                                      onClick={() => setMateReprogramar('')}
+                                      className="mt-1 text-[10px] text-red-400 hover:text-red-300"
+                                    >
+                                      ✕ Quitar fecha
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Minutos para llegar */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block flex items-center gap-1">
+                                    🕐 Minutos para llegar
+                                    <span className="text-slate-500 normal-case font-normal">(opcional)</span>
+                                  </label>
+                                  <div className="grid grid-cols-4 gap-1.5 mb-2">
+                                    {minutosOpciones.map(m => (
+                                      <button
+                                        key={m}
+                                        onClick={() => { setMateMinutos(mateMinutos === m ? null : m); setMateMinutosCustom(''); }}
+                                        className={`py-2 rounded-lg text-xs font-bold transition-all active:scale-95 border ${
+                                          mateMinutos === m && !mateMinutosCustom
+                                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                                            : 'bg-slate-800 border-slate-700 text-slate-400'
+                                        }`}
+                                      >
+                                        {m}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <input
+                                    type="number"
+                                    value={mateMinutosCustom}
+                                    onChange={e => { setMateMinutosCustom(e.target.value); setMateMinutos(null); }}
+                                    placeholder="Ej: 15"
+                                    min="1"
+                                    max="180"
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none text-center"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* TAB 2: Mensaje completo */}
+                            {mateTab === 'mensaje' && (
+                              <div className="space-y-3">
+                                {/* Plantillas guardadas */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">📄 Plantillas guardadas</label>
+                                  <select
+                                    value={matePlantillaSel}
+                                    onChange={e => {
+                                      setMatePlantillaSel(e.target.value);
+                                      const pl = matePlantillas.find(p => p.nombre === e.target.value);
+                                      if (pl) setMateMensaje(pl.texto);
+                                    }}
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-indigo-500 outline-none"
+                                  >
+                                    <option value="">-- Selecciona una plantilla --</option>
+                                    {matePlantillas.map(p => (
+                                      <option key={p.nombre} value={p.nombre}>{p.nombre}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                {/* Textarea mensaje */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">✏️ Mensaje</label>
+                                  <textarea
+                                    value={mateMensaje}
+                                    onChange={e => { setMateMensaje(e.target.value); setMatePlantillaSel(''); }}
+                                    placeholder="Escribe tu mensaje o selecciona una plantilla... Usa [motivo] donde quieras que aparezca el motivo."
+                                    rows={5}
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-indigo-500 outline-none resize-none"
+                                  />
+                                </div>
+
+                                {/* Motivo / Nota */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">
+                                    📝 Motivo / Nota <span className="text-slate-500 normal-case font-normal">(se reemplaza en [motivo])</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={mateMotivo}
+                                    onChange={e => setMateMotivo(e.target.value)}
+                                    placeholder="Ej: Falta poner la direccion exacta / Cliente no estaba / etc..."
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-indigo-500 outline-none"
+                                  />
+                                </div>
+
+                                {/* Frases predefinidas (snippets) */}
+                                <div>
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">💬 Frases predefinidas</label>
+                                  {mateFrases.length === 0 ? (
+                                    <div className="text-[10px] text-slate-500 mb-2">Aún no tienes frases. Toca ➕ para crear la primera.</div>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-1.5 mb-2">
+                                      {mateFrases.map((frase, i) => (
+                                        <div key={i} className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-md overflow-hidden">
+                                          <button
+                                            onClick={() => {
+                                              const nuevoMsg = mateMensaje ? `${mateMensaje}\n${frase}` : frase;
+                                              setMateMensaje(nuevoMsg);
+                                            }}
+                                            className="px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-700"
+                                          >
+                                            {frase.length > 30 ? frase.substring(0, 30) + '...' : frase}
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              const nuevas = mateFrases.filter((_, idx) => idx !== i);
+                                              setMateFrases(nuevas);
+                                              if (user) localStorage.setItem(`mate_frases_${user.uid}`, JSON.stringify(nuevas));
+                                            }}
+                                            className="px-1 py-1 text-red-400 hover:bg-red-500/10"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {mateMostrarAgregarFrase ? (
+                                    <div className="flex gap-1.5">
+                                      <input
+                                        type="text"
+                                        value={mateNuevaFrase}
+                                        onChange={e => setMateNuevaFrase(e.target.value)}
+                                        placeholder="Nueva frase..."
+                                        className="flex-1 bg-slate-800 text-white text-xs rounded-lg px-3 py-1.5 border border-slate-700 focus:border-emerald-500 outline-none"
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          if (!mateNuevaFrase.trim()) return;
+                                          const nuevas = [...mateFrases, mateNuevaFrase.trim()];
+                                          setMateFrases(nuevas);
+                                          if (user) localStorage.setItem(`mate_frases_${user.uid}`, JSON.stringify(nuevas));
+                                          setMateNuevaFrase('');
+                                          setMateMostrarAgregarFrase(false);
+                                        }}
+                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        onClick={() => { setMateMostrarAgregarFrase(false); setMateNuevaFrase(''); }}
+                                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs font-bold"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => setMateMostrarAgregarFrase(true)}
+                                      className="px-2 py-1 rounded-md border border-emerald-500/30 text-emerald-400 text-[10px] font-bold hover:bg-emerald-500/10"
+                                    >
+                                      ➕ Agregar
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Guardar plantilla */}
+                                {mateMostrarGuardarPlantilla ? (
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={mateNuevoNombrePlantilla}
+                                      onChange={e => setMateNuevoNombrePlantilla(e.target.value)}
+                                      placeholder="Nombre de la plantilla..."
+                                      className="flex-1 bg-slate-800 text-white text-xs rounded-lg px-3 py-1.5 border border-slate-700 focus:border-blue-500 outline-none"
+                                      autoFocus
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        if (!mateNuevoNombrePlantilla.trim() || !mateMensaje.trim()) return;
+                                        const nuevas = [...matePlantillas, { nombre: mateNuevoNombrePlantilla.trim(), texto: mateMensaje }];
+                                        setMatePlantillas(nuevas);
+                                        if (user) localStorage.setItem(`mate_plantillas_${user.uid}`, JSON.stringify(nuevas));
+                                        setMateNuevoNombrePlantilla('');
+                                        setMateMostrarGuardarPlantilla(false);
+                                        onShowToast?.('💾 Plantilla', 'Guardada correctamente', 'success');
+                                      }}
+                                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      onClick={() => { setMateMostrarGuardarPlantilla(false); setMateNuevoNombrePlantilla(''); }}
+                                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs font-bold"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setMateMostrarGuardarPlantilla(true)}
+                                    disabled={!mateMensaje.trim()}
+                                    className="w-full py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+                                  >
+                                    💾 Guardar mensaje actual como plantilla
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Vista previa del mensaje */}
+                            {tieneContenido && (
+                              <div>
+                                <label className="text-[10px] text-emerald-400 uppercase font-bold mb-1 block">👁️ Vista previa (lo que recibirá MATE)</label>
+                                <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-3 max-h-48 overflow-y-auto">
+                                  <pre className="text-[11px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">{mensajeFinal}</pre>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Botones principales */}
+                            <div className="space-y-2">
+                              <button
+                                onClick={async () => {
+                                  onShowToast?.('📤 MATE', 'Enviando reporte al grupo MATE...', 'info');
+                                  await enviarAccionBot(c, 'reporte_mate', {
+                                    mensaje: mensajeFinal,
+                                    estado: mateEstadoSel,
+                                    reprogramar: mateReprogramar || null,
+                                    minutos: mateMinutos || (mateMinutosCustom ? parseInt(mateMinutosCustom) : null),
+                                    clienteData: {
+                                      nombre: c.nombre,
+                                      cel: c.cel,
+                                      prod: c.prod,
+                                      cobrar: c.cobrar,
+                                      dir: c.dir,
+                                      dist: c.dist,
+                                      st: c.st,
+                                    },
+                                  });
+                                  // Cambiar estado del cliente si se seleccionó
+                                  if (mateEstadoSel) {
+                                    const mapeoEstado: Record<string, string> = {
+                                      pendiente: 'pendiente',
+                                      entregado: 'efectivo',
+                                      fallido: 'fallida',
+                                      reprogramar: 'pendiente',
+                                      ausente: 'ausente',
+                                      rechazo: 'rechazado',
+                                      no_contesta: 'no-contesta',
+                                      en_camino: 'pendiente',
+                                      devolucion: 'cambio',
+                                      cancelado: 'cancelado',
+                                    };
+                                    if (mapeoEstado[mateEstadoSel]) {
+                                      cambiarEstado(c.id, mapeoEstado[mateEstadoSel]);
+                                    }
+                                  }
+                                  setReporteMateModalId(null);
+                                }}
+                                disabled={!tieneContenido}
+                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-black transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                📦 ENVIAR AL GRUPO MATE
+                              </button>
+
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(mensajeFinal).then(() => {
+                                      onShowToast?.('📋 Copiado', 'Mensaje copiado al portapapeles', 'success');
+                                    }).catch(() => {
+                                      onShowToast?.('⚠️ Error', 'No se pudo copiar', 'warning');
+                                    });
+                                  }}
+                                  disabled={!tieneContenido}
+                                  className="flex-1 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+                                >
+                                  📋 Copiar
+                                </button>
+                                <button
+                                  onClick={() => setReporteMateModalId(null)}
+                                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
