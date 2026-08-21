@@ -73,6 +73,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [pagoFotoSubiendo, setPagoFotoSubiendo] = useState(false);
   const [pagoFotoTipo, setPagoFotoTipo] = useState<'comprobante' | 'entregado' | 'otro'>('comprobante');
   const pagoFotoInputRef = useRef<HTMLInputElement>(null);
+  const pagoFotoGaleriaRef = useRef<HTMLInputElement>(null);
 
   // Estados modal 📤 Enviar reporte a MATE (Modal completo tipo Modular)
   const [reporteMateModalId, setReporteMateModalId] = useState<string | number | null>(null);
@@ -90,6 +91,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [matePlantillas, setMatePlantillas] = useState<{ nombre: string; texto: string }[]>([]);
   const [mateMostrarGuardarPlantilla, setMateMostrarGuardarPlantilla] = useState(false);
   const [mateNuevoNombrePlantilla, setMateNuevoNombrePlantilla] = useState('');
+
+  // Plantillas predefinidas (siempre disponibles en el dropdown)
+  const PLANTILLAS_PREDEF = [
+    { nombre: '📋 Cliente no contesta', texto: 'Cliente no contesta al teléfono ni responde WhatsApp. [motivo]' },
+    { nombre: '👤 Cliente ausente', texto: 'El cliente no se encuentra en la dirección indicada. [motivo]' },
+    { nombre: '❌ Entrega fallida', texto: 'No se pudo completar la entrega. [motivo]' },
+    { nombre: '📦 Producto dañado', texto: 'El producto llegó dañado y el cliente lo rechazó. [motivo]' },
+    { nombre: '📦 Producto equivocado', texto: 'El producto entregado no corresponde al pedido. [motivo]' },
+    { nombre: '📍 Dirección incorrecta', texto: 'La dirección registrada no existe o es incorrecta. [motivo]' },
+    { nombre: '📅 Reprogramar entrega', texto: 'El cliente solicita reprogramar la entrega. [motivo]' },
+    { nombre: '💵 Pago parcial', texto: 'El cliente pagó solo una parte. Falta completar el pago. [motivo]' },
+    { nombre: '🚫 Cliente rechazó', texto: 'El cliente rechazó el pedido. [motivo]' },
+    { nombre: '💬 Cliente requiere atención', texto: 'El cliente solicita atención especial. [motivo]' },
+    { nombre: '🔄 Cliente pide cambio', texto: 'El cliente desea cambiar el producto. [motivo]' },
+    { nombre: '⏳ Pendiente de confirmar', texto: 'Pendiente de confirmar con el cliente. [motivo]' },
+    { nombre: '✅ Entrega exitosa', texto: 'Entrega completada exitosamente. [motivo]' },
+    { nombre: '🚀 En camino', texto: 'Rider en camino a la dirección del cliente. [motivo]' },
+  ];
 
   // Cargar plantillas y frases de localStorage al montar
   useEffect(() => {
@@ -1014,21 +1033,43 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             }}
                             className="hidden"
                           />
+                          {/* Input de galería (oculto) - SIN capture para que abra la galería */}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            ref={pagoFotoGaleriaRef}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setPagoFotoArchivo(file);
+                              const reader = new FileReader();
+                              reader.onload = ev => setPagoFotoPreview(ev.target?.result as string);
+                              reader.readAsDataURL(file);
+                            }}
+                            className="hidden"
+                          />
 
                           {/* Preview de la foto */}
                           {pagoFotoPreview ? (
                             <div className="relative mb-3">
                               <img src={pagoFotoPreview} alt="Comprobante" className="w-full max-h-64 object-contain rounded-lg border border-slate-700" />
-                              <button onClick={() => { setPagoFotoArchivo(null); setPagoFotoPreview(null); if (pagoFotoInputRef.current) pagoFotoInputRef.current.value = ''; }} disabled={pagoFotoSubiendo} className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-1.5 transition-all disabled:opacity-50">
+                              <button onClick={() => { setPagoFotoArchivo(null); setPagoFotoPreview(null); if (pagoFotoInputRef.current) pagoFotoInputRef.current.value = ''; if (pagoFotoGaleriaRef.current) pagoFotoGaleriaRef.current.value = ''; }} disabled={pagoFotoSubiendo} className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-1.5 transition-all disabled:opacity-50">
                                 <X className="w-4 h-4" />
                               </button>
                             </div>
                           ) : (
-                            <button onClick={() => pagoFotoInputRef.current?.click()} className="w-full mb-3 flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 text-rose-400 transition-all active:scale-95">
-                              <Camera className="w-8 h-8" />
-                              <div className="text-sm font-bold">Tomar foto / Subir imagen</div>
-                              <div className="text-[10px] text-slate-500">Captura del comprobante o evidencia</div>
-                            </button>
+                            <div className="grid grid-cols-2 gap-2 mb-3">
+                              <button onClick={() => pagoFotoInputRef.current?.click()} className="flex flex-col items-center gap-1 p-4 rounded-xl border-2 border-dashed border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 text-rose-400 transition-all active:scale-95">
+                                <Camera className="w-6 h-6" />
+                                <div className="text-[11px] font-bold">📷 Tomar foto</div>
+                                <div className="text-[9px] text-slate-500">Abre la cámara</div>
+                              </button>
+                              <button onClick={() => pagoFotoGaleriaRef.current?.click()} className="flex flex-col items-center gap-1 p-4 rounded-xl border-2 border-dashed border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-400 transition-all active:scale-95">
+                                <Upload className="w-6 h-6" />
+                                <div className="text-[11px] font-bold">🖼️ Subir imagen</div>
+                                <div className="text-[9px] text-slate-500">De la galería</div>
+                              </button>
+                            </div>
                           )}
 
                           {/* Monto y método (solo si es comprobante) */}
@@ -1283,11 +1324,40 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             {mateTab === 'mensaje' && (
                               <div className="space-y-3">
                                 <div>
-                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">📄 Plantillas guardadas</label>
-                                  <select value={matePlantillaSel} onChange={e => { setMatePlantillaSel(e.target.value); const pl = matePlantillas.find(p => p.nombre === e.target.value); if (pl) setMateMensaje(pl.texto); }} className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-indigo-500 outline-none">
+                                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">📄 Plantillas predefinidas</label>
+                                  <select
+                                    value={matePlantillaSel}
+                                    onChange={e => {
+                                      setMatePlantillaSel(e.target.value);
+                                      // Buscar en predefinidas primero
+                                      const plPre = PLANTILLAS_PREDEF.find(p => p.nombre === e.target.value);
+                                      if (plPre) {
+                                        setMateMensaje(plPre.texto);
+                                        return;
+                                      }
+                                      // Si no, buscar en plantillas guardadas del usuario
+                                      const plUser = matePlantillas.find(p => p.nombre === e.target.value);
+                                      if (plUser) setMateMensaje(plUser.texto);
+                                    }}
+                                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-indigo-500 outline-none"
+                                  >
                                     <option value="">-- Selecciona una plantilla --</option>
-                                    {matePlantillas.map(p => (<option key={p.nombre} value={p.nombre}>{p.nombre}</option>))}
+                                    <optgroup label="📋 Predefinidas">
+                                      {PLANTILLAS_PREDEF.map(p => (
+                                        <option key={p.nombre} value={p.nombre}>{p.nombre}</option>
+                                      ))}
+                                    </optgroup>
+                                    {matePlantillas.length > 0 && (
+                                      <optgroup label="💾 Mis plantillas guardadas">
+                                        {matePlantillas.map(p => (
+                                          <option key={p.nombre} value={p.nombre}>{p.nombre}</option>
+                                        ))}
+                                      </optgroup>
+                                    )}
                                   </select>
+                                  <div className="text-[9px] text-slate-500 mt-1">
+                                    💡 Las predefinidas usan [motivo] que se reemplaza con el campo de abajo
+                                  </div>
                                 </div>
 
                                 <div>
