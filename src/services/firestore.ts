@@ -4,7 +4,7 @@
 // Compatible con RiderTrack Modular (misma estructura)
 // ═══════════════════════════════════════════════════════════
 
-import { db } from './firebase';
+import { db, storage } from './firebase';
 import {
   collection,
   doc,
@@ -20,6 +20,11 @@ import {
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 import * as XLSX from 'xlsx';
 
 // ═══════════════════════════════════════════════════════════
@@ -375,3 +380,40 @@ function _botCel(cel: string): string | null {
 }
 
 export { _botCel };
+
+// ═══════════════════════════════════════════════════════════
+// 📸 SUBIR FOTO A STORAGE (Reportar pago con foto)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Sube una foto del comprobante de pago a Firebase Storage.
+ * Ruta: pagos/{uid}/{clienteId}_{timestamp}.jpg
+ * @returns URL pública de la imagen subida
+ */
+export async function subirFotoPago(
+  uid: string,
+  clienteId: string | number,
+  file: File | Blob
+): Promise<string> {
+  if (!storage) throw new Error('Storage no inicializado');
+
+  const timestamp = Date.now();
+  const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const ruta = `pagos/${uid}/${safeId}_${timestamp}.jpg`;
+  const refImg = storageRef(storage, ruta);
+
+  // Subir con metadata para optimizar cache
+  await uploadBytes(refImg, file, {
+    contentType: 'image/jpeg',
+    customMetadata: {
+      clienteId: String(clienteId),
+      uid: uid,
+      fecha: new Date().toISOString(),
+    },
+  });
+
+  // Obtener URL de descarga
+  const url = await getDownloadURL(refImg);
+  console.log('✅ Foto subida a Storage:', ruta);
+  return url;
+}

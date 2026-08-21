@@ -31,6 +31,12 @@ import {
   getDocs,
   writeBatch,
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzDl7gaS40JoXt9OoCPzG9FyaVPz_O34I",
@@ -45,6 +51,7 @@ const firebaseConfig = {
 let app;
 let auth;
 let db;
+let storage;
 
 try {
   app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -59,13 +66,15 @@ try {
     db = getFirestore(app);
   }
 
+  storage = getStorage(app);
+
   console.log('✅ Firebase inicializado:', firebaseConfig.projectId);
 } catch (e) {
   console.error('❌ Error inicializando Firebase:', e);
 }
 
-export { app, auth, db };
-export { GoogleAuthProvider };
+export { app, auth, db, storage };
+export { GoogleAuthProvider, storageRef, uploadBytes, getDownloadURL };
 
 // ═══════════════════════════════════════════════════════════
 // 🔐 FUNCIONES DE AUTENTICACIÓN
