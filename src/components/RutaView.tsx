@@ -1450,39 +1450,76 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       ] as const;
                       const minutosOpciones = [5, 10, 15, 20, 25, 30, 45, 60];
 
-                      // Construir mensaje final con variables sustituidas
+                      // Construir mensaje final con variables sustituidas (FORMATO MODULAR SUSTANCIOSO)
                       const construirMensajeFinal = () => {
-                        const partes: string[] = [];
-                        partes.push(`📦 REPORTE - ${c.nombre.toUpperCase()}`);
-                        partes.push(`📍 ${c.dist || '—'} · 📱 ${c.cel || '—'}`);
-                        partes.push(`💰 S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} · ${c.st || 'pendiente'}`);
-                        if (c.prod) partes.push(`📦 Producto: ${c.prod}`);
-                        if (c.dir) partes.push(`🏠 ${c.dir}, ${c.dist || ''}`);
+                        const ahora = new Date();
+                        const fechaStr = ahora.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+                        const horaStr = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                        const precio = parseFloat(String(c.cobrar || 0)).toFixed(2);
+                        const producto = c.prod || '—';
+                        const nombre = c.nombre || '—';
+                        const direccion = c.dir || '—';
+                        const distrito = c.dist || '—';
+                        const telefono = c.cel || '—';
+
+                        // Título según estado
+                        let titulo = '📦 *REPORTE DE PEDIDO*';
+                        let emojiEstado = '⏳';
+                        let labelEstado = 'Pendiente';
+
                         if (mateEstadoSel) {
                           const est = estadosModular.find(e => e[0] === mateEstadoSel);
-                          if (est) partes.push(`━━━━━━━━━━━━━━`);
-                          if (est) partes.push(`ESTADO: ${est[1]} ${est[2].toUpperCase()}`);
+                          if (est) { emojiEstado = est[1]; labelEstado = est[2]; }
+                          if (mateEstadoSel === 'entregado') titulo = '✅ *PEDIDO ENTREGADO*';
+                          else if (['fallido', 'rechazo', 'devolucion', 'cancelado'].includes(mateEstadoSel)) titulo = '❌ *PEDIDO NO ENTREGADO*';
+                          else if (mateEstadoSel === 'en_camino') titulo = '🚀 *PEDIDO EN CAMINO*';
+                          else if (mateEstadoSel === 'reprogramar') titulo = '📅 *PEDIDO REPROGRAMADO*';
+                          else if (mateEstadoSel === 'ausente') titulo = '👤 *CLIENTE AUSENTE*';
+                          else if (mateEstadoSel === 'no_contesta') titulo = '📵 *CLIENTE NO CONTESTA*';
                         }
+
+                        const partes: string[] = [];
+                        partes.push(titulo);
+                        partes.push('');
+                        partes.push(`📅 _${fechaStr} · ${horaStr}_`);
+                        partes.push(`⚠️ *Estado:* ${emojiEstado} ${labelEstado}`);
+                        partes.push('');
+                        partes.push(`👤 *Cliente:* ${nombre}`);
+                        partes.push(`📦 *Producto:* ${producto}`);
+                        partes.push(`💰 *Precio:* S/ ${precio}`);
+                        partes.push(`💵 *A cobrar:* S/ ${precio}`);
+                        partes.push(`📍 *Dirección:* ${direccion}`);
+                        partes.push(`🏘️ *Distrito:* ${distrito}`);
+                        partes.push(`📞 *Teléfono:* ${telefono}`);
+
                         if (mateReprogramar) {
                           try {
                             const fecha = new Date(mateReprogramar);
-                            partes.push(`📅 Reprogramado para: ${fecha.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} a las ${fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`);
-                          } catch {
-                            partes.push(`📅 Reprogramado: ${mateReprogramar}`);
-                          }
+                            const fechaRep = fecha.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+                            const horaRep = fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                            partes.push(`📅 *Reprogramado para:* ${fechaRep} · ${horaRep}`);
+                          } catch { partes.push(`📅 *Reprogramado:* ${mateReprogramar}`); }
                         }
+
                         if (mateMinutos || (mateMinutosCustom && parseInt(mateMinutosCustom) > 0)) {
                           const min = mateMinutos || parseInt(mateMinutosCustom);
-                          partes.push(`⏱️ Llego en aproximadamente ${min} minutos`);
+                          partes.push(`⏱️ *Llego en:* ~${min} minutos~`);
                         }
-                        if (mateMensaje.trim()) {
-                          let msg = mateMensaje;
+
+                        // Motivo (textarea) - siempre se incluye si hay contenido
+                        const motivoTexto = mateMotivo.trim() || mateMensaje.trim();
+                        if (motivoTexto) {
+                          // Reemplazar [motivo] en el mensaje con el motivo
+                          let msg = mateMensaje.trim();
                           if (mateMotivo.trim()) {
                             msg = msg.replace(/\[motivo\]/gi, mateMotivo.trim());
                           }
-                          partes.push(`━━━━━━━━━━━━━━`);
-                          partes.push(`📝 ${msg}`);
+                          partes.push('');
+                          partes.push(`📝 *Motivo:* \`${msg}\``);
                         }
+
+                        partes.push('');
+                        partes.push('— _Reporte automático desde RiderTrack_');
                         return partes.join('\n');
                       };
 
