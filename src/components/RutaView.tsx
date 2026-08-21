@@ -930,52 +930,43 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     {/* ═══ Modal 📸 Reportar pago con foto ═══ */}
                     {pagoFotoModalId === c.id && (() => {
                       // Construir mensaje según tipo seleccionado
+                      // 📌 IMPORTANTE: Esta función genera el caption EXACTAMENTE igual
+                      // a como lo construye el bot Baileys en enviarFotoGrupoMATE().
+                      // Así la vista previa coincide con lo que llega al grupo MATE.
                       const construirMensajeFoto = () => {
-                        const ahora = new Date();
-                        const fechaStr = ahora.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
-                        const horaStr = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
                         const precio = parseFloat(String(c.cobrar || 0)).toFixed(2);
                         const nombre = c.nombre || '—';
                         const producto = c.prod || '—';
                         const direccion = c.dir || '—';
                         const distrito = c.dist || '—';
-                        const telefono = c.cel || '—';
                         const montoRecibido = parseFloat(pagoFotoMonto || '0').toFixed(2);
 
+                        // Título según tipo (igual que el bot)
                         let titulo = '';
-                        let intro = '';
-
                         if (pagoFotoTipo === 'comprobante') {
-                          titulo = '📸 *COMPROBANTE DE PAGO*';
-                          intro = `Hola MATE, les adjunto el comprobante de pago de *${nombre}*`;
+                          titulo = '📸 COMPROBANTE DE PAGO';
                         } else if (pagoFotoTipo === 'entregado') {
-                          titulo = '✅ *ENTREGA CONFIRMADA*';
-                          intro = `Hola MATE, confirmo la entrega del cliente *${nombre}* de la dirección *${direccion}*`;
+                          titulo = '✅ ENTREGA CONFIRMADA';
                         } else {
-                          titulo = '📦 *REPORTE FOTO*';
-                          intro = `Hola MATE, les comparto esta foto del cliente *${nombre}*`;
+                          titulo = '📦 REPORTE FOTO';
                         }
 
+                        // Caption IGUAL al del bot
                         const partes: string[] = [];
-                        partes.push(titulo);
-                        partes.push('');
-                        partes.push(intro);
-                        partes.push('');
-                        partes.push(`📅 _${fechaStr} · ${horaStr}_`);
+                        partes.push(`*${titulo}*`);
+                        if (nombre) partes.push(`👤 Cliente: ${nombre}`);
+                        if (producto) partes.push(`📦 Producto: ${producto}`);
+                        if (precio && precio !== '0.00') partes.push(`💵 Monto: S/ ${precio}`);
+                        if (direccion) partes.push(`📍 Dirección: ${direccion}`);
+                        if (distrito) partes.push(`🏘️ Distrito: ${distrito}`);
+
+                        // Comentario (igual al que mandamos al bot)
+                        let comentario = '';
                         if (pagoFotoTipo === 'comprobante') {
-                          partes.push(`💵 *Monto recibido:* S/ ${montoRecibido}`);
-                          partes.push(`💳 *Método:* ${pagoFotoMetodo.toUpperCase()}`);
+                          comentario = `Método: ${pagoFotoMetodo.toUpperCase()} · Monto recibido: S/ ${montoRecibido}`;
                         }
-                        partes.push('');
-                        partes.push(`👤 *Cliente:* ${nombre}`);
-                        partes.push(`📦 *Producto:* ${producto}`);
-                        partes.push(`💰 *Precio:* S/ ${precio}`);
-                        partes.push(`💵 *A cobrar:* S/ ${precio}`);
-                        partes.push(`📍 *Dirección:* ${direccion}`);
-                        partes.push(`🏘️ *Distrito:* ${distrito}`);
-                        partes.push(`📞 *Teléfono:* ${telefono}`);
-                        partes.push('');
-                        partes.push('— _Reporte automático desde RiderTrack_');
+                        if (comentario) partes.push(`📝 ${comentario}`);
+
                         return partes.join('\n');
                       };
 
