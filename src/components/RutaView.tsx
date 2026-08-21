@@ -1125,7 +1125,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   const fotoUrl = await subirFotoPago(user.uid, c.id, pagoFotoArchivo);
                                   onShowToast?.('📤 Enviando', 'Enviando al grupo MATE...', 'info');
                                   // 📌 Usamos el tipo 'enviar_foto_grupo_mate' que el bot YA conoce
-                                  // No necesitamos tocar el bot Baileys
+                                  // El bot construye el caption con: titulo, nombre, prod, cobrar, dir, distrito, comentario
+                                  // Por eso NO pasamos el mensaje completo en comentario (se duplicaría)
                                   await enviarAccionBot(c, 'enviar_foto_grupo_mate', {
                                     imagenUrl: fotoUrl,
                                     nombre: c.nombre,
@@ -1136,7 +1137,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     titulo: pagoFotoTipo === 'comprobante' ? '📸 Comprobante de pago'
                                       : pagoFotoTipo === 'entregado' ? '✅ Entrega confirmada'
                                       : '📦 Reporte foto',
-                                    comentario: mensajeFoto,
+                                    // Comentario breve (NO el mensaje completo, sino se duplica)
+                                    comentario: pagoFotoTipo === 'comprobante'
+                                      ? `Método: ${pagoFotoMetodo.toUpperCase()} · Monto recibido: S/ ${parseFloat(pagoFotoMonto || '0').toFixed(2)}`
+                                      : '',
                                   });
                                   // Cambiar estado del cliente según tipo
                                   if (pagoFotoTipo === 'entregado') {
@@ -1453,99 +1457,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       );
                     })()}
 
-                    {/* Modal de Control */}
-                    {controlModalId === c.id && (
-                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setControlModalId(null)}>
-                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-base font-bold text-white">🎯 Control de mensajes</h3>
-                            <button onClick={() => setControlModalId(null)} className="text-slate-400 hover:text-white">
-                              <X className="w-5 h-5" />
-                            </button>
-                          </div>
-
-                          <div className="text-xs text-slate-400 mb-3">
-                            Cliente: <span className="text-white font-bold">{c.nombre}</span>
-                          </div>
-
-                          {/* Opciones de Control */}
-                          <div className="space-y-2">
-                            <button
-                              onClick={() => {
-                                onShowToast?.('🤖 Bot', 'Enviando aviso de entrega con imagen...', 'info');
-                                setControlModalId(null);
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-sm font-bold transition-all"
-                            >
-                              <span className="text-lg">📷</span>
-                              <div className="text-left">
-                                <div>Con imagen</div>
-                                <div className="text-[10px] text-slate-500">Manda "gracias por tu compra" con imagen</div>
-                              </div>
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                onShowToast?.('📝 Texto', 'Enviando aviso de entrega (solo texto)...', 'info');
-                                setControlModalId(null);
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-bold transition-all"
-                            >
-                              <span className="text-lg">📝</span>
-                              <div className="text-left">
-                                <div>Solo texto</div>
-                                <div className="text-[10px] text-slate-500">Manda "gracias por tu compra" sin imagen</div>
-                              </div>
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                const minutos = prompt('¿En cuántos minutos llegás?', '15');
-                                if (minutos) {
-                                  onShowToast?.('⏱️ Avisar llegada', `Enviando aviso: ${minutos} minutos`, 'info');
-                                }
-                                setControlModalId(null);
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all"
-                            >
-                              <span className="text-lg">⏱️</span>
-                              <div className="text-left">
-                                <div>Avisar llegada</div>
-                                <div className="text-[10px] text-slate-500">Avisa en cuántos minutos llegás</div>
-                              </div>
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                onShowToast?.('📍 Ubicación', 'Enviando solicitud de ubicación...', 'info');
-                                setControlModalId(null);
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-sm font-bold transition-all"
-                            >
-                              <span className="text-lg">📍</span>
-                              <div className="text-left">
-                                <div>Solicitar ubicación</div>
-                                <div className="text-[10px] text-slate-500">Pide al cliente su ubicación actual</div>
-                              </div>
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                onShowToast?.('📢 Info empresa', 'Enviando pedido de info a empresa...', 'info');
-                                setControlModalId(null);
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-all"
-                            >
-                              <span className="text-lg">📢</span>
-                              <div className="text-left">
-                                <div>Pedir info a empresa</div>
-                                <div className="text-[10px] text-slate-500">Solicita información del pedido a la empresa</div>
-                              </div>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* NOTE: El modal de Control viejo fue eliminado (duplicado).
+                        El modal correcto está arriba, línea ~646, y usa enviarAccionBot. */}
                   </div>
                 )}
               </div>
