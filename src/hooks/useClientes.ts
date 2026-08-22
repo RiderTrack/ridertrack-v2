@@ -7,7 +7,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Cliente,
-  subscribeToClientes,
   guardarClientes,
   importarExcel,
   subscribeToRutaActiva,
@@ -26,8 +25,8 @@ export function useClientes() {
   // que el listener de ruta_activa sobrescriba inmediatamente
   const actualizandoDesdeV2 = useRef(false);
 
-  // 🔄 Suscribirse a cambios en ruta_activa (donde guarda el Modular)
-  // Si el Modular cambia algo, V2 lo ve automáticamente
+  // 🔄 Escuchar ruta_activa (fuente de verdad - mismo lugar que el Modular)
+  // Solo un listener, evita race conditions
   useEffect(() => {
     if (!user) {
       setClientes([]);
@@ -37,69 +36,44 @@ export function useClientes() {
 
     setLoading(true);
 
-    // 1. Escuchar usuarios/{uid}/clientes (propio de V2)
-    const unsubV2 = subscribeToClientes(
-      user.uid,
-      (clientesData) => {
-        // Si hay clientes en V2 pero ruta_activa está vacío, publicarlos
-        if (clientesData.length > 0 && !actualizandoDesdeV2.current) {
-          publicarClientesEnRutaActiva(user.uid, clientesData);
-        }
-        setClientes(clientesData);
-        setLoading(false);
-      },
-      () => setLoading(false)
-    );
-
-    // 2. Escuchar ruta_activa (donde guarda el Modular)
-    // Si el Modular cambia algo, V2 lo ve automáticamente
-    const unsubModular = subscribeToRutaActiva(
+    const unsubscribe = subscribeToRutaActiva(
       (clientesModular) => {
+        // Si V2 está actualizando (boton guardar), ignorar el snapshot
+        // porque ya tenemos los datos actualizados localmente
         if (actualizandoDesdeV2.current) {
           actualizandoDesdeV2.current = false;
+          // Aun asi actualizamos con lo que viene del Modular (por si hubo cambios)
+          if (clientesModular.length > 0) {
+            setClientes(clientesModular);
+          }
+          setLoading(false);
           return;
         }
 
-        // Si el Modular tiene clientes y V2 no, cargarlos del Modular
-        setClientes(clientesPrev => {
-          if (clientesModular.length > 0 && clientesPrev.length === 0) {
-            // Copiar clientes del Modular a V2
-            guardarClientes(user.uid, clientesModular);
-            return clientesModular;
-          }
-          // Si ambos tienen clientes, fusionar manteniendo estados actualizados del Modular
-          if (clientesModular.length > 0 && clientesPrev.length > 0) {
-            const clientesFusionados = clientesPrev.map(cV2 => {
-              const cMod = clientesModular.find(c => String(c.id) === String(cV2.id));
-              if (cMod && cMod.st !== cV2.st) {
-                // El Modular actualizó el estado, usar ese
-                return { ...cV2, st: cMod.st, hora: cMod.hora };
-              }
-              return cV2;
-            });
-            return clientesFusionados;
-          }
-          return clientesPrev;
-        });
+        // Cargar clientes del Modular (fuente de verdad)
+        setClientes(clientesModular);
         setLoading(false);
+
+        // Guardar en V2 como respaldo (opcional)
+        if (clientesModular.length > 0) {
+          guardarClientes(user.uid, clientesModular);
+        }
       },
       () => setLoading(false)
     );
 
-    return () => {
-      unsubV2();
-      unsubModular();
-    };
+    return () => unsubscribe();
   }, [user]);
 
-  // Guardar clientes en V2 Y sincronizar con Modular
+  // Guardar clientes en ruta_activa Y en V2 (respaldo)
   const guardar = useCallback(async (nuevosClientes: Cliente[]) => {
     if (!user) return;
     actualizandoDesdeV2.current = true;
     setClientes(nuevosClientes);
-    await guardarClientes(user.uid, nuevosClientes);
-    // También publicar en ruta_activa para que el Modular lo vea
+    // Publicar en ruta_activa PRIMERO (fuente de verdad del Modular)
     await publicarClientesEnRutaActiva(user.uid, nuevosClientes);
+    // Guardar en V2 como respaldo
+    await guardarClientes(user.uid, nuevosClientes);
   }, [user]);
 
   // Agregar un cliente
@@ -130,7 +104,7 @@ export function useClientes() {
       return c;
     });
     guardar(nuevos);
-    // También actualizar en ruta_activa (para que el Modular lo vea al instante)
+    // También actualizar en ruta_activa (optimistic update para que el Modular lo vea al instante)
     if (user) {
       actualizarClienteEnRutaActiva(user.uid, id, { st: estado, hora });
     }
@@ -150,16 +124,18 @@ export function useClientes() {
     }
   }, [clientes, guardar, user]);
 
-  // 🔄 Sincronización manual (botón "Importar del Modular")
+  // 🔄 Sincronización manual (botón "Sync")
+  // Recarga forzada desde ruta_activa (donde está el Modular)
   const sincronizarDesdeModular = useCallback(async () => {
     if (!user) return 0;
     setSincronizando(true);
     try {
-      // Como ya escuchamos ruta_activa, los clientes del Modular ya están cargados
-      // Solo necesitamos guardarlos en V2 si no estaban
+      // El listener de ruta_activa ya está activo, así que los clientes
+      // del Modular ya están en el estado. Solo necesitamos forzar una
+      // re-publicación para asegurar consistencia.
       if (clientes.length > 0) {
-        await guardarClientes(user.uid, clientes);
         await publicarClientesEnRutaActiva(user.uid, clientes);
+        await guardarClientes(user.uid, clientes);
       }
       return clientes.length;
     } finally {
