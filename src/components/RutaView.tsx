@@ -38,7 +38,7 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta } = useClientes();
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
@@ -1472,6 +1472,69 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 🏁 BOTONES DE GESTIÓN DE RUTA (Finalizar, Guardar, Limpiar) */}
+      {clientes.length > 0 && (
+        <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-2">
+          <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">🏁 Gestión de ruta</div>
+
+          {/* Finalizar Ruta */}
+          <button
+            onClick={async () => {
+              if (!confirm('¿Finalizar ruta?\n\nSe guardará un resumen en el historial y la ruta se marcará como finalizada.\nLos clientes seguirán visibles para consulta.')) return;
+              try {
+                await finalizarRutaActual();
+                onShowToast?.('🏁 Ruta finalizada', 'Resumen guardado en historial', 'success');
+              } catch (e: any) {
+                onShowToast?.('❌ Error', e.message || 'No se pudo finalizar', 'error');
+              }
+            }}
+            disabled={sincronizando}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+            style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}
+          >
+            {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🏁'}
+            FINALIZAR RUTA
+          </button>
+
+          {/* Guardar y Cerrar Ruta */}
+          <button
+            onClick={async () => {
+              if (!confirm('¿Guardar y cerrar ruta?\n\nSe guardarán los clientes en clientes_registrados como respaldo histórico.\nLos clientes seguirán visibles en el panel.')) return;
+              try {
+                await guardarYCerrarRutaActual();
+                onShowToast?.('💾 Ruta guardada', 'Clientes guardados en historial', 'success');
+              } catch (e: any) {
+                onShowToast?.('❌ Error', e.message || 'No se pudo guardar', 'error');
+              }
+            }}
+            disabled={sincronizando}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+          >
+            {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '💾'}
+            GUARDAR Y CERRAR RUTA
+          </button>
+
+          {/* Limpiar sin Guardar */}
+          <button
+            onClick={async () => {
+              if (!confirm('⚠️ ¿Limpiar ruta SIN GUARDAR?\n\nSe borrarán TODOS los clientes de ruta_activa y del panel.\nNo se guardará nada en historial.\n\nEsta acción NO se puede deshacer.')) return;
+              if (!confirm('Última confirmación: ¿Estás SEGURO de borrar todo?')) return;
+              try {
+                await limpiarRuta();
+                onShowToast?.('🗑️ Ruta limpiada', 'Todos los clientes eliminados', 'info');
+              } catch (e: any) {
+                onShowToast?.('❌ Error', e.message || 'No se pudo limpiar', 'error');
+              }
+            }}
+            disabled={sincronizando}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+          >
+            {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🗑️'}
+            LIMPIAR SIN GUARDAR
+          </button>
         </div>
       )}
 

@@ -13,6 +13,9 @@ import {
   subscribeToClientesRegistrados,
   actualizarClienteEnRutaActiva,
   publicarClientesEnRutaActiva,
+  finalizarRuta,
+  guardarYCerrarRuta,
+  limpiarRutaSinGuardar,
 } from '../services/firestore';
 import { useAuth } from './useAuth';
 
@@ -166,6 +169,43 @@ export function useClientes() {
     }
   }, [user, clientes]);
 
+  // 🏁 FINALIZAR RUTA: guarda resumen en historial, marca como finalizada
+  const finalizarRutaActual = useCallback(async () => {
+    if (!user || clientes.length === 0) return;
+    setSincronizando(true);
+    try {
+      await finalizarRuta(user.uid, clientes);
+      return true;
+    } finally {
+      setSincronizando(false);
+    }
+  }, [user, clientes]);
+
+  // 💾 GUARDAR Y CERRAR RUTA: guarda en clientes_registrados y ruta_activa
+  const guardarYCerrarRutaActual = useCallback(async () => {
+    if (!user || clientes.length === 0) return;
+    setSincronizando(true);
+    try {
+      await guardarYCerrarRuta(user.uid, clientes);
+      return true;
+    } finally {
+      setSincronizando(false);
+    }
+  }, [user, clientes]);
+
+  // 🗑️ LIMPIAR SIN GUARDAR: vacía ruta_activa y estado local
+  const limpiarRuta = useCallback(async () => {
+    if (!user) return;
+    setSincronizando(true);
+    try {
+      await limpiarRutaSinGuardar(user.uid);
+      setClientes([]);
+      return true;
+    } finally {
+      setSincronizando(false);
+    }
+  }, [user]);
+
   // Estadísticas
   const stats = useMemo(() => {
     const total = clientes.length;
@@ -200,5 +240,8 @@ export function useClientes() {
     cambiarEstado,
     importarDesdeExcel,
     sincronizarDesdeModular,
+    finalizarRutaActual,
+    guardarYCerrarRutaActual,
+    limpiarRuta,
   };
 }

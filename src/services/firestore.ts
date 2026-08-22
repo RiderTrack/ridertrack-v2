@@ -218,6 +218,149 @@ export async function finalizarRutaActiva(userId: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 🏁 GESTIÓN DE RUTA (Finalizar, Guardar y Cerrar, Limpiar)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * FINALIZAR RUTA:
+ * Marca la ruta como finalizada, guarda un resumen en historial_rutas
+ * y MANTIENE los clientes visibles en ruta_activa para consulta.
+ * Útil cuando terminaste todas las entregas del día.
+ */
+export async function finalizarRuta(userId: string, clientes: Cliente[]): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    // 1. Calcular resumen del día
+    const total = clientes.length;
+    const entregados = clientes.filter(c =>
+      ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st)
+    ).length;
+    const fallidos = clientes.filter(c =>
+      ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
+    ).length;
+    const cobrado = clientes
+      .filter(c => ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st))
+      .reduce((sum, c) => sum + parseFloat(String(c.cobrar || 0)), 0);
+
+    // 2. Guardar resumen en historial_rutas
+    const fechaHoy = new Date().toISOString().split('T')[0];
+    await setDoc(doc(db, 'historial_rutas', `${userId}_${fechaHoy}`), {
+      uid: userId,
+      fecha: fechaHoy,
+      iniciadaAt: new Date().toISOString(),
+      finalizadaAt: new Date().toISOString(),
+      totalClientes: total,
+      entregados: entregados,
+      fallidos: fallidos,
+      pendientes: total - entregados - fallidos,
+      cobradoTotal: cobrado,
+      clientes: clientes.map(c => ({
+        id: c.id,
+        nombre: c.nombre,
+        cel: c.cel,
+        prod: c.prod,
+        cobrar: parseFloat(String(c.cobrar || 0)),
+        dir: c.dir,
+        dist: c.dist,
+        st: c.st || 'pendiente',
+        hora: c.hora || '',
+      })),
+    }, { merge: true });
+
+    // 3. Marcar ruta_activa como finalizada (pero MANTENER los clientes)
+    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
+      activa: false,
+      finalizadaAt: new Date().toISOString(),
+      actualizadaAt: new Date().toISOString(),
+      resumen: { total, entregados, fallidos, cobradoTotal: cobrado },
+    }, { merge: true });
+
+    console.log('🏁 Ruta finalizada y guardada en historial');
+  } catch (e) {
+    console.error('❌ Error finalizando ruta:', e);
+    throw e;
+  }
+}
+
+/**
+ * GUARDAR Y CERRAR RUTA:
+ * Guarda los clientes actuales en ruta_activa y en clientes_registrados
+ * (como respaldo histórico) y marca la ruta como inactiva.
+ * Los clientes siguen visibles en el panel para consulta.
+ */
+export async function guardarYCerrarRuta(userId: string, clientes: Cliente[]): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    // 1. Guardar en ruta_activa
+    await publicarClientesEnRutaActiva(userId, clientes);
+
+    // 2. Guardar cada cliente en clientes_registrados (respaldo histórico)
+    const batch = writeBatch(db);
+    clientes.forEach((c) => {
+      const tel = String(c.cel || '').replace(/\D/g, '');
+      if (tel) {
+        const ref = doc(db, 'clientes_registrados', tel);
+        batch.set(ref, {
+          telefono: tel,
+          nombre: c.nombre || '',
+          prod: c.prod || '',
+          cobrar: parseFloat(String(c.cobrar || 0)),
+          dir: c.dir || '',
+          dist: c.dist || '',
+          st: c.st || 'pendiente',
+          ultimaVisita: new Date().toISOString(),
+        }, { merge: true });
+      }
+    });
+    await batch.commit();
+
+    // 3. Marcar ruta como inactiva pero manteniendo los clientes
+    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
+      activa: false,
+      guardadaAt: new Date().toISOString(),
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true });
+
+    console.log('💾 Ruta guardada y cerrada (clientes preservados)');
+  } catch (e) {
+    console.error('❌ Error guardando ruta:', e);
+    throw e;
+  }
+}
+
+/**
+ * LIMPIAR SIN GUARDAR:
+ * Elimina TODOS los clientes de ruta_activa y del estado local.
+ * NO guarda nada en historial ni clientes_registrados.
+ * Útil cuando quieres empezar de cero con un Excel nuevo.
+ */
+export async function limpiarRutaSinGuardar(userId: string): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    // Vaciar ruta_activa (eliminar el documento de clientes)
+    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
+      clientes: [],
+      totalClientes: 0,
+      pendientes: 0,
+      activa: false,
+      limpiadaAt: new Date().toISOString(),
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true });
+
+    // También vaciar usuarios/{uid}/clientes
+    await setDoc(doc(db, 'usuarios', userId), {
+      clientes: [],
+      limpiadaAt: new Date().toISOString(),
+    }, { merge: true });
+
+    console.log('🗑️ Ruta limpiada (sin guardar)');
+  } catch (e) {
+    console.error('❌ Error limpiando ruta:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 🔄 SINCRONIZACIÓN CON RIDERTRACK MODULAR (ruta_activa)
 // ═══════════════════════════════════════════════════════════
 
