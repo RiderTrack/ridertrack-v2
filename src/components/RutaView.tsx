@@ -38,10 +38,12 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden } = useClientes();
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
+  const [filtroDistrito, setFiltroDistrito] = useState<string>('');
+  const [filtroProducto, setFiltroProducto] = useState<string>('');
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
   const [controlModalId, setControlModalId] = useState<string | number | null>(null);
   const [importando, setImportando] = useState(false);
@@ -148,6 +150,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       );
     }
 
+    // Filtro por distrito
+    if (filtroDistrito) {
+      filtrados = filtrados.filter(c => (c.dist || '').toLowerCase().trim() === filtroDistrito.toLowerCase().trim());
+    }
+
+    // Filtro por producto
+    if (filtroProducto) {
+      filtrados = filtrados.filter(c => (c.prod || '').toLowerCase().trim() === filtroProducto.toLowerCase().trim());
+    }
+
     // Filtro por búsqueda
     if (search.trim()) {
       const q = search.toLowerCase().trim();
@@ -160,7 +172,18 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
 
     return filtrados;
-  }, [clientes, filtroEstado, search]);
+  }, [clientes, filtroEstado, filtroDistrito, filtroProducto, search]);
+
+  // Listas únicas de distritos y productos para los dropdowns
+  const distritosUnicos = useMemo(() => {
+    const distritos = clientes.map(c => (c.dist || '').trim()).filter(Boolean);
+    return [...new Set(distritos)].sort();
+  }, [clientes]);
+
+  const productosUnicos = useMemo(() => {
+    const productos = clientes.map(c => (c.prod || '').trim()).filter(Boolean);
+    return [...new Set(productos)].sort();
+  }, [clientes]);
 
   // Botones de pago (iguales que RiderTrack Modular)
   const pagosList = [
@@ -432,6 +455,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
           />
         </div>
+
+        {/* Filtros por estado (chips) */}
         <div className="flex gap-1 overflow-x-auto scrollbar-none">
           {[
             { id: 'todos', label: 'Todos', count: stats.total },
@@ -452,6 +477,32 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </button>
           ))}
         </div>
+
+        {/* Filtros por distrito y producto */}
+        {clientes.length > 0 && (
+          <div className="grid grid-cols-2 gap-1.5">
+            <select
+              value={filtroDistrito}
+              onChange={e => setFiltroDistrito(e.target.value)}
+              className="bg-slate-800 text-white text-[11px] rounded-lg px-2 py-1.5 border border-slate-700 focus:border-emerald-500 outline-none appearance-none cursor-pointer"
+            >
+              <option value="">📍 Todos los distritos</option>
+              {distritosUnicos.map(d => (
+                <option key={d} value={d}>📍 {d}</option>
+              ))}
+            </select>
+            <select
+              value={filtroProducto}
+              onChange={e => setFiltroProducto(e.target.value)}
+              className="bg-slate-800 text-white text-[11px] rounded-lg px-2 py-1.5 border border-slate-700 focus:border-emerald-500 outline-none appearance-none cursor-pointer"
+            >
+              <option value="">📦 Todos los productos</option>
+              {productosUnicos.map(p => (
+                <option key={p} value={p}>📦 {p.length > 25 ? p.substring(0, 25) + '...' : p}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Lista de clientes */}
@@ -486,10 +537,29 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   className="flex items-center gap-2 p-2 cursor-pointer"
                   onClick={() => setClienteExpandido(expandido ? null : c.id)}
                 >
-                  {/* Número de posición */}
-                  <div className="w-7 h-7 rounded-md bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-300 shrink-0">
-                    {c.num || idx + 1}
-                  </div>
+                  {/* Número de posición (editable cuando está expandido) */}
+                  {expandido ? (
+                    <input
+                      type="number"
+                      value={c.num || idx + 1}
+                      min="1"
+                      max={clientes.length}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => {
+                        const nuevoNum = parseInt(e.target.value);
+                        if (nuevoNum > 0 && nuevoNum <= clientes.length) {
+                          editarNumeroOrden(c.id, nuevoNum);
+                          onShowToast?.('🔢 Orden cambiado', `${c.nombre} ahora es #${nuevoNum}`, 'info');
+                        }
+                      }}
+                      className="w-10 h-7 rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[11px] font-bold text-center outline-none focus:bg-purple-500/30 shrink-0"
+                      title="Editar número de orden"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-md bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-300 shrink-0">
+                      {c.num || idx + 1}
+                    </div>
+                  )}
 
                   {/* Info del cliente */}
                   <div className="flex-1 min-w-0">

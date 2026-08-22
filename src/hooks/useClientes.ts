@@ -252,6 +252,29 @@ export function useClientes() {
     guardar(conNuevoOrden);
   }, [clientes, guardar]);
 
+  // ✏️ EDITAR NÚMERO DE ORDEN: cambia manualmente el número de un cliente
+  // y reorganiza los demás clientes según corresponda
+  const editarNumeroOrden = useCallback((id: string | number, nuevoNum: number) => {
+    if (!nuevoNum || nuevoNum < 1) return;
+    const idx = clientes.findIndex(c => c.id === id);
+    if (idx === -1) return;
+
+    const maxNum = clientes.length;
+    const numFinal = Math.min(Math.max(nuevoNum, 1), maxNum);
+
+    // Si el nuevo número es igual al actual, no hacer nada
+    if (numFinal === idx + 1) return;
+
+    // Crear nueva lista: remover el cliente y reinsertarlo en la nueva posición
+    const nuevos = [...clientes];
+    const [clienteMovido] = nuevos.splice(idx, 1);
+    nuevos.splice(numFinal - 1, 0, clienteMovido);
+
+    // Reasignar números de orden
+    const conNuevoOrden = nuevos.map((c, i) => ({ ...c, num: i + 1 }));
+    guardar(conNuevoOrden);
+  }, [clientes, guardar]);
+
   // Estadísticas
   const stats = useMemo(() => {
     const total = clientes.length;
@@ -291,5 +314,6 @@ export function useClientes() {
     limpiarRuta,
     optimizarRuta,
     moverCliente,
+    editarNumeroOrden,
   };
 }
