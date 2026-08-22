@@ -17,6 +17,7 @@ import {
   orderBy,
   limit,
   getDocs,
+  getDoc,
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
@@ -213,6 +214,156 @@ export async function finalizarRutaActiva(userId: string): Promise<void> {
     console.log('✅ Ruta finalizada');
   } catch (e) {
     console.warn('Error finalizando ruta:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🔄 SINCRONIZACIÓN CON RIDERTRACK MODULAR (ruta_activa)
+// ═══════════════════════════════════════════════════════════
+
+// UID del bot (mismo que usa el Modular)
+const UID_BOT_MODULAR = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
+
+/**
+ * Escuchar clientes del RiderTrack Modular en tiempo real.
+ * El Modular guarda en: ruta_activa/{UID_BOT}/clientes
+ *
+ * Esto permite que RiderTrack V2 vea los clientes del Modular automáticamente.
+ */
+export function subscribeToRutaActiva(
+  onUpdate: (clientes: Cliente[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  try {
+    const rutaRef = doc(db, 'ruta_activa', UID_BOT_MODULAR);
+    return onSnapshot(
+      rutaRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const clientesData = data.clientes || [];
+          // Convertir formato del Modular a formato V2
+          const clientes: Cliente[] = clientesData.map((c: any, idx: number) => ({
+            id: c.id || (Date.now() + idx),
+            num: c.num || (idx + 1),
+            nombre: c.nombre || '',
+            cel: c.cel || '',
+            prod: c.prod || '',
+            precio: parseFloat(String(c.precio || c.cobrar || 0)),
+            cobrar: parseFloat(String(c.cobrar || 0)),
+            dir: c.dir || '',
+            dist: c.dist || '',
+            obs: c.obs || '',
+            st: c.st || 'pendiente',
+            mEf: c.mEf || 0,
+            mYp: c.mYp || 0,
+            mEmp: c.mEmp || 0,
+            mVt: c.mVt || 0,
+            mEM: c.mEM || '',
+            hora: c.hora || '',
+            nota: c.nota || '',
+            fotoUrl: c.fotoUrl,
+            respondioInicioRuta: c.respondioInicioRuta,
+          }));
+          console.log('🔄 Clientes del Modular cargados:', clientes.length);
+          onUpdate(clientes);
+        } else {
+          onUpdate([]);
+        }
+      },
+      (err) => {
+        console.error('❌ Error escuchando ruta_activa:', err);
+        onError?.(err);
+      }
+    );
+  } catch (e: any) {
+    console.error('Error subscribeToRutaActiva:', e);
+    onError?.(e);
+    return () => {};
+  }
+}
+
+/**
+ * Actualizar un cliente específico en ruta_activa (para que el Modular lo vea).
+ * Se llama cuando V2 cambia el estado de un cliente.
+ */
+export async function actualizarClienteEnRutaActiva(
+  userId: string,
+  clienteId: string | number,
+  cambios: Partial<Cliente>
+): Promise<void> {
+  if (!db) return;
+  try {
+    const rutaRef = doc(db, 'ruta_activa', UID_BOT_MODULAR);
+    const snap = await getDoc(rutaRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const clientes = data.clientes || [];
+    const idx = clientes.findIndex((c: any) => String(c.id) === String(clienteId));
+
+    if (idx >= 0) {
+      // Actualizar el cliente en el array
+      clientes[idx] = {
+        ...clientes[idx],
+        ...cambios,
+        st: cambios.st || clientes[idx].st,
+        hora: cambios.hora || clientes[idx].hora,
+      };
+      await setDoc(rutaRef, {
+        clientes: clientes,
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true });
+      console.log('🔄 Cliente actualizado en ruta_activa (sincronizado con Modular)');
+    }
+  } catch (e: any) {
+    console.error('❌ Error actualizando cliente en ruta_activa:', e);
+  }
+}
+
+/**
+ * Sincronizar TODA la lista de clientes desde V2 hacia ruta_activa.
+ * Útil cuando importas Excel en V2 y quieres que el Modular lo vea.
+ */
+export async function publicarClientesEnRutaActiva(
+  userId: string,
+  clientes: Cliente[]
+): Promise<void> {
+  if (!db) return;
+  try {
+    const rutaRef = doc(db, 'ruta_activa', UID_BOT_MODULAR);
+    const clientesFormateados = clientes.map((c, idx) => ({
+      idx: idx,
+      id: c.id,
+      nombre: c.nombre || 'Cliente',
+      cel: _botCel(c.cel || ''),
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      precio: parseFloat(String(c.precio || 0)),
+      prod: c.prod || '',
+      dir: c.dir || '',
+      dist: c.dist || '',
+      st: c.st || 'pendiente',
+      nota: c.nota || '',
+      obs: c.obs || '',
+      hora: c.hora || '',
+    }));
+
+    await setDoc(rutaRef, {
+      activa: true,
+      actualizadaAt: new Date().toISOString(),
+      clientes: clientesFormateados,
+      totalClientes: clientes.length,
+      pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
+    }, { merge: true });
+
+    console.log('🔄 Clientes publicados en ruta_activa (sincronizados con Modular):', clientes.length);
+  } catch (e: any) {
+    console.error('❌ Error publicando clientes en ruta_activa:', e);
   }
 }
 
