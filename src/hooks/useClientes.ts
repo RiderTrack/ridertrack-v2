@@ -10,6 +10,7 @@ import {
   guardarClientes,
   importarExcel,
   subscribeToRutaActiva,
+  subscribeToClientesRegistrados,
   actualizarClienteEnRutaActiva,
   publicarClientesEnRutaActiva,
 } from '../services/firestore';
@@ -21,12 +22,33 @@ export function useClientes() {
   const [loading, setLoading] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
 
-  // Flag para evitar loop infinito: cuando V2 actualiza, no queremos
-  // que el listener de ruta_activa sobrescriba inmediatamente
+  // Refs para guardar los datos de cada listener por separado
+  const clientesRutaRef = useRef<Cliente[]>([]);
+  const clientesRegistradosRef = useRef<Cliente[]>([]);
   const actualizandoDesdeV2 = useRef(false);
 
-  // 🔄 Escuchar ruta_activa (fuente de verdad - mismo lugar que el Modular)
-  // Solo un listener, evita race conditions
+  // 🔄 Combinar clientes de ambas fuentes
+  const combinarClientes = useCallback(() => {
+    // Si hay clientes en ruta_activa (ruta del día actual), usar esos
+    if (clientesRutaRef.current.length > 0) {
+      setClientes(clientesRutaRef.current);
+      setLoading(false);
+      return;
+    }
+    // Si no, usar clientes_registrados (todos los históricos del Modular)
+    if (clientesRegistradosRef.current.length > 0) {
+      setClientes(clientesRegistradosRef.current);
+      setLoading(false);
+      return;
+    }
+    // Si no hay en ninguno, mantener vacío
+    setClientes([]);
+    setLoading(false);
+  }, []);
+
+  // 🔄 Escuchar AMBAS colecciones del Modular:
+  // 1. ruta_activa (ruta del día actual)
+  // 2. clientes_registrados (todos los clientes históricos)
   useEffect(() => {
     if (!user) {
       setClientes([]);
@@ -36,34 +58,35 @@ export function useClientes() {
 
     setLoading(true);
 
-    const unsubscribe = subscribeToRutaActiva(
+    // 1. Escuchar ruta_activa (clientes del día actual)
+    const unsubRuta = subscribeToRutaActiva(
       (clientesModular) => {
-        // Si V2 está actualizando (boton guardar), ignorar el snapshot
-        // porque ya tenemos los datos actualizados localmente
-        if (actualizandoDesdeV2.current) {
+        clientesRutaRef.current = clientesModular;
+        if (!actualizandoDesdeV2.current) {
+          combinarClientes();
+        } else {
           actualizandoDesdeV2.current = false;
-          // Aun asi actualizamos con lo que viene del Modular (por si hubo cambios)
-          if (clientesModular.length > 0) {
-            setClientes(clientesModular);
-          }
-          setLoading(false);
-          return;
-        }
-
-        // Cargar clientes del Modular (fuente de verdad)
-        setClientes(clientesModular);
-        setLoading(false);
-
-        // Guardar en V2 como respaldo (opcional)
-        if (clientesModular.length > 0) {
-          guardarClientes(user.uid, clientesModular);
         }
       },
       () => setLoading(false)
     );
 
-    return () => unsubscribe();
-  }, [user]);
+    // 2. Escuchar clientes_registrados (todos los clientes históricos)
+    const unsubRegistrados = subscribeToClientesRegistrados(
+      (clientesRegistrados) => {
+        clientesRegistradosRef.current = clientesRegistrados;
+        if (!actualizandoDesdeV2.current) {
+          combinarClientes();
+        }
+      },
+      () => setLoading(false)
+    );
+
+    return () => {
+      unsubRuta();
+      unsubRegistrados();
+    };
+  }, [user, combinarClientes]);
 
   // Guardar clientes en ruta_activa Y en V2 (respaldo)
   const guardar = useCallback(async (nuevosClientes: Cliente[]) => {

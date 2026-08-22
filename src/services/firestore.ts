@@ -289,6 +289,62 @@ export function subscribeToRutaActiva(
 }
 
 /**
+ * Escuchar TODOS los clientes registrados del Modular.
+ * El Modular guarda en: clientes_registrados/{telefono}
+ *
+ * Esta colección tiene TODOS los clientes históricos (no solo los de hoy).
+ * Útil cuando ruta_activa está vacío o la ruta ya terminó.
+ */
+export function subscribeToClientesRegistrados(
+  onUpdate: (clientes: Cliente[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  try {
+    const q = query(collection(db, 'clientes_registrados'), orderBy('registradoAt', 'desc'), limit(200));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const clientes: Cliente[] = [];
+        snapshot.forEach((docSnap) => {
+          const c = docSnap.data();
+          clientes.push({
+            id: c.telefono || docSnap.id,
+            num: clientes.length + 1,
+            nombre: c.nombre || '',
+            cel: c.telefono || '',
+            prod: c.prod || '',
+            precio: parseFloat(String(c.cobrar || 0)),
+            cobrar: parseFloat(String(c.cobrar || 0)),
+            dir: c.dir || '',
+            dist: c.dist || '',
+            obs: '',
+            st: c.st || 'pendiente',
+            mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '',
+            hora: '',
+            nota: '',
+          });
+        });
+        console.log('🔄 Clientes registrados del Modular cargados:', clientes.length);
+        onUpdate(clientes);
+      },
+      (err) => {
+        console.error('❌ Error escuchando clientes_registrados:', err);
+        onError?.(err);
+      }
+    );
+  } catch (e: any) {
+    console.error('Error subscribeToClientesRegistrados:', e);
+    onError?.(e);
+    return () => {};
+  }
+}
+
+/**
  * Actualizar un cliente específico en ruta_activa (para que el Modular lo vea).
  * Se llama cuando V2 cambia el estado de un cliente.
  */
