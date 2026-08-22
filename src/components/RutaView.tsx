@@ -1492,8 +1492,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               }
             }}
             disabled={sincronizando}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
           >
             {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🏁'}
             FINALIZAR RUTA
@@ -1511,7 +1510,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               }
             }}
             disabled={sincronizando}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400"
           >
             {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '💾'}
             GUARDAR Y CERRAR RUTA
@@ -1530,7 +1529,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               }
             }}
             disabled={sincronizando}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400"
           >
             {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🗑️'}
             LIMPIAR SIN GUARDAR
