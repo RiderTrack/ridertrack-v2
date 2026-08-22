@@ -206,6 +206,52 @@ export function useClientes() {
     }
   }, [user]);
 
+  // 🚀 OPTIMIZAR RUTA: ordena clientes por distrito (mismo distrito juntos)
+  // Esto minimiza la distancia recorrida al agrupar entregas por zona
+  const optimizarRuta = useCallback(async () => {
+    if (clientes.length === 0) return 0;
+    setSincronizando(true);
+    try {
+      // Ordenar por distrito (alfabético) manteniendo el orden original dentro de cada distrito
+      const optimizados = [...clientes].sort((a, b) => {
+        const distA = (a.dist || '').toLowerCase().trim();
+        const distB = (b.dist || '').toLowerCase().trim();
+        if (distA && !distB) return -1;  // a con distrito primero
+        if (!distA && distB) return 1;   // b con distrito primero
+        return distA.localeCompare(distB);
+      });
+
+      // Reasignar números de orden (1, 2, 3...)
+      const conNuevoOrden = optimizados.map((c, idx) => ({
+        ...c,
+        num: idx + 1,
+      }));
+
+      await guardar(conNuevoOrden);
+      return conNuevoOrden.length;
+    } finally {
+      setSincronizando(false);
+    }
+  }, [clientes, guardar]);
+
+  // ⬆️⬇️ MOVER CLIENTE: cambia el orden de un cliente (arriba/abajo)
+  const moverCliente = useCallback((id: string | number, direccion: 'arriba' | 'abajo') => {
+    const idx = clientes.findIndex(c => c.id === id);
+    if (idx === -1) return;
+
+    const nuevoIdx = direccion === 'arriba' ? idx - 1 : idx + 1;
+    if (nuevoIdx < 0 || nuevoIdx >= clientes.length) return;
+
+    const nuevos = [...clientes];
+    const temp = nuevos[idx];
+    nuevos[idx] = nuevos[nuevoIdx];
+    nuevos[nuevoIdx] = temp;
+
+    // Reasignar números de orden
+    const conNuevoOrden = nuevos.map((c, i) => ({ ...c, num: i + 1 }));
+    guardar(conNuevoOrden);
+  }, [clientes, guardar]);
+
   // Estadísticas
   const stats = useMemo(() => {
     const total = clientes.length;
@@ -243,5 +289,7 @@ export function useClientes() {
     finalizarRutaActual,
     guardarYCerrarRutaActual,
     limpiarRuta,
+    optimizarRuta,
+    moverCliente,
   };
 }

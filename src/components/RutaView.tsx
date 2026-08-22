@@ -38,7 +38,7 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente } = useClientes();
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
@@ -352,6 +352,23 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               <span>Sync</span>
             </button>
             <button
+              onClick={async () => {
+                if (!confirm('🚀 ¿Optimizar ruta?\n\nSe ordenarán los clientes por distrito (mismo distrito juntos) para minimizar la distancia recorrida.\n\nSe reasignarán los números de orden (1, 2, 3...).')) return;
+                try {
+                  const count = await optimizarRuta();
+                  onShowToast?.('🚀 Ruta optimizada', `${count} clientes ordenados por distrito`, 'success');
+                } catch (e: any) {
+                  onShowToast?.('❌ Error', e.message || 'No se pudo optimizar', 'error');
+                }
+              }}
+              disabled={sincronizando || clientes.length === 0}
+              className="flex items-center gap-1 px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
+              title="Optimizar ruta por distrito"
+            >
+              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+              <span>Ruta</span>
+            </button>
+            <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
               className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
             >
@@ -562,6 +579,25 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">
+                      {/* Botones de mover (arriba/abajo) */}
+                      <div className="flex gap-0.5 mr-1">
+                        <button
+                          onClick={() => moverCliente(c.id, 'arriba')}
+                          disabled={clientesFiltrados.findIndex(cc => cc.id === c.id) === 0}
+                          className="flex items-center px-1.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-md border border-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Mover arriba"
+                        >
+                          <ChevronUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => moverCliente(c.id, 'abajo')}
+                          disabled={clientesFiltrados.findIndex(cc => cc.id === c.id) === clientesFiltrados.length - 1}
+                          className="flex items-center px-1.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-md border border-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Mover abajo"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      </div>
                       {c.cel && (
                         <>
                           <button
