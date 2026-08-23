@@ -27,10 +27,12 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Settings,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
+import { ConfigCuentasModal } from './ConfigCuentasModal';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -53,6 +55,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
   const [numTemporal, setNumTemporal] = useState('');
+
+  // Estado para modal de configuración de cuentas
+  const [mostrarConfigCuentas, setMostrarConfigCuentas] = useState(false);
 
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
@@ -400,6 +405,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
             >
               <Plus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setMostrarConfigCuentas(true)}
+              className="flex items-center gap-1 px-2.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg text-[11px] font-bold transition-all active:scale-95"
+              title="Configurar cuentas bancarias"
+            >
+              <Settings className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -1681,6 +1693,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 🏦 Modal de configuración de cuentas bancarias */}
+      {mostrarConfigCuentas && (
+        <ConfigCuentasModal
+          onClose={() => setMostrarConfigCuentas(false)}
+          onShowToast={onShowToast}
+        />
       )}
     </div>
   );
