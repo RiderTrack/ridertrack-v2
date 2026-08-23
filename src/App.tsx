@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage } from './types';
 import {
   INITIAL_DRIVERS,
@@ -84,6 +85,18 @@ export default function App() {
       root.classList.remove('light');
     }
   }, [theme]);
+
+  // 🔐 Inicializar GoogleAuth plugin (solo en APK)
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+        GoogleAuth.initialize();
+        console.log('✅ GoogleAuth inicializado en APK');
+      }).catch(err => {
+        console.error('❌ Error inicializando GoogleAuth:', err);
+      });
+    }
+  }, []);
 
   // Order Handlers
   const handleCreateOrder = (newOrder: Order) => {

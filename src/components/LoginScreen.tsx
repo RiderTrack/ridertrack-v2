@@ -40,9 +40,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
     setError('');
 
     try {
-      if (isAPK && (window as any).Capacitor?.Plugins?.GoogleAuth) {
-        // APK: usar Capacitor GoogleAuth
-        const GoogleAuth = (window as any).Capacitor.Plugins.GoogleAuth;
+      if (isAPK) {
+        // APK: usar Capacitor GoogleAuth plugin
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         await GoogleAuth.signOut().catch(() => {});
         const googleUser = await GoogleAuth.signIn();
         const result = await loginConGoogleAPK(googleUser);
