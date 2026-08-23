@@ -826,3 +826,34 @@ export async function subirFotoPago(
   console.log('✅ Foto subida a Storage:', ruta);
   return url;
 }
+
+/**
+ * Sube una foto de evidencia de entrega a Firebase Storage.
+ * Ruta: entregas/{uid}/{clienteId}_{timestamp}.jpg
+ */
+export async function subirFotoEntrega(
+  uid: string,
+  clienteId: string | number,
+  file: File | Blob
+): Promise<string> {
+  if (!storage) throw new Error('Storage no inicializado');
+
+  const timestamp = Date.now();
+  const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
+  const refImg = storageRef(storage, ruta);
+
+  await uploadBytes(refImg, file, {
+    contentType: 'image/jpeg',
+    customMetadata: {
+      clienteId: String(clienteId),
+      uid: uid,
+      fecha: new Date().toISOString(),
+      tipo: 'entrega',
+    },
+  });
+
+  const url = await getDownloadURL(refImg);
+  console.log('✅ Foto de entrega subida:', ruta);
+  return url;
+}

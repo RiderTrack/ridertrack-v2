@@ -17,6 +17,7 @@ import { DriversView } from './components/DriversView';
 import { LiveMap } from './components/LiveMap';
 import { WhatsAppView } from './components/WhatsAppView';
 import { AnalyticsView } from './components/AnalyticsView';
+import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
 import { MediosView } from './components/MediosView';
@@ -366,7 +367,7 @@ export default function App() {
             />
           )}
 
-          {(activeTab === 'reportes' || activeTab === 'estadisticas') && <AnalyticsView />}
+          {activeTab === 'estadisticas' && <ResumenView />}
 
           {activeTab === 'configuracion' && <SettingsView onShowToast={showToast} />}
           {activeTab === 'medios' && <MediosView />}

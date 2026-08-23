@@ -8,14 +8,13 @@ import {
   MapPin,
   MessageSquare,
   BarChart2,
-  TrendingUp,
   Settings,
   User,
   ChevronLeft,
   ChevronRight,
   X,
   Music,
-  Radio,
+  PieChart,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 
@@ -92,8 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       titulo: 'Análisis',
       items: [
-        { id: 'reportes', label: 'Reportes', icon: BarChart2 },
-        { id: 'estadisticas', label: 'Estadísticas', icon: TrendingUp },
+        { id: 'estadisticas', label: 'Resumen del día', icon: PieChart },
       ],
     },
     {

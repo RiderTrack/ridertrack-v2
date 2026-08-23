@@ -31,6 +31,7 @@ import {
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
+import { FotoEntregaModal } from './FotoEntregaModal';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -53,6 +54,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
   const [numTemporal, setNumTemporal] = useState('');
+
+  // Estado para modal de foto de entrega
+  const [fotoEntregaCliente, setFotoEntregaCliente] = useState<Cliente | null>(null);
 
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
@@ -660,6 +664,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           ))}
                         </div>
                       </div>
+
+                    {/* Botón Foto de entrega */}
+                    <button
+                      onClick={() => setFotoEntregaCliente(c)}
+                      className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-md text-[10px] font-bold transition-all active:scale-95"
+                    >
+                      <Camera className="w-3 h-3" />
+                      {c.fotoUrl ? '📷 Ver/Cambiar foto de entrega' : '📷 Foto de entrega'}
+                    </button>
 
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">
@@ -1681,6 +1694,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </div>
           </div>
         </div>
+      )}
+      {/* 📷 Modal de foto de entrega */}
+      {fotoEntregaCliente && (
+        <FotoEntregaModal
+          cliente={fotoEntregaCliente}
+          onClose={() => setFotoEntregaCliente(null)}
+          onShowToast={onShowToast}
+        />
       )}
     </div>
   );

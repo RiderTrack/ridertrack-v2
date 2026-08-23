@@ -16,6 +16,7 @@ import {
   finalizarRuta,
   guardarYCerrarRuta,
   limpiarRutaSinGuardar,
+  subirFotoEntrega,
 } from '../services/firestore';
 import { useAuth } from './useAuth';
 
@@ -275,6 +276,29 @@ export function useClientes() {
     guardar(conNuevoOrden);
   }, [clientes, guardar]);
 
+  // 📷 GUARDAR FOTO DE ENTREGA: sube a Storage y actualiza el cliente
+  const guardarFotoEntrega = useCallback(async (clienteId: string | number, file: File | Blob): Promise<string> => {
+    if (!user) throw new Error('No hay sesión activa');
+    setSincronizando(true);
+    try {
+      // 1. Subir foto a Storage
+      const fotoUrl = await subirFotoEntrega(user.uid, clienteId, file);
+
+      // 2. Actualizar el cliente con la URL de la foto
+      const nuevos = clientes.map(c =>
+        c.id === clienteId ? { ...c, fotoUrl } : c
+      );
+      await guardar(nuevos);
+
+      // 3. También actualizar en ruta_activa (sincronización con Modular)
+      await actualizarClienteEnRutaActiva(user.uid, clienteId, { fotoUrl } as any);
+
+      return fotoUrl;
+    } finally {
+      setSincronizando(false);
+    }
+  }, [user, clientes, guardar]);
+
   // Estadísticas
   const stats = useMemo(() => {
     const total = clientes.length;
@@ -315,5 +339,6 @@ export function useClientes() {
     optimizarRuta,
     moverCliente,
     editarNumeroOrden,
+    guardarFotoEntrega,
   };
 }
