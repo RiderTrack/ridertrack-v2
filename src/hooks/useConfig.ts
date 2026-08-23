@@ -18,7 +18,6 @@ export function useConfig() {
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
 
-  // Cargar configuración al montar
   useEffect(() => {
     if (!user) {
       setConfig(CONFIG_CUENTAS_DEFAULT);
@@ -39,7 +38,6 @@ export function useConfig() {
       });
   }, [user]);
 
-  // Guardar configuración completa
   const guardar = useCallback(async (nuevaConfig: ConfigCuentas) => {
     if (!user) return;
     setGuardando(true);
@@ -55,7 +53,6 @@ export function useConfig() {
     }
   }, [user]);
 
-  // Actualizar una sección específica (yape, bcp, bbva, etc.)
   const actualizarSeccion = useCallback((seccion: keyof ConfigCuentas, datos: any) => {
     setConfig(prev => ({
       ...prev,

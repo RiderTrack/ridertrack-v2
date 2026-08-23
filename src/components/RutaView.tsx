@@ -27,12 +27,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Settings,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
-import { ConfigCuentasModal } from './ConfigCuentasModal';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -55,9 +53,6 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
   const [numTemporal, setNumTemporal] = useState('');
-
-  // Estado para modal de configuración de cuentas
-  const [mostrarConfigCuentas, setMostrarConfigCuentas] = useState(false);
 
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
@@ -352,14 +347,6 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
               <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
               Mi Ruta
-              {/* Botón configuración cuentas bancarias */}
-              <button
-                onClick={() => setMostrarConfigCuentas(true)}
-                className="flex items-center justify-center w-7 h-7 bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 rounded-lg transition-all active:scale-90"
-                title="Configurar cuentas bancarias"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
               {/* Badge de sincronización con Modular */}
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-[9px] text-emerald-400 font-bold">
                 <span className={`w-1.5 h-1.5 rounded-full ${sincronizando ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
@@ -1694,14 +1681,6 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* 🏦 Modal de configuración de cuentas bancarias */}
-      {mostrarConfigCuentas && (
-        <ConfigCuentasModal
-          onClose={() => setMostrarConfigCuentas(false)}
-          onShowToast={onShowToast}
-        />
       )}
     </div>
   );

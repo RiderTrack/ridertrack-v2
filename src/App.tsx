@@ -19,6 +19,7 @@ import { WhatsAppView } from './components/WhatsAppView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
+import { MediosView } from './components/MediosView';
 import { WhatsAppModal } from './components/WhatsAppModal';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
@@ -367,7 +368,8 @@ export default function App() {
 
           {(activeTab === 'reportes' || activeTab === 'estadisticas') && <AnalyticsView />}
 
-          {activeTab === 'configuracion' && <SettingsView />}
+          {activeTab === 'configuracion' && <SettingsView onShowToast={showToast} />}
+          {activeTab === 'medios' && <MediosView />}
 
           {activeTab === 'perfil' && <ProfileView />}
         </main>

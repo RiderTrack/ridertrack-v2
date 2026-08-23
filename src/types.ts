@@ -9,6 +9,7 @@ export type NavigationTab =
   | 'reportes'
   | 'estadisticas'
   | 'configuracion'
+  | 'medios'
   | 'perfil';
 
 export type ThemeMode = 'dark' | 'light';

@@ -571,77 +571,23 @@ export async function publicarClientesEnRutaActiva(
 // ═══════════════════════════════════════════════════════════
 
 export interface ConfigCuentas {
-  yape?: {
-    nombre: string;
-    telefono: string;
-    qrUrl?: string;
-    qrBase64?: string;
-  };
-  bcp?: {
-    titular: string;
-    cci: string;
-    numero: string;
-  };
-  bbva?: {
-    titular: string;
-    cci: string;
-    numero: string;
-  };
-  interbank?: {
-    titular: string;
-    cci: string;
-    numero: string;
-  };
-  plin?: {
-    nombre: string;
-    telefono: string;
-  };
-  // Datos de la empresa
-  empresa?: {
-    nombre: string;
-    telefono: string;
-    direccion: string;
-  };
+  yape?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
+  bcp?: { titular: string; cci: string; numero: string; };
+  bbva?: { titular: string; cci: string; numero: string; };
+  interbank?: { titular: string; cci: string; numero: string; };
+  plin?: { nombre: string; telefono: string; };
+  empresa?: { nombre: string; telefono: string; direccion: string; };
 }
 
-// Configuración por defecto (Rudy / MATE)
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
-  yape: {
-    nombre: 'Rudy Alen',
-    telefono: '999999999',
-    qrUrl: '',
-  },
-  bcp: {
-    titular: 'Rudy Alen',
-    cci: '002-999-999999999999-99',
-    numero: '999-99999999-9-99',
-  },
-  bbva: {
-    titular: 'Rudy Alen',
-    cci: '011-999-000000000000-00',
-    numero: '0011-9999-9900000000',
-  },
-  interbank: {
-    titular: 'Rudy Alen',
-    cci: '003-000-999999999-99',
-    numero: '999-999999999-99',
-  },
-  plin: {
-    nombre: 'Rudy Alen',
-    telefono: '999999999',
-  },
-  empresa: {
-    nombre: 'MATE',
-    telefono: '+51999999999',
-    direccion: 'Lima, Perú',
-  },
+  yape: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
+  bcp: { titular: 'Rudy Alen', cci: '002-999-999999999999-99', numero: '999-99999999-9-99' },
+  bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
+  interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
+  plin: { nombre: 'Rudy Alen', telefono: '999999999' },
+  empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
 };
 
-/**
- * Cargar la configuración de cuentas bancarias desde Firestore.
- * Colección: config_empresa/{uid}
- * Si no existe, retorna la configuración por defecto.
- */
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
   if (!db || !userId) return CONFIG_CUENTAS_DEFAULT;
   try {
@@ -649,7 +595,6 @@ export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas
     const snap = await getDoc(ref);
     if (snap.exists()) {
       const data = snap.data();
-      // Mezclar con defaults para campos que falten
       return {
         ...CONFIG_CUENTAS_DEFAULT,
         ...data,
@@ -668,18 +613,11 @@ export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas
   }
 }
 
-/**
- * Guardar la configuración de cuentas bancarias en Firestore.
- * Colección: config_empresa/{uid}
- */
 export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<void> {
   if (!db || !userId) return;
   try {
     const ref = doc(db, 'config_empresa', userId);
-    await setDoc(ref, {
-      ...config,
-      actualizadoEn: serverTimestamp(),
-    }, { merge: true });
+    await setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true });
     console.log('🏦 Config de cuentas guardada');
   } catch (e: any) {
     console.error('❌ Error guardando config de cuentas:', e);

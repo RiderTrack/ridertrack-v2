@@ -13,8 +13,9 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Circle,
-  X
+  X,
+  Music,
+  Radio,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 
@@ -29,6 +30,19 @@ interface SidebarProps {
   activeDriversCount: number;
 }
 
+interface MenuItem {
+  id: NavigationTab;
+  label: string;
+  icon: any;
+  badge?: string;
+  badgeColor?: string;
+}
+
+interface MenuSection {
+  titulo?: string;
+  items: MenuItem[];
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   onSelectTab,
@@ -39,40 +53,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeOrdersCount,
   activeDriversCount,
 }) => {
-  const menuItems = [
-    { id: 'dashboard' as NavigationTab, label: 'Dashboard', icon: LayoutDashboard },
+  // Secciones del menú
+  const secciones: MenuSection[] = [
     {
-      id: 'ruta' as NavigationTab,
-      label: 'Mi Ruta',
-      icon: Route,
-      badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
-      badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        {
+          id: 'ruta',
+          label: 'Mi Ruta',
+          icon: Route,
+          badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
+        { id: 'pedidos', label: 'Pedidos', icon: Package },
+        { id: 'clientes', label: 'Clientes', icon: Users },
+        {
+          id: 'repartidores',
+          label: 'Repartidores',
+          icon: Bike,
+          badge: `${activeDriversCount}`,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
+      ],
     },
     {
-      id: 'pedidos' as NavigationTab,
-      label: 'Pedidos',
-      icon: Package,
+      titulo: 'Operación',
+      items: [
+        { id: 'mapa', label: 'Mapa en tiempo real', icon: MapPin },
+        {
+          id: 'whatsapp',
+          label: 'WhatsApp API',
+          icon: MessageSquare,
+          badge: 'PRO',
+          badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+        },
+      ],
     },
-    { id: 'clientes' as NavigationTab, label: 'Clientes', icon: Users },
     {
-      id: 'repartidores' as NavigationTab,
-      label: 'Repartidores',
-      icon: Bike,
-      badge: `${activeDriversCount}`,
-      badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      titulo: 'Análisis',
+      items: [
+        { id: 'reportes', label: 'Reportes', icon: BarChart2 },
+        { id: 'estadisticas', label: 'Estadísticas', icon: TrendingUp },
+      ],
     },
-    { id: 'mapa' as NavigationTab, label: 'Mapa en tiempo real', icon: MapPin },
     {
-      id: 'whatsapp' as NavigationTab,
-      label: 'WhatsApp API',
-      icon: MessageSquare,
-      badge: 'PRO',
-      badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      titulo: 'Sistema',
+      items: [
+        { id: 'configuracion', label: 'Configuración', icon: Settings },
+        { id: 'medios', label: 'Medios', icon: Music },
+        { id: 'perfil', label: 'Perfil', icon: User },
+      ],
     },
-    { id: 'reportes' as NavigationTab, label: 'Reportes', icon: BarChart2 },
-    { id: 'estadisticas' as NavigationTab, label: 'Estadísticas', icon: TrendingUp },
-    { id: 'configuracion' as NavigationTab, label: 'Configuración', icon: Settings },
-    { id: 'perfil' as NavigationTab, label: 'Perfil', icon: User },
   ];
 
   const handleTabClick = (tab: NavigationTab) => {
@@ -112,48 +143,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 p-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => handleTabClick(item.id)}
-              title={isCollapsed ? item.label : undefined}
-              className={`group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
-                isActive
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
-              }`}
-            >
-              <Icon
-                className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 ${
-                  isActive ? 'scale-110 text-white' : 'group-hover:scale-105'
-                }`}
-              />
-
-              {!isCollapsed && (
-                <span className="ml-3 truncate font-medium">{item.label}</span>
-              )}
-
-              {!isCollapsed && item.badge && (
-                <span
-                  className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border ${item.badgeColor}`}
+      <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
+        {secciones.map((seccion, sIdx) => (
+          <div key={sIdx} className="space-y-1">
+            {seccion.titulo && !isCollapsed && (
+              <div className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-wider text-slate-500 font-bold">
+                {seccion.titulo}
+              </div>
+            )}
+            {seccion.titulo && isCollapsed && (
+              <div className="border-t border-slate-800 my-2 mx-2"></div>
+            )}
+            {seccion.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleTabClick(item.id)}
+                  title={isCollapsed ? item.label : undefined}
+                  className={`group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+                  }`}
                 >
-                  {item.badge}
-                </span>
-              )}
+                  <Icon
+                    className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 ${
+                      isActive ? 'scale-110 text-white' : 'group-hover:scale-105'
+                    }`}
+                  />
 
-              {/* Tooltip on collapse */}
-              {isCollapsed && (
-                <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
-                  {item.label}
-                </div>
-              )}
-            </button>
-          );
-        })}
+                  {!isCollapsed && (
+                    <span className="ml-3 truncate font-medium">{item.label}</span>
+                  )}
+
+                  {!isCollapsed && item.badge && (
+                    <span
+                      className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border ${item.badgeColor}`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+
+                  {/* Tooltip on collapse */}
+                  {isCollapsed && (
+                    <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
+                      {item.label}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Bottom Profile Section */}

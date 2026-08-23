@@ -17,25 +17,17 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
   const { config, loading, guardando, guardar } = useConfig();
   const [configLocal, setConfigLocal] = useState<ConfigCuentas>(CONFIG_CUENTAS_DEFAULT);
 
-  // Cargar config al montar
   useEffect(() => {
-    if (config) {
-      setConfigLocal(config);
-    }
+    if (config) setConfigLocal(config);
   }, [config]);
 
-  // Actualizar campo
   const actualizarCampo = (seccion: keyof ConfigCuentas, campo: string, valor: string) => {
     setConfigLocal(prev => ({
       ...prev,
-      [seccion]: {
-        ...(prev[seccion] as any),
-        [campo]: valor,
-      },
+      [seccion]: { ...(prev[seccion] as any), [campo]: valor },
     }));
   };
 
-  // Guardar
   const handleGuardar = async () => {
     try {
       await guardar(configLocal);
@@ -57,7 +49,6 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between z-10">
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -77,36 +68,9 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-emerald-400 uppercase font-bold flex items-center gap-1">
               <MapPin className="w-3 h-3" /> Datos de la Empresa
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Nombre empresa</label>
-              <input
-                type="text"
-                value={configLocal.empresa?.nombre || ''}
-                onChange={e => actualizarCampo('empresa', 'nombre', e.target.value)}
-                placeholder="MATE"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Teléfono empresa</label>
-              <input
-                type="tel"
-                value={configLocal.empresa?.telefono || ''}
-                onChange={e => actualizarCampo('empresa', 'telefono', e.target.value)}
-                placeholder="+51999999999"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Dirección empresa</label>
-              <input
-                type="text"
-                value={configLocal.empresa?.direccion || ''}
-                onChange={e => actualizarCampo('empresa', 'direccion', e.target.value)}
-                placeholder="Lima, Perú"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
-              />
-            </div>
+            <CampoInput label="Nombre empresa" value={configLocal.empresa?.nombre || ''} onChange={v => actualizarCampo('empresa', 'nombre', v)} placeholder="MATE" color="emerald" />
+            <CampoInput label="Teléfono empresa" value={configLocal.empresa?.telefono || ''} onChange={v => actualizarCampo('empresa', 'telefono', v)} placeholder="+51999999999" color="emerald" />
+            <CampoInput label="Dirección empresa" value={configLocal.empresa?.direccion || ''} onChange={v => actualizarCampo('empresa', 'direccion', v)} placeholder="Lima, Perú" color="emerald" />
           </div>
 
           {/* YAPE */}
@@ -114,26 +78,8 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-purple-400 uppercase font-bold flex items-center gap-1">
               <Smartphone className="w-3 h-3" /> Yape
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Titular</label>
-              <input
-                type="text"
-                value={configLocal.yape?.nombre || ''}
-                onChange={e => actualizarCampo('yape', 'nombre', e.target.value)}
-                placeholder="Nombre del titular"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-purple-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Teléfono Yape</label>
-              <input
-                type="tel"
-                value={configLocal.yape?.telefono || ''}
-                onChange={e => actualizarCampo('yape', 'telefono', e.target.value)}
-                placeholder="999999999"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-purple-500 outline-none"
-              />
-            </div>
+            <CampoInput label="Titular" value={configLocal.yape?.nombre || ''} onChange={v => actualizarCampo('yape', 'nombre', v)} placeholder="Nombre del titular" color="purple" />
+            <CampoInput label="Teléfono Yape" value={configLocal.yape?.telefono || ''} onChange={v => actualizarCampo('yape', 'telefono', v)} placeholder="999999999" color="purple" />
           </div>
 
           {/* PLIN */}
@@ -141,26 +87,8 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-blue-400 uppercase font-bold flex items-center gap-1">
               <Smartphone className="w-3 h-3" /> Plin
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Titular</label>
-              <input
-                type="text"
-                value={configLocal.plin?.nombre || ''}
-                onChange={e => actualizarCampo('plin', 'nombre', e.target.value)}
-                placeholder="Nombre del titular"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Teléfono Plin</label>
-              <input
-                type="tel"
-                value={configLocal.plin?.telefono || ''}
-                onChange={e => actualizarCampo('plin', 'telefono', e.target.value)}
-                placeholder="999999999"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none"
-              />
-            </div>
+            <CampoInput label="Titular" value={configLocal.plin?.nombre || ''} onChange={v => actualizarCampo('plin', 'nombre', v)} placeholder="Nombre del titular" color="blue" />
+            <CampoInput label="Teléfono Plin" value={configLocal.plin?.telefono || ''} onChange={v => actualizarCampo('plin', 'telefono', v)} placeholder="999999999" color="blue" />
           </div>
 
           {/* BCP */}
@@ -168,36 +96,9 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-sky-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> BCP
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Titular</label>
-              <input
-                type="text"
-                value={configLocal.bcp?.titular || ''}
-                onChange={e => actualizarCampo('bcp', 'titular', e.target.value)}
-                placeholder="Nombre del titular"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-sky-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Número de cuenta</label>
-              <input
-                type="text"
-                value={configLocal.bcp?.numero || ''}
-                onChange={e => actualizarCampo('bcp', 'numero', e.target.value)}
-                placeholder="999-99999999-9-99"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-sky-500 outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">CCI</label>
-              <input
-                type="text"
-                value={configLocal.bcp?.cci || ''}
-                onChange={e => actualizarCampo('bcp', 'cci', e.target.value)}
-                placeholder="002-999-999999999999-99"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-sky-500 outline-none font-mono"
-              />
-            </div>
+            <CampoInput label="Titular" value={configLocal.bcp?.titular || ''} onChange={v => actualizarCampo('bcp', 'titular', v)} placeholder="Nombre del titular" color="sky" />
+            <CampoInput label="Número de cuenta" value={configLocal.bcp?.numero || ''} onChange={v => actualizarCampo('bcp', 'numero', v)} placeholder="999-99999999-9-99" color="sky" mono />
+            <CampoInput label="CCI" value={configLocal.bcp?.cci || ''} onChange={v => actualizarCampo('bcp', 'cci', v)} placeholder="002-999-999999999999-99" color="sky" mono />
           </div>
 
           {/* BBVA */}
@@ -205,36 +106,9 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-blue-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> BBVA
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Titular</label>
-              <input
-                type="text"
-                value={configLocal.bbva?.titular || ''}
-                onChange={e => actualizarCampo('bbva', 'titular', e.target.value)}
-                placeholder="Nombre del titular"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Número de cuenta</label>
-              <input
-                type="text"
-                value={configLocal.bbva?.numero || ''}
-                onChange={e => actualizarCampo('bbva', 'numero', e.target.value)}
-                placeholder="0011-9999-9900000000"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">CCI</label>
-              <input
-                type="text"
-                value={configLocal.bbva?.cci || ''}
-                onChange={e => actualizarCampo('bbva', 'cci', e.target.value)}
-                placeholder="011-999-000000000000-00"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none font-mono"
-              />
-            </div>
+            <CampoInput label="Titular" value={configLocal.bbva?.titular || ''} onChange={v => actualizarCampo('bbva', 'titular', v)} placeholder="Nombre del titular" color="blue" />
+            <CampoInput label="Número de cuenta" value={configLocal.bbva?.numero || ''} onChange={v => actualizarCampo('bbva', 'numero', v)} placeholder="0011-9999-9900000000" color="blue" mono />
+            <CampoInput label="CCI" value={configLocal.bbva?.cci || ''} onChange={v => actualizarCampo('bbva', 'cci', v)} placeholder="011-999-000000000000-00" color="blue" mono />
           </div>
 
           {/* INTERBANK */}
@@ -242,67 +116,52 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-green-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> Interbank
             </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Titular</label>
-              <input
-                type="text"
-                value={configLocal.interbank?.titular || ''}
-                onChange={e => actualizarCampo('interbank', 'titular', e.target.value)}
-                placeholder="Nombre del titular"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-green-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Número de cuenta</label>
-              <input
-                type="text"
-                value={configLocal.interbank?.numero || ''}
-                onChange={e => actualizarCampo('interbank', 'numero', e.target.value)}
-                placeholder="999-999999999-99"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-green-500 outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">CCI</label>
-              <input
-                type="text"
-                value={configLocal.interbank?.cci || ''}
-                onChange={e => actualizarCampo('interbank', 'cci', e.target.value)}
-                placeholder="003-000-999999999-99"
-                className="w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-green-500 outline-none font-mono"
-              />
-            </div>
+            <CampoInput label="Titular" value={configLocal.interbank?.titular || ''} onChange={v => actualizarCampo('interbank', 'titular', v)} placeholder="Nombre del titular" color="green" />
+            <CampoInput label="Número de cuenta" value={configLocal.interbank?.numero || ''} onChange={v => actualizarCampo('interbank', 'numero', v)} placeholder="999-999999999-99" color="green" mono />
+            <CampoInput label="CCI" value={configLocal.interbank?.cci || ''} onChange={v => actualizarCampo('interbank', 'cci', v)} placeholder="003-000-999999999-99" color="green" mono />
           </div>
 
           {/* Botones */}
           <div className="flex gap-2 pt-2 sticky bottom-0 bg-slate-900 border-t border-slate-700 -mx-4 px-4 py-3">
-            <button
-              onClick={onClose}
-              disabled={guardando}
-              className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-            >
+            <button onClick={onClose} disabled={guardando} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all disabled:opacity-50">
               Cancelar
             </button>
-            <button
-              onClick={handleGuardar}
-              disabled={guardando}
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {guardando ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Guardando...
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5" />
-                  Guardar
-                </>
-              )}
+            <button onClick={handleGuardar} disabled={guardando} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+              {guardando ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Guardando...</>) : (<><Save className="w-3.5 h-3.5" /> Guardar</>)}
             </button>
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// Componente auxiliar para inputs con colores
+const CampoInput: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  color?: string;
+  mono?: boolean;
+}> = ({ label, value, onChange, placeholder, color = 'emerald', mono = false }) => {
+  const colorMap: Record<string, string> = {
+    emerald: 'focus:border-emerald-500',
+    purple: 'focus:border-purple-500',
+    blue: 'focus:border-blue-500',
+    sky: 'focus:border-sky-500',
+    green: 'focus:border-green-500',
+  };
+  return (
+    <div>
+      <label className="text-[10px] text-slate-400 uppercase font-bold">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full bg-slate-900 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 ${colorMap[color] || colorMap.emerald} outline-none ${mono ? 'font-mono' : ''}`}
+      />
     </div>
   );
 };
