@@ -50,6 +50,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Estado para edición del número de orden (input local)
+  const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
+  const [numTemporal, setNumTemporal] = useState('');
+
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
 
@@ -541,18 +545,28 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   {expandido ? (
                     <input
                       type="number"
-                      value={c.num || idx + 1}
+                      value={editandoNumId === c.id ? numTemporal : String(c.num || idx + 1)}
                       min="1"
                       max={clientes.length}
                       onClick={e => e.stopPropagation()}
-                      onChange={e => {
-                        const nuevoNum = parseInt(e.target.value);
-                        if (nuevoNum > 0 && nuevoNum <= clientes.length) {
+                      onFocus={e => {
+                        setEditandoNumId(c.id);
+                        setNumTemporal(String(c.num || idx + 1));
+                        e.target.select();
+                      }}
+                      onChange={e => setNumTemporal(e.target.value)}
+                      onBlur={() => {
+                        const nuevoNum = parseInt(numTemporal);
+                        if (nuevoNum > 0 && nuevoNum <= clientes.length && nuevoNum !== (c.num || idx + 1)) {
                           editarNumeroOrden(c.id, nuevoNum);
                           onShowToast?.('🔢 Orden cambiado', `${c.nombre} ahora es #${nuevoNum}`, 'info');
                         }
+                        setEditandoNumId(null);
                       }}
-                      className="w-10 h-7 rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[11px] font-bold text-center outline-none focus:bg-purple-500/30 shrink-0"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      }}
+                      className="w-12 h-7 rounded-md bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[11px] font-bold text-center outline-none focus:bg-purple-500/30 focus:border-purple-500 shrink-0"
                       title="Editar número de orden"
                     />
                   ) : (
