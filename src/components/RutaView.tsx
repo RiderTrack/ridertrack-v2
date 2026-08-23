@@ -352,6 +352,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
               <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
               Mi Ruta
+              {/* Botón configuración cuentas bancarias */}
+              <button
+                onClick={() => setMostrarConfigCuentas(true)}
+                className="flex items-center justify-center w-7 h-7 bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 rounded-lg transition-all active:scale-90"
+                title="Configurar cuentas bancarias"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
               {/* Badge de sincronización con Modular */}
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-[9px] text-emerald-400 font-bold">
                 <span className={`w-1.5 h-1.5 rounded-full ${sincronizando ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
@@ -405,13 +413,6 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
             >
               <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setMostrarConfigCuentas(true)}
-              className="flex items-center gap-1 px-2.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg text-[11px] font-bold transition-all active:scale-95"
-              title="Configurar cuentas bancarias"
-            >
-              <Settings className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
