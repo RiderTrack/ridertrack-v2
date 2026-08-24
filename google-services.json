@@ -1,0 +1,92 @@
+{
+  "project_info": {
+    "project_number": "851606828420",
+    "project_id": "ridertrack-93c8a",
+    "storage_bucket": "ridertrack-93c8a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:851606828420:android:629bddcf15a783cb3e59d1",
+        "android_client_info": {
+          "package_name": "com.ridertrack.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "851606828420-anpvku22r1np0ne7e3dumjm2q35hiblc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ridertrack.app",
+            "certificate_hash": "4d05afe567ef7af769aae4e11a242c4b2191c33b"
+          }
+        },
+        {
+          "client_id": "851606828420-c6fdfdjekbdfbsd15ql2gj9q2f3d3uco.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ridertrack.app",
+            "certificate_hash": "9fd3d5c0c1b6131ffa229d9f94726eb3f8f3c636"
+          }
+        },
+        {
+          "client_id": "851606828420-hjd7plotq91if82s8equroa8lh12ibup.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ridertrack.app",
+            "certificate_hash": "9797047b78f08a4123cdb14512a07df17ebcb578"
+          }
+        },
+        {
+          "client_id": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASJif8iYTU68U3CX8gnQfjDcw1ohnW820"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:851606828420:android:fd7c1255f2fb9c773e59d1",
+        "android_client_info": {
+          "package_name": "com.ridertrack.v2"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASJif8iYTU68U3CX8gnQfjDcw1ohnW820"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
