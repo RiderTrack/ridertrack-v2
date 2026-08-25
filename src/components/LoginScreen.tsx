@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════
-// 📱 LOGIN SCREEN - RiderTrack V2
-// Pantalla de login con Google Auth + Email/Password
+// 📱 LOGIN SCREEN - RiderTrack V2 (VERSIÓN DIAGNÓSTICO)
+// Muestra el código de error REAL de Google en pantalla
+// para identificar exactamente la causa del fallo.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState } from 'react';
@@ -28,20 +29,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [info, setInfo] = useState('');
   const [showForgot, setShowForgot] = useState(false);
 
+  // Interpretar código de error de Google a causa conocida
+  const interpretarError = (code: string, msg: string): string => {
+    const m = msg.toLowerCase();
+    if (code === '10' || m.includes('developer_error'))
+      return 'SHA-1 del APK no coincide con Firebase';
+    if (code === '12500') return 'Config OAuth rechazada por Google (12500)';
+    if (code === '12501' || m.includes('cancel')) return 'Cancelado por el usuario';
+    if (code === '7') return 'Error de red con Google';
+    if (code === '4') return 'Requiere cuenta Google en el dispositivo';
+    if (code === '12502') return 'Login ya en progreso (12502)';
+    if (m.includes('something went wrong')) return 'Google rechazó la config OAuth';
+    if (m.includes('not implemented')) return 'Plugin nativo NO instalado (falta cap sync)';
+    if (m.includes('network')) return 'Sin conexión a internet';
+    return 'Error no catalogado';
+  };
+
   // Login con Google
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError('');
 
     try {
-      // ⚠️ Detección en tiempo real (no confiar solo en el estado inicial)
+      // ⚠️ Detección en tiempo real con la API correcta
       const apk = Capacitor.isNativePlatform();
       console.log('📱 Google login en modo:', apk ? 'APK (plugin nativo)' : 'Web (popup)');
 
       if (apk) {
-        // APK: usar Capacitor GoogleAuth plugin (flujo nativo, igual que el app vieja)
+        // APK: usar Capacitor GoogleAuth plugin (flujo nativo, igual que el APK vieja)
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-        try { await GoogleAuth.signOut(); } catch { /* ignorar: no había sesión */ }
+        try { await GoogleAuth.signOut(); } catch { /* sin sesión previa */ }
         const googleUser = await GoogleAuth.signIn();
         const result = await loginConGoogleAPK(googleUser);
         if (!result.success) throw new Error(result.error);
@@ -52,18 +69,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
       }
     } catch (e: any) {
       console.error('❌ Error Google login completo:', e);
-      const errStr = `${e?.message || ''} ${e?.code || ''} ${JSON.stringify(e || {})}`;
 
-      let msg = 'Error al iniciar con Google';
-      if (errStr.includes('cancel')) msg = 'Inicio cancelado';
-      else if (errStr.includes('network')) msg = 'Sin conexión a internet';
-      // ApiException 10 = DEVELOPER_ERROR → SHA-1 del APK no registrado en Firebase
-      else if (errStr.includes('10:') || errStr.includes('DEVELOPER_ERROR') || errStr.includes('Something went wrong'))
-        msg = 'Config: falta registrar el SHA-1 del APK nuevo (com.ridertrack.v2) en Firebase Console → Configuración del proyecto → Tus apps';
-      else if (errStr.includes('not implemented') || errStr.includes('plugin'))
-        msg = 'El plugin GoogleAuth no está instalado en el APK. Ejecuta: npx cap sync android y recompila';
-      else if (e.message) msg = `Error: ${e.message.substring(0, 140)}`;
-      setError(msg);
+      // ── DIAGNÓSTICO: extraer código y mensaje REAL ──
+      const code = e?.code !== undefined && e?.code !== null ? String(e.code) : '—';
+      const rawMsg = String(e?.message ?? JSON.stringify(e ?? e)).substring(0, 200);
+      const env = Capacitor.isNativePlatform() ? 'APK' : 'Web';
+      const causa = interpretarError(code, rawMsg);
+
+      // Mensaje con TODO el detalle técnico (screenshot de esto!)
+      setError(`[${env} | código ${code}] ${causa} — DETALLE: ${rawMsg}`);
     } finally {
       setLoading(false);
     }
@@ -170,7 +184,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
-                Continuar con Google
+                {loading ? '⏳ Conectando...' : 'Continuar con Google'}
               </button>
 
               {/* Divisor */}
@@ -180,10 +194,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                 <div className="flex-1 h-px bg-slate-800" />
               </div>
 
-              {/* Error */}
+              {/* Error — VERSIÓN DIAGNÓSTICO: muestra código y detalle real */}
               {error && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400">
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 break-words">
                   ⚠️ {error}
+                  <div className="mt-2 pt-2 border-t border-red-500/20 text-red-300/70">
+                    📸 Haz screenshot de este mensaje y envíalo — contiene el código exacto del error.
+                  </div>
                 </div>
               )}
 
