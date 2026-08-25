@@ -56,6 +56,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
       let msg = 'Error al iniciar con Google';
       if (e.message?.includes('cancel')) msg = 'Inicio cancelado';
       if (e.message?.includes('network')) msg = 'Sin conexión a internet';
+      // Mostrar el error completo para diagnosticar
+      console.error('❌ Error Google login:', e);
+      if (e.message) msg = `Error: ${e.message.substring(0, 100)}`;
       setError(msg);
     } finally {
       setLoading(false);
