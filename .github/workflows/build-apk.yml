@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+# ⚠️ EDITA AQUÍ si registras un NUEVO SHA-1 en Firebase Console
+env:
+  FIREBASE_SHA1: "4D:85:AF:E6:56:7E:7F:47:69:9A:E4:E1:1A:24:2C:48:29:19:03:3B"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -95,11 +99,23 @@ jobs:
 
       - name: Restore or generate keystore
         run: |
+          echo "## 🔑 Diagnóstico de firma" >> $GITHUB_STEP_SUMMARY
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "✅ Usando keystore guardado en Secrets"
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            # 🔍 Mostrar el SHA-1 del keystore del secret (para comparar con Firebase)
+            KS_SHA1=$(keytool -list -v -keystore release.keystore -alias ridertrack -storepass ridertrack123 2>/dev/null | grep "SHA1:" | awk '{print $NF}')
+            if [ -n "$KS_SHA1" ]; then
+              echo "- SHA-1 keystore del secret: $KS_SHA1"
+              echo "SHA-1 del keystore (secret): **$KS_SHA1**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ⚠️ No se pudo leer el SHA-1 del keystore (alias/password distintos)"
+              echo "⚠️ No se pudo leer el keystore con alias 'ridertrack' / pass 'ridertrack123'" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "⚠️ No hay KEYSTORE_BASE64 — generando nuevo keystore"
+            echo "### ⚠️ ATENCIÓN: keystore FALLBACK generado" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Este APK NO funcionará con login Google (SHA-1 no registrado en Firebase)" >> $GITHUB_STEP_SUMMARY
             keytool -genkeypair \
               -keystore release.keystore \
               -alias ridertrack \
@@ -122,6 +138,34 @@ jobs:
         run: |
           APKSIGNER=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -1)
           $APKSIGNER sign --ks release.keystore --ks-key-alias ridertrack --ks-pass pass:ridertrack123 --key-pass pass:ridertrack123 --out RiderTrackV2.apk RiderTrackV2-aligned.apk
+
+      - name: Verify APK SHA-1 vs Firebase
+        run: |
+          APKSIGNER=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -1)
+          # Obtener SHA-1 real del APK firmado
+          APK_SHA1=$($APKSIGNER verify --print-certs RiderTrackV2.apk 2>/dev/null | grep -i "SHA-1" | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
+          if [ -z "$APK_SHA1" ]; then
+            APK_SHA1=$(keytool -printcert -jarfile RiderTrackV2.apk 2>/dev/null | grep -i "^SHA1:" | head -1 | awk '{print $NF}')
+          fi
+          echo "SHA-1 del APK firmado: $APK_SHA1"
+          echo "SHA-1 esperado (Firebase): ${{ env.FIREBASE_SHA1 }}"
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Verificación | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA-1 del APK firmado | \`$APK_SHA1\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA-1 registrado en Firebase | \`${{ env.FIREBASE_SHA1 }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$APK_SHA1" = "${{ env.FIREBASE_SHA1 }}" ]; then
+            echo "### ✅ SHA-1 COINCIDE — el login Google debe funcionar" >> $GITHUB_STEP_SUMMARY
+            echo "✅ El SHA-1 del APK coincide con Firebase"
+          else
+            echo "### ❌ SHA-1 NO COINCIDE — el login Google FALLARÁ" >> $GITHUB_STEP_SUMMARY
+            echo "👉 Registra ESTE SHA-1 en Firebase Console → Configuración → app com.ridertrack.v2:" >> $GITHUB_STEP_SUMMARY
+            echo "\`$APK_SHA1\`" >> $GITHUB_STEP_SUMMARY
+            echo "❌ El SHA-1 del APK ($APK_SHA1) NO coincide con Firebase (${{ env.FIREBASE_SHA1 }})"
+          fi
 
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
