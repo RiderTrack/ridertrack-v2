@@ -12,9 +12,23 @@
     "webContentsDebuggingEnabled": true
   },
   "plugins": {
-    "Geolocation": { "permissions": ["location", "coarseLocation"] },
-    "Camera": { "permissions": ["camera", "photos"] },
-    "Filesystem": { "permissions": ["publicStorage"] },
+    "Geolocation": {
+      "permissions": [
+        "location",
+        "coarseLocation"
+      ]
+    },
+    "Camera": {
+      "permissions": [
+        "camera",
+        "photos"
+      ]
+    },
+    "Filesystem": {
+      "permissions": [
+        "publicStorage"
+      ]
+    },
     "Share": {},
     "TextToSpeech": {},
     "App": {},
@@ -31,7 +45,11 @@
       "showSpinner": false
     },
     "GoogleAuth": {
-      "scopes": ["profile", "email"],
+      "scopes": [
+        "profile",
+        "email"
+      ],
+      "clientId": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
       "serverClientId": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
       "forceCodeForRefreshToken": true
     }
