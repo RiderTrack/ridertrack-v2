@@ -67,6 +67,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "851606828420-s68erv0bdldvs6ftluo3s8g7596g4een.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ridertrack.v2",
+            "certificate_hash": "4d85afe6567e7f47699ae4e11a242c482919033b"
+          }
+        },
+        {
           "client_id": "851606828420-rm5mumtplpctk6p4cjh44mnttlnlmbfs.apps.googleusercontent.com",
           "client_type": 3
         }
