@@ -3,6 +3,7 @@
 // Proyecto: ridertrack-93c8a (mismo que Modular y RiderChat)
 // ═══════════════════════════════════════════════════════════
 
+import { Capacitor } from '@capacitor/core';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
@@ -14,6 +15,7 @@ import {
   sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
+  updateProfile,
   User,
 } from 'firebase/auth';
 import {
@@ -58,8 +60,9 @@ try {
   auth = getAuth(app);
 
   // Detectar APK (Capacitor) para usar long polling
-  const isAPK = typeof (window as any).Capacitor !== 'undefined' && (window as any).Capacitor?.isNative;
-  if (isAPK) {
+  // ⚠️ API correcta: Capacitor.isNativePlatform() — "isNative" no existe
+  const isNative = Capacitor.isNativePlatform();
+  if (isNative) {
     console.log('📱 APK detectado - usando long polling');
     db = initializeFirestore(app, { experimentalForceLongPolling: true });
   } else {
@@ -134,8 +137,8 @@ export async function loginConEmail(email: string, password: string) {
 export async function registrarConEmail(email: string, password: string, nombre: string) {
   try {
     const result = await createUserWithEmailAndPassword(auth, email, password);
-    // Guardar nombre en el perfil
-    await result.user.updateProfile({ displayName: nombre });
+    // Guardar nombre en el perfil (API modular de Firebase v10: función externa, no método)
+    await updateProfile(result.user, { displayName: nombre });
     // Guardar datos en Firestore
     await setDoc(doc(db, 'usuarios', result.user.uid), {
       nombre: nombre,
