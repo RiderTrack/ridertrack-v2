@@ -3,7 +3,8 @@
 // Pantalla de login con Google Auth + Email/Password
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   loginConGoogleWeb,
   loginConGoogleAPK,
@@ -26,13 +27,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [showForgot, setShowForgot] = useState(false);
-  const [isAPK, setIsAPK] = useState(false);
-
-  // Detectar si es APK
-  useEffect(() => {
-    const apk = typeof (window as any).Capacitor !== 'undefined' && (window as any).Capacitor?.isNative;
-    setIsAPK(!!apk);
-  }, []);
 
   // Login con Google
   const handleGoogleLogin = async () => {
@@ -40,10 +34,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
     setError('');
 
     try {
-      if (isAPK) {
-        // APK: usar Capacitor GoogleAuth plugin
+      // ⚠️ Detección en tiempo real (no confiar solo en el estado inicial)
+      const apk = Capacitor.isNativePlatform();
+      console.log('📱 Google login en modo:', apk ? 'APK (plugin nativo)' : 'Web (popup)');
+
+      if (apk) {
+        // APK: usar Capacitor GoogleAuth plugin (flujo nativo, igual que el app vieja)
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-        await GoogleAuth.signOut().catch(() => {});
+        try { await GoogleAuth.signOut(); } catch { /* ignorar: no había sesión */ }
         const googleUser = await GoogleAuth.signIn();
         const result = await loginConGoogleAPK(googleUser);
         if (!result.success) throw new Error(result.error);
@@ -53,12 +51,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
         if (!result.success) throw new Error(result.error);
       }
     } catch (e: any) {
+      console.error('❌ Error Google login completo:', e);
+      const errStr = `${e?.message || ''} ${e?.code || ''} ${JSON.stringify(e || {})}`;
+
       let msg = 'Error al iniciar con Google';
-      if (e.message?.includes('cancel')) msg = 'Inicio cancelado';
-      if (e.message?.includes('network')) msg = 'Sin conexión a internet';
-      // Mostrar el error completo para diagnosticar
-      console.error('❌ Error Google login:', e);
-      if (e.message) msg = `Error: ${e.message.substring(0, 100)}`;
+      if (errStr.includes('cancel')) msg = 'Inicio cancelado';
+      else if (errStr.includes('network')) msg = 'Sin conexión a internet';
+      // ApiException 10 = DEVELOPER_ERROR → SHA-1 del APK no registrado en Firebase
+      else if (errStr.includes('10:') || errStr.includes('DEVELOPER_ERROR') || errStr.includes('Something went wrong'))
+        msg = 'Config: falta registrar el SHA-1 del APK nuevo (com.ridertrack.v2) en Firebase Console → Configuración del proyecto → Tus apps';
+      else if (errStr.includes('not implemented') || errStr.includes('plugin'))
+        msg = 'El plugin GoogleAuth no está instalado en el APK. Ejecuta: npx cap sync android y recompila';
+      else if (e.message) msg = `Error: ${e.message.substring(0, 140)}`;
       setError(msg);
     } finally {
       setLoading(false);
