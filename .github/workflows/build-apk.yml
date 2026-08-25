@@ -49,6 +49,28 @@ jobs:
       - name: Sync Capacitor plugins
         run: npx cap sync android
 
+      - name: Copy google-services.json to Android
+        run: |
+          if [ -f google-services.json ]; then
+            cp google-services.json android/app/google-services.json
+            echo "✅ google-services.json copiado a android/app/"
+          else
+            echo "⚠️ google-services.json NO encontrado en la raíz del repo"
+          fi
+
+      - name: Apply Google Services Gradle plugin
+        run: |
+          # Agregar plugin de Google Services al build.gradle del proyecto
+          PROJECT_GRADLE="android/build.gradle"
+          if ! grep -q "com.google.gms.google-services" "$PROJECT_GRADLE"; then
+            sed -i '/buildscript {/a\    repositories { google() mavenCentral() }\n    dependencies { classpath "com.google.gms:google-services:4.4.2" }' "$PROJECT_GRADLE" || true
+          fi
+          # Agregar plugin al build.gradle del módulo app
+          APP_GRADLE="android/app/build.gradle"
+          if ! grep -q "com.google.gms.google-services" "$APP_GRADLE"; then
+            echo 'apply plugin: "com.google.gms.google-services"' >> "$APP_GRADLE"
+          fi
+
       - name: Configure GoogleAuth plugin
         run: |
           mkdir -p android/app/src/main/res/values
