@@ -94,11 +94,24 @@ export async function loginConGoogleWeb() {
 // Login con Google (APK - Capacitor GoogleAuth)
 export async function loginConGoogleAPK(googleUser: any) {
   try {
-    const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+    // El idToken puede venir en diferentes ubicaciones según la versión del plugin
+    const idToken = googleUser?.authentication?.idToken
+      || googleUser?.idToken
+      || googleUser?.authentication?.accessToken
+      || googleUser?.accessToken;
+
+    if (!idToken) {
+      console.error('❌ No se encontró idToken en:', JSON.stringify(googleUser, null, 2));
+      throw new Error('No se pudo obtener el token de Google');
+    }
+
+    console.log('✅ idToken obtenido, long:', idToken.length);
+    const credential = GoogleAuthProvider.credential(idToken);
     const result = await signInWithCredential(auth, credential);
     return { success: true, user: result.user };
   } catch (e: any) {
-    return { success: false, error: e.message };
+    console.error('❌ Error en loginConGoogleAPK:', e);
+    return { success: false, error: e.message || 'Error al conectar con Firebase' };
   }
 }
 
