@@ -57,10 +57,11 @@ service cloud.firestore {
       allow write: if isOwner(userId) || isAdmin();
     }
 
-    // Historial de rutas por rider
-    match /historial_rutas/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
+    // Historial de rutas — v2 guarda con ID "{uid}_{fecha}"
+    // (no es solo el uid), por eso se valida el prefijo con regex
+    match /historial_rutas/{docId} {
+      allow read: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin());
+      allow write: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin());
     }
 
     // Clientes registrados del rider
@@ -69,10 +70,11 @@ service cloud.firestore {
       allow write: if isAuth();  // cualquier rider logueado puede registrar
     }
 
-    // Config de empresa (común para todos)
+    // Config de empresa (cuentas Yape/BCP/etc de cada rider)
+    // v2 guarda config_empresa/{uid} — el rider escribe la SUYA
     match /config_empresa/{docId} {
       allow read: if isAuth();
-      allow write: if isAdmin();
+      allow write: if isOwner(docId) || isAdmin();
     }
 
     // ═══════════════════════════════════════════════════════
