@@ -27,6 +27,7 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './hooks/useAuth';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
+import { YapeQRView } from './components/YapeQRView';
 
 export default function App() {
   // 🔐 Autenticación
@@ -326,6 +327,10 @@ export default function App() {
 
           {activeTab === 'ruta' && (
             <RutaView onShowToast={showToast} />
+          )}
+
+          {activeTab === 'yape' && (
+            <YapeQRView onShowToast={showToast} />
           )}
 
           {activeTab === 'pedidos' && (
