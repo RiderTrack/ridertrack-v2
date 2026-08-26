@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════════════════════
-// 📱 LOGIN SCREEN - RiderTrack V2 (VERSIÓN DIAGNÓSTICO)
-// Muestra el código de error REAL de Google en pantalla
-// para identificar exactamente la causa del fallo.
+// 📱 LOGIN SCREEN - RiderTrack V2
+// Login con Google (web popup + APK nativo) + email/registro/recuperar
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState } from 'react';
@@ -18,6 +17,22 @@ interface LoginScreenProps {
   onSuccess?: () => void;
 }
 
+// Interpretar código de error de Google a causa conocida para mensaje user-friendly
+const interpretarError = (code: string, msg: string): string => {
+  const m = msg.toLowerCase();
+  if (code === '10' || m.includes('developer_error'))
+    return 'Configuración OAuth del APK incompleta. Contacta al administrador.';
+  if (code === '12500') return 'Configuración OAuth rechazada por Google.';
+  if (code === '12501' || m.includes('cancel')) return 'Inicio de sesión cancelado.';
+  if (code === '7') return 'Sin conexión a internet.';
+  if (code === '4') return 'Necesitas una cuenta Google activa en el dispositivo.';
+  if (code === '12502') return 'Ya hay un login en progreso. Espera un momento.';
+  if (m.includes('something went wrong')) return 'Google rechazó la configuración OAuth.';
+  if (m.includes('not implemented')) return 'Plugin nativo no instalado.';
+  if (m.includes('network')) return 'Sin conexión a internet.';
+  return 'No se pudo iniciar sesión con Google. Intenta de nuevo.';
+};
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -29,55 +44,30 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [info, setInfo] = useState('');
   const [showForgot, setShowForgot] = useState(false);
 
-  // Interpretar código de error de Google a causa conocida
-  const interpretarError = (code: string, msg: string): string => {
-    const m = msg.toLowerCase();
-    if (code === '10' || m.includes('developer_error'))
-      return 'SHA-1 del APK no coincide con Firebase';
-    if (code === '12500') return 'Config OAuth rechazada por Google (12500)';
-    if (code === '12501' || m.includes('cancel')) return 'Cancelado por el usuario';
-    if (code === '7') return 'Error de red con Google';
-    if (code === '4') return 'Requiere cuenta Google en el dispositivo';
-    if (code === '12502') return 'Login ya en progreso (12502)';
-    if (m.includes('something went wrong')) return 'Google rechazó la config OAuth';
-    if (m.includes('not implemented')) return 'Plugin nativo NO instalado (falta cap sync)';
-    if (m.includes('network')) return 'Sin conexión a internet';
-    return 'Error no catalogado';
-  };
-
-  // Login con Google
+  // Login con Google (web popup o APK nativo)
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError('');
 
     try {
-      // ⚠️ Detección en tiempo real con la API correcta
       const apk = Capacitor.isNativePlatform();
-      console.log('📱 Google login en modo:', apk ? 'APK (plugin nativo)' : 'Web (popup)');
 
       if (apk) {
-        // APK: usar Capacitor GoogleAuth plugin (flujo nativo, igual que el APK vieja)
+        // APK: Capacitor GoogleAuth plugin (flujo nativo)
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         try { await GoogleAuth.signOut(); } catch { /* sin sesión previa */ }
         const googleUser = await GoogleAuth.signIn();
         const result = await loginConGoogleAPK(googleUser);
         if (!result.success) throw new Error(result.error);
       } else {
-        // Web: usar popup
+        // Web: popup
         const result = await loginConGoogleWeb();
         if (!result.success) throw new Error(result.error);
       }
     } catch (e: any) {
-      console.error('❌ Error Google login completo:', e);
-
-      // ── DIAGNÓSTICO: extraer código y mensaje REAL ──
       const code = e?.code !== undefined && e?.code !== null ? String(e.code) : '—';
-      const rawMsg = String(e?.message ?? JSON.stringify(e ?? e)).substring(0, 200);
-      const env = Capacitor.isNativePlatform() ? 'APK' : 'Web';
-      const causa = interpretarError(code, rawMsg);
-
-      // Mensaje con TODO el detalle técnico (screenshot de esto!)
-      setError(`[${env} | código ${code}] ${causa} — DETALLE: ${rawMsg}`);
+      const rawMsg = String(e?.message ?? JSON.stringify(e ?? e));
+      setError(interpretarError(code, rawMsg));
     } finally {
       setLoading(false);
     }
@@ -194,13 +184,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                 <div className="flex-1 h-px bg-slate-800" />
               </div>
 
-              {/* Error — VERSIÓN DIAGNÓSTICO: muestra código y detalle real */}
+              {/* Error user-friendly */}
               {error && (
                 <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 break-words">
                   ⚠️ {error}
-                  <div className="mt-2 pt-2 border-t border-red-500/20 text-red-300/70">
-                    📸 Haz screenshot de este mensaje y envíalo — contiene el código exacto del error.
-                  </div>
                 </div>
               )}
 
