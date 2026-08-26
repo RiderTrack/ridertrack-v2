@@ -748,7 +748,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           </div>
 
                           <div className="grid grid-cols-2 gap-1.5">
-                            <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'yape_qr'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_yape'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📲</span> Enviar Yape
                             </button>
                             <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95">

@@ -15,6 +15,7 @@ import {
   X,
   Music,
   PieChart,
+  QrCode,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 
@@ -64,6 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
+        { id: 'yape', label: 'Mi QR Yape', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         {
