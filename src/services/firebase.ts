@@ -59,21 +59,17 @@ try {
   app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
   auth = getAuth(app);
 
-  // Detectar APK (Capacitor) para usar long polling
-  // ⚠️ API correcta: Capacitor.isNativePlatform() — "isNative" no existe
+  // Detectar APK (Capacitor) para usar long polling (mejor performance en Android)
   const isNative = Capacitor.isNativePlatform();
   if (isNative) {
-    console.log('📱 APK detectado - usando long polling');
     db = initializeFirestore(app, { experimentalForceLongPolling: true });
   } else {
     db = getFirestore(app);
   }
 
   storage = getStorage(app);
-
-  console.log('✅ Firebase inicializado:', firebaseConfig.projectId);
 } catch (e) {
-  console.error('❌ Error inicializando Firebase:', e);
+  console.error('Error inicializando Firebase:', e);
 }
 
 export { app, auth, db, storage };
@@ -104,16 +100,13 @@ export async function loginConGoogleAPK(googleUser: any) {
       || googleUser?.accessToken;
 
     if (!idToken) {
-      console.error('❌ No se encontró idToken en:', JSON.stringify(googleUser, null, 2));
       throw new Error('No se pudo obtener el token de Google');
     }
 
-    console.log('✅ idToken obtenido, long:', idToken.length);
     const credential = GoogleAuthProvider.credential(idToken);
     const result = await signInWithCredential(auth, credential);
     return { success: true, user: result.user };
   } catch (e: any) {
-    console.error('❌ Error en loginConGoogleAPK:', e);
     return { success: false, error: e.message || 'Error al conectar con Firebase' };
   }
 }
