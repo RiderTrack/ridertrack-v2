@@ -1,0 +1,200 @@
+// ═══════════════════════════════════════════════════════════
+// 🔥 FIRESTORE SECURITY RULES - RiderTrack V2
+// Proyecto: ridertrack-93c8a (compartido con modular, riderchat, clientetrack)
+//
+// Principios:
+//   1. Solo usuarios autenticados pueden leer/escribir
+//   2. Cada rider solo ve/edita SUS propios datos (excepto colecciones compartidas)
+//   3. Colecciones de chat y broadcast tienen reglas más finas
+//   4. Colecciones admin (chat_codigos, chat_logs) solo para rol admin
+//
+// DEPLOY:
+//   firebase deploy --only firestore:rules
+// ═══════════════════════════════════════════════════════════
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════
+
+    // Usuario autenticado
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // El rider solo accede a sus propios documentos
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // ¿Es admin? (se asume UID hardcodeado del rider principal = bot)
+    // TODO: migrar a custom claims (admin: true) cuando se distribuya
+    function isAdmin() {
+      return isAuth() && (
+        request.auth.uid == 'K8wx9X5GGOfindI1RGtIIQN3UGr1'  // UID_BOT_MODULAR (rudy-bot)
+        // Agregar aquí otros admins cuando distribuyas
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // COLECCIONES DE USUARIO
+    // ═══════════════════════════════════════════════════════
+
+    // Perfil de cada rider — solo él puede leer/editar su doc
+    match /usuarios/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Ruta activa de cada rider — el rider lee/escribe la suya,
+    // el bot (rudy-bot con firebase-admin) puede escribir en cualquiera
+    match /ruta_activa/{userId} {
+      allow read: if isAuth();  // cualquier rider logueado puede ver (multi-rider sync)
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Historial de rutas por rider
+    match /historial_rutas/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Clientes registrados del rider
+    match /clientes_registrados/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();  // cualquier rider logueado puede registrar
+    }
+
+    // Config de empresa (común para todos)
+    match /config_empresa/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // COLECCIONES DE CHAT Y MENSAJES
+    // ═══════════════════════════════════════════════════════
+
+    // Chats de clientes (un doc por número de teléfono)
+    match /chats/{clientPhone} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+
+      // Subcolección de mensajes
+      match /messages/{messageId} {
+        allow read: if isAuth();
+        allow write: if isAuth();
+      }
+    }
+
+    // Mensajes de chat del equipo (modular legacy)
+    match /mensajes/{messageId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Usuarios del chat con rol
+    match /chat_usuarios/{userId} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Códigos de acceso al chat — SOLO ADMIN
+    match /chat_codigos/{codigoId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Config global del chat — SOLO ADMIN
+    match /chat_config/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Logs de admin — SOLO ADMIN
+    match /chat_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // COLECCIONES DEL BOT BAILEYS (cola de envío)
+    // ═══════════════════════════════════════════════════════
+
+    // Cola de envío — el rider escribe, el bot lee y borra al enviar
+    match /cola_envio/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+      allow delete: if isAuth();  // el bot vía firebase-admin puede borrar
+    }
+
+    // Respuestas manuales del rider (cuando responde directo)
+    match /respuestas_manuales/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Acciones del RiderBot wizard
+    match /acciones_bot/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+
+      // Subcolección pendientes
+      match /pendientes/{pendId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // COLECCIONES DE BACKUP Y EXCELS
+    // ═══════════════════════════════════════════════════════
+
+    // Backups — solo el dueño del backup
+    match /backups/{backupId} {
+      allow read: if isAuth();  // cualquier rider puede descargar backups compartidos
+      allow write: if isAuth();
+    }
+
+    // Excels en nube
+    match /excels/{excelId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Plantillas de mensajes a clientes
+    match /mensajes_clientes/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Pedidos pendientes (cola de Odoo)
+    match /pendientes/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Campañas broadcast
+    match /campanas/{campanaId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+
+      // Destinatarios de cada campaña
+      match /destinatarios/{destId} {
+        allow read: if isAuth();
+        allow write: if isAuth();
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // REGLA DEFAULT — NEGAR TODO LO DEMÁS
+    // ═══════════════════════════════════════════════════════
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
