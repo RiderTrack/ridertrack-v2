@@ -17,7 +17,6 @@ import { CustomersView } from './components/CustomersView';
 import { DriversView } from './components/DriversView';
 import { LiveMap } from './components/LiveMap';
 import { WhatsAppView } from './components/WhatsAppView';
-import { AnalyticsView } from './components/AnalyticsView';
 import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
@@ -91,9 +90,8 @@ export default function App() {
     if (Capacitor.isNativePlatform()) {
       import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
         GoogleAuth.initialize();
-        console.log('✅ GoogleAuth inicializado en APK');
       }).catch(err => {
-        console.error('❌ Error inicializando GoogleAuth:', err);
+        console.error('Error inicializando GoogleAuth:', err);
       });
     }
   }, []);
