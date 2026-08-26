@@ -626,6 +626,74 @@ export async function guardarConfigCuentas(userId: string, config: ConfigCuentas
 }
 
 // ═══════════════════════════════════════════════════════════
+// 💜 QR YAPE — SINCRONIZACIÓN CON EL BOT
+// ═══════════════════════════════════════════════════════════
+// El bot (rudy-bot, index.js → enviarYapeConImagen) lee el QR
+// desde Firestore: ruta_activa/{uid}.yape.qrBase64 / .qrUrl
+// y lo envía como imagen + plantilla yapeQR por WhatsApp.
+// Este shape es EXACTAMENTE el mismo que usaba el Rider modular.
+
+export interface YapeBotConfig {
+  qrBase64?: string;   // imagen del QR (data URI, máx ~900KB para Firestore)
+  qrUrl?: string;      // alternativa: URL pública del QR
+  numero: string;      // número Yape (9 dígitos)
+  titular: string;     // nombre del titular
+  cci?: string;        // CCI opcional (compatible con el modular)
+  bancos?: string;     // info de bancos opcional (compatible con el modular)
+}
+
+/**
+ * Sincroniza la config de Yape (QR + datos) a ruta_activa/{uid}.yape
+ * para que el bot pueda enviar el QR por WhatsApp.
+ * Usa merge:true → NO toca clientes ni otros campos de la ruta.
+ */
+export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await setDoc(doc(db, 'ruta_activa', userId), {
+      yape: {
+        qrBase64: yape.qrBase64 || '',
+        qrUrl: yape.qrUrl || '',
+        numero: yape.numero || '',
+        titular: yape.titular || '',
+        cci: yape.cci || '',
+        bancos: yape.bancos || '',
+      },
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (e: any) {
+    console.error('❌ Error sincronizando Yape al bot:', e);
+    throw e;
+  }
+}
+
+/**
+ * Lee la config de Yape que el bot ve (ruta_activa/{uid}.yape).
+ * Sirve para mostrar el estado de sincronización en la pantalla de QR.
+ */
+export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig | null> {
+  if (!db || !userId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'ruta_activa', userId));
+    if (snap.exists() && snap.data().yape) {
+      const y = snap.data().yape;
+      return {
+        qrBase64: y.qrBase64 || '',
+        qrUrl: y.qrUrl || '',
+        numero: y.numero || '',
+        titular: y.titular || '',
+        cci: y.cci || '',
+        bancos: y.bancos || '',
+      };
+    }
+    return null;
+  } catch (e: any) {
+    console.error('❌ Error leyendo Yape del bot:', e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 🤖 ACCIONES DEL BOT (para Baileys)
 // ═══════════════════════════════════════════════════════════
 
