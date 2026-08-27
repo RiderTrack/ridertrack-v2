@@ -16,8 +16,17 @@ import {
   Radio,
   ChevronRight,
   Loader2,
+  MapPin,
+  KeyRound,
+  Trash2,
 } from 'lucide-react';
 import { ConfigCuentasModal } from './ConfigCuentasModal';
+import {
+  getGoogleApiKey,
+  setGoogleApiKey,
+  tamanoCache,
+  limpiarCacheGeocodificacion,
+} from '../services/geocoding';
 
 interface SettingsViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -25,6 +34,46 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
   const [modalAbierto, setModalAbierto] = useState<'cuentas' | null>(null);
+
+  // ── Mapas y Rutas (Fase 1.3) ──
+  const [mapasAbierto, setMapasAbierto] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(getGoogleApiKey());
+  const [motor, setMotor] = useState<'google' | 'nominatim'>(
+    getGoogleApiKey() ? 'google' : 'nominatim'
+  );
+  const [cacheN, setCacheN] = useState(0);
+
+  const abrirMapas = () => {
+    setApiKeyInput(getGoogleApiKey());
+    setMotor(getGoogleApiKey() ? 'google' : 'nominatim');
+    setCacheN(tamanoCache());
+    setMapasAbierto((v) => !v);
+  };
+
+  const guardarApiKey = () => {
+    setGoogleApiKey(apiKeyInput);
+    const nuevoMotor = apiKeyInput.trim() ? 'google' : 'nominatim';
+    setMotor(nuevoMotor);
+    if (apiKeyInput.trim()) {
+      onShowToast?.(
+        '🗺️ Google Geocoding activado',
+        'Las direcciones se ubicarán con Google (más precisión). Funciona en la próxima optimización de ruta.',
+        'success'
+      );
+    } else {
+      onShowToast?.('🌐 Google desactivado', 'Se vuelve al motor gratis Nominatim (OpenStreetMap)', 'info');
+    }
+  };
+
+  const limpiarCache = () => {
+    const n = limpiarCacheGeocodificacion();
+    setCacheN(0);
+    onShowToast?.(
+      '🧹 Caché limpiada',
+      n === 0 ? 'No había direcciones en caché' : `${n} direcciones borradas — se ubicarán de nuevo al optimizar`,
+      'info'
+    );
+  };
 
   return (
     <div className="space-y-4 pb-12 max-w-3xl">
@@ -142,7 +191,103 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-red-400 transition-colors" />
           </div>
         </button>
+        {/* Mapas y Rutas (Fase 1.3 — geocodificación y optimización) */}
+        <button
+          onClick={abrirMapas}
+          className="text-left p-4 rounded-2xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 transition-all active:scale-95 group sm:col-span-2"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+              <MapPin className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">Mapas y Rutas</div>
+              <div className="text-[11px] text-slate-400">
+                Motor: {motor === 'google' ? 'Google Geocoding (activo)' : 'Nominatim gratis (OpenStreetMap)'} · Caché: {cacheN} direcciones
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-all ${mapasAbierto ? 'rotate-90' : ''}`} />
+          </div>
+        </button>
       </div>
+
+      {/* Panel Mapas y Rutas */}
+      {mapasAbierto && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-800 border border-indigo-500/30 space-y-4">
+          {/* Motor activo */}
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-white text-sm">Motor de ubicación de direcciones</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Convierte “Av. Larco 123, Miraflores” en coordenadas para optimizar tu ruta y dibujarla en el mapa.
+              </p>
+            </div>
+            <span
+              className={`px-2.5 py-1 rounded-full text-[10px] font-bold whitespace-nowrap border ${
+                motor === 'google'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                  : 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+              }`}
+            >
+              {motor === 'google' ? 'Google activo' : 'Nominatim (gratis)'}
+            </span>
+          </div>
+
+          {/* API Key de Google */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              Google Maps API Key (opcional)
+            </label>
+            <div className="flex gap-2">
+              <input
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="AIza… (vacío = Nominatim gratis)"
+                className="flex-1 bg-slate-900 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-700 focus:border-indigo-500 outline-none font-mono"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button
+                onClick={guardarApiKey}
+                className="flex items-center gap-1 px-3 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all active:scale-95"
+              >
+                <Save className="w-3.5 h-3.5" /> Guardar
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Con key: Google ubica direcciones peruanas con mayor precisión (Geocoding API — se habilita en{' '}
+              <a href="https://console.cloud.google.com/apis/library/geocodingapi" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">
+                Google Cloud
+              </a>
+              , tiene capa gratuita mensual y requiere tarjeta). Sin key: Nominatim/OpenStreetMap gratis — ya funciona, solo un poco menos preciso.
+              La key se guarda únicamente en este dispositivo.
+            </p>
+          </div>
+
+          {/* Caché de direcciones */}
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-700/60">
+            <div>
+              <p className="text-xs font-bold text-white">Caché de direcciones</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {cacheN === 0 ? 'Sin direcciones en caché todavía' : `${cacheN} ${cacheN === 1 ? 'dirección guardada' : 'direcciones guardadas'} — evita volver a ubicar las mismas direcciones.`}
+              </p>
+            </div>
+            <button
+              onClick={limpiarCache}
+              className="flex items-center gap-1 px-3 py-2 bg-slate-700 hover:bg-red-600/80 text-white rounded-lg text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Limpiar
+            </button>
+          </div>
+
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            ℹ️ El mapa de entregas usa OpenStreetMap (gratis, sin key). La optimización de ruta ordena tus paradas
+            por distancia real con tu GPS: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
+          </p>
+        </div>
+      )}
 
       {/* Modal de cuentas bancarias */}
       {modalAbierto === 'cuentas' && (

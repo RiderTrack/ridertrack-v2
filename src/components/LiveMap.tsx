@@ -1,390 +1,467 @@
-import React, { useState, useEffect } from 'react';
+// ═══════════════════════════════════════════════════════════
+// 🗺️ LIVE MAP - RiderTrack V2 (Fase 1.3)
+// Mapa REAL (Leaflet + OpenStreetMap, sin API key) con:
+//   • Tu posición GPS real (punto azul, se actualiza en vivo)
+//   • Marcadores de clientes con nº de orden y color por estado
+//   • Línea de la ruta en orden de entrega
+//   • Popups con WhatsApp directo y navegación en moto hacia
+//     la coordenada real del cliente
+//
+// Reemplaza al mapa SVG decorativo con repartidores ficticios
+// que se movían con Math.random(). Aquí todo es real: si un
+// cliente no tiene ubicación geocodificada, se dice — no se
+// inventa nada.
+// ═══════════════════════════════════════════════════════════
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   MapPin,
-  Bike,
-  Navigation2,
-  Zap,
-  BatteryCharging,
-  Maximize2,
-  RotateCcw,
+  Crosshair,
+  Loader2,
   MessageSquare,
-  Eye,
-  SlidersHorizontal,
-  Clock,
-  ShieldCheck,
-  CheckCircle2
+  Navigation,
+  RefreshCw,
+  Route as RouteIcon,
 } from 'lucide-react';
-import { Driver, Order } from '../types';
+import { Order } from '../types';
+import { Coordenadas, vigilarPosicion } from '../services/geocoding';
+import { distanciaRutaKm, LIMA_CENTRO } from '../services/routeOptimizer';
+import { linkWhatsApp, ETIQUETAS_ESTADO } from '../utils/realData';
 
 interface LiveMapProps {
-  drivers: Driver[];
   orders: Order[];
-  onSelectDriver?: (driver: Driver) => void;
+  riderName?: string;
   onOpenWhatsApp?: (telefono: string, nombre: string) => void;
 }
 
+/** Escapa texto para incrustarlo en el HTML del popup (seguridad) */
+function esc(texto: string | undefined | null): string {
+  return String(texto ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export const LiveMap: React.FC<LiveMapProps> = ({
-  drivers,
   orders,
-  onSelectDriver,
+  riderName,
   onOpenWhatsApp,
 }) => {
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(drivers[0]?.id || null);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'en_camino' | 'disponible'>('all');
-  const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [isLiveSimulating, setIsLiveSimulating] = useState<boolean>(true);
-  const [driverPositions, setDriverPositions] = useState<Driver[]>(drivers);
+  // ── Estado GPS ────────────────────────────────────────────
+  const [gpsEstado, setGpsEstado] = useState<'buscando' | 'ok' | 'no'>('buscando');
+  const [miPosicion, setMiPosicion] = useState<Coordenadas | null>(null);
+  const [reintentosGPS, setReintentosGPS] = useState(0);
 
-  // Sync state if props change
-  useEffect(() => {
-    setDriverPositions(drivers);
-  }, [drivers]);
+  // ── Refs del mapa Leaflet ─────────────────────────────────
+  const mapDivRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const clientesLayerRef = useRef<L.LayerGroup | null>(null);
+  const riderMarkerRef = useRef<L.Marker | null>(null);
+  const rutaLineRef = useRef<L.Polyline | null>(null);
+  const numMarcadoresRef = useRef(-1);
 
-  // Subtle live position oscillation simulation for realism
+  // ── Datos derivados ───────────────────────────────────────
+  const ubicados = useMemo(
+    () =>
+      orders
+        .filter(
+          (o) => typeof o.lat === 'number' && typeof o.lng === 'number' && !isNaN(o.lat!) && !isNaN(o.lng!)
+        )
+        .sort((a, b) => (a.num ?? 999) - (b.num ?? 999)),
+    [orders]
+  );
+
+  const sinUbicar = orders.length - ubicados.length;
+  const pendientes = orders.filter((o) => o.estado === 'pendiente').length;
+  const entregados = orders.filter((o) => o.estado === 'entregado').length;
+  const fallidos = orders.filter((o) => o.estado === 'cancelado').length;
+
+  const inicioRuta = miPosicion ?? LIMA_CENTRO;
+
+  const estimacion = useMemo(() => {
+    if (ubicados.length === 0) return { km: 0, min: 0 };
+    const km = distanciaRutaKm(
+      ubicados.map((o) => ({ lat: o.lat!, lng: o.lng! })),
+      inicioRuta
+    );
+    return { km, min: Math.round((km / 22) * 60) };
+  }, [ubicados, inicioRuta]);
+
+  /** Siguiente parada pendiente (por nº de orden) */
+  const siguienteParada = useMemo(
+    () =>
+      orders
+        .filter((o) => o.estado === 'pendiente')
+        .sort((a, b) => (a.num ?? 999) - (b.num ?? 999))[0] || null,
+    [orders]
+  );
+
+  // ── Inicializar mapa (una sola vez) ───────────────────────
   useEffect(() => {
-    if (!isLiveSimulating) return;
-    const interval = setInterval(() => {
-      setDriverPositions((prev) =>
-        prev.map((d) => {
-          if (d.estado === 'en_camino') {
-            const dx = (Math.random() - 0.48) * 1.2;
-            const dy = (Math.random() - 0.48) * 1.2;
-            return {
-              ...d,
-              lat: Math.max(10, Math.min(90, d.lat + dy)),
-              lng: Math.max(10, Math.min(90, d.lng + dx)),
-              velocidadActual: Math.max(15, Math.min(55, Math.round(d.velocidadActual + (Math.random() - 0.5) * 4))),
-              ultimaActualizacion: 'Hace 1s',
-            };
-          }
-          return d;
-        })
+    if (!mapDivRef.current || mapRef.current) return;
+
+    const map = L.map(mapDivRef.current, {
+      center: [LIMA_CENTRO.lat, LIMA_CENTRO.lng],
+      zoom: 12,
+      zoomControl: true,
+      attributionControl: true,
+    });
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+
+    clientesLayerRef.current = L.layerGroup().addTo(map);
+    rutaLineRef.current = L.polyline([], {
+      color: '#3b82f6',
+      weight: 3,
+      dashArray: '6 8',
+      opacity: 0.85,
+    }).addTo(map);
+
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      clientesLayerRef.current = null;
+      riderMarkerRef.current = null;
+      rutaLineRef.current = null;
+      numMarcadoresRef.current = -1;
+    };
+  }, []);
+
+  // ── GPS en vivo ───────────────────────────────────────────
+  useEffect(() => {
+    setGpsEstado('buscando');
+    const detener = vigilarPosicion(
+      (c) => {
+        setMiPosicion(c);
+        setGpsEstado('ok');
+      },
+      () => {
+        setGpsEstado((prev) => (prev === 'ok' ? 'ok' : 'no'));
+      }
+    );
+    return detener;
+  }, [reintentosGPS]);
+
+  // ── Marcadores de clientes ────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = clientesLayerRef.current;
+    if (!map || !layer) return;
+
+    layer.clearLayers();
+
+    for (const o of ubicados) {
+      const color =
+        o.estado === 'entregado'
+          ? '#10b981' // verde
+          : o.estado === 'cancelado'
+          ? '#ef4444' // rojo
+          : '#f59e0b'; // ámbar
+
+      const icon = L.divIcon({
+        className: '',
+        html:
+          `<div style="width:30px;height:30px;border-radius:50%;background:${color};` +
+          `border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.45);` +
+          `display:flex;align-items:center;justify-content:center;` +
+          `color:#fff;font-weight:800;font-size:12px;font-family:system-ui;">${o.num ?? '•'}</div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -14],
+      });
+
+      const waUrl = linkWhatsApp(
+        o.clienteTelefono,
+        `Hola ${o.cliente} 👋 Te escribo desde ${riderName ? esc(riderName) : 'RiderTrack'} por tu entrega de hoy.`
       );
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [isLiveSimulating]);
+      const navUrl =
+        o.lat != null && o.lng != null
+          ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lng}&travelmode=two_wheeler`
+          : '';
 
-  const activeDriver = driverPositions.find((d) => d.id === selectedDriverId) || driverPositions[0];
+      const popupHtml =
+        `<div style="min-width:190px">` +
+        `<div style="font-weight:800;font-size:13px;margin-bottom:2px">#${o.num ?? '·'} ${esc(o.cliente)}</div>` +
+        `<div style="opacity:0.75;font-size:11px;margin-bottom:6px">${esc(o.direccion)}${o.distrito ? `, ${esc(o.distrito)}` : ''}</div>` +
+        `<div style="font-size:11.5px;line-height:1.6">` +
+        `<div><b>Estado:</b> ${esc(ETIQUETAS_ESTADO[o.stReal || ''] || o.stReal || o.estado)}</div>` +
+        `<div><b>Monto:</b> S/ ${(o.monto || 0).toFixed(2)}</div>` +
+        (o.hora ? `<div><b>Hora:</b> ${esc(o.hora)}</div>` : '') +
+        `</div>` +
+        `<div style="display:flex;gap:6px;margin-top:8px">` +
+        (o.clienteTelefono
+          ? `<a href="${waUrl}" target="_blank" rel="noopener" style="text-decoration:none;background:#059669;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">💬 WhatsApp</a>`
+          : '') +
+        (navUrl
+          ? `<a href="${navUrl}" target="_blank" rel="noopener" style="text-decoration:none;background:#2563eb;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">🛵 Navegar</a>`
+          : '') +
+        `</div>` +
+        `</div>`;
 
-  const filteredDrivers = driverPositions.filter((d) => {
-    if (filterStatus === 'en_camino') return d.estado === 'en_camino';
-    if (filterStatus === 'disponible') return d.estado === 'disponible';
-    return true;
-  });
+      L.marker([o.lat!, o.lng!], { icon })
+        .bindPopup(popupHtml, { className: 'rtmap-popup', closeButton: true })
+        .addTo(layer);
+    }
+
+    // Ajustar vista SOLO cuando cambia la cantidad de marcadores
+    // (para no robar el zoom al usuario mientras se mueve)
+    if (ubicados.length !== numMarcadoresRef.current) {
+      numMarcadoresRef.current = ubicados.length;
+      if (ubicados.length > 0) {
+        const bounds = L.latLngBounds(ubicados.map((o) => [o.lat!, o.lng!] as [number, number]));
+        if (miPosicion) bounds.extend([miPosicion.lat, miPosicion.lng]);
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, ubicados]);
+
+  // ── Marcador del rider + línea de ruta ────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Punto azul del rider
+    if (miPosicion) {
+      const icon = L.divIcon({
+        className: '',
+        html:
+          `<span style="position:relative;display:flex;width:22px;height:22px">` +
+          `<span style="position:absolute;inset:0;border-radius:50%;background:#3b82f6;opacity:0.5;animation:rtmapPing 1.6s ease-out infinite"></span>` +
+          `<span style="position:relative;width:16px;height:16px;margin:auto;border-radius:50%;background:#2563eb;border:3px solid #ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.5)"></span>` +
+          `</span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      });
+
+      if (riderMarkerRef.current) {
+        riderMarkerRef.current.setLatLng([miPosicion.lat, miPosicion.lng]);
+        riderMarkerRef.current.setIcon(icon);
+      } else {
+        riderMarkerRef.current = L.marker([miPosicion.lat, miPosicion.lng], { icon, zIndexOffset: 1000 })
+          .bindTooltip(riderName || 'Tú', { className: 'rtmap-tooltip', direction: 'top', offset: [0, -12] })
+          .addTo(map);
+      }
+    }
+
+    // Línea de ruta (posición → parada 1 → parada 2 → ...)
+    const puntos: [number, number][] = [];
+    if (miPosicion) puntos.push([miPosicion.lat, miPosicion.lng]);
+    for (const o of ubicados) puntos.push([o.lat!, o.lng!]);
+    rutaLineRef.current?.setLatLngs(puntos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [miPosicion, ubicados]);
+
+  const centrarEnMi = () => {
+    if (miPosicion && mapRef.current) {
+      mapRef.current.setView([miPosicion.lat, miPosicion.lng], 16, { animate: true });
+    }
+  };
 
   return (
-    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 light:border-slate-200 overflow-hidden shadow-xl flex flex-col h-[520px]">
-      {/* Map Header Toolbar */}
-      <div className="flex flex-wrap items-center justify-between p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-b border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 z-10 gap-3">
+    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 light:border-slate-200 overflow-hidden shadow-xl flex flex-col">
+      {/* Estilos para popups/tooltip oscuros sobre el mapa Leaflet */}
+      <style>{`
+        @keyframes rtmapPing { 0% { transform: scale(1); opacity: 0.6 } 100% { transform: scale(2.4); opacity: 0 } }
+        .rtmap-popup .leaflet-popup-content-wrapper { background: #1e293b; color: #f1f5f9; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+        .rtmap-popup .leaflet-popup-tip { background: #1e293b; border: 1px solid #334155; }
+        .rtmap-popup .leaflet-popup-content { margin: 12px 14px; font-size: 12px; line-height: 1.5; }
+        .rtmap-tooltip.leaflet-tooltip { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; font-size: 11px; font-weight: 700; }
+        .rtmap-tooltip.leaflet-tooltip::before { border-top-color: #1e293b; }
+        .leaflet-container { background: #0f172a; font-family: inherit; }
+        .leaflet-bar a { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+        .leaflet-bar a:hover { background: #334155; }
+        .leaflet-control-attribution { background: rgba(15,23,42,.75) !important; color: #94a3b8 !important; font-size: 9px !important; }
+        .leaflet-control-attribution a { color: #cbd5e1 !important; }
+      `}</style>
+
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-b border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 z-[500]">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
             <MapPin className="w-5 h-5" />
           </div>
           <div>
             <h3 className="font-bold text-sm text-white dark:text-white light:text-slate-900 flex items-center gap-2">
-              Telemetría y Mapa en Tiempo Real
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
+              Mapa de Entregas
+              {gpsEstado === 'ok' && (
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+              )}
             </h3>
             <p className="text-xs text-slate-400">
-              {driverPositions.length} Repartidores rastreados por GPS diferencial
+              {ubicados.length} de {orders.length} clientes ubicados
+              {sinUbicar > 0 && ` · ${sinUbicar} sin ubicación`}
             </p>
           </div>
         </div>
 
-        {/* Controls & Status Filter */}
-        <div className="flex items-center gap-2">
-          {/* Status filter pill */}
-          <div className="flex p-1 rounded-xl bg-slate-800 dark:bg-slate-800 light:bg-slate-200 border border-slate-700/80 dark:border-slate-700/80 light:border-slate-300 text-xs font-medium">
-            <button
-              onClick={() => setFilterStatus('all')}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
-                filterStatus === 'all'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Todos ({driverPositions.length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('en_camino')}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
-                filterStatus === 'en_camino'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              En Ruta
-            </button>
-            <button
-              onClick={() => setFilterStatus('disponible')}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
-                filterStatus === 'disponible'
-                  ? 'bg-blue-500 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Disponibles
-            </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Chips de estado reales */}
+          <div className="flex gap-1 text-[11px] font-bold">
+            <span className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400">
+              {pendientes} pend.
+            </span>
+            <span className="px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+              {entregados} entreg.
+            </span>
+            {fallidos > 0 && (
+              <span className="px-2 py-1 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400">
+                {fallidos} fallidos
+              </span>
+            )}
           </div>
 
-          {/* Live Simulation Switch */}
-          <button
-            onClick={() => setIsLiveSimulating(!isLiveSimulating)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-              isLiveSimulating
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                : 'bg-slate-800 border-slate-700 text-slate-400'
-            }`}
-            title="Pausar/Reanudar simulación GPS en vivo"
-          >
-            <Zap className={`w-3.5 h-3.5 ${isLiveSimulating ? 'animate-bounce text-amber-400' : ''}`} />
-            <span className="hidden sm:inline">{isLiveSimulating ? 'GPS Vivo ON' : 'Pausado'}</span>
-          </button>
+          {/* Estado GPS real */}
+          {gpsEstado === 'buscando' && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs font-semibold">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando GPS…
+            </span>
+          )}
+          {gpsEstado === 'ok' && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-semibold">
+              <Crosshair className="w-3.5 h-3.5" /> GPS activo
+            </span>
+          )}
+          {gpsEstado === 'no' && (
+            <button
+              onClick={() => setReintentosGPS((n) => n + 1)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-all"
+              title="Sin señal GPS — tocar para reintentar"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Sin GPS · Reintentar
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Vector Map Body */}
-      <div className="relative flex-1 bg-slate-950 dark:bg-slate-950 light:bg-slate-900 overflow-hidden select-none">
-        {/* Vector City Map SVG Background */}
-        <svg
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-300"
-          style={{ transform: `scale(${zoomLevel})` }}
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
+      {/* Mapa Leaflet real */}
+      <div className="relative h-[420px] sm:h-[520px]">
+        <div ref={mapDivRef} className="absolute inset-0 z-0" />
+
+        {/* Botón centrar en mi posición */}
+        <button
+          onClick={centrarEnMi}
+          disabled={!miPosicion}
+          className="absolute bottom-4 right-3 z-[500] p-2.5 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg disabled:opacity-40 transition-all"
+          title="Centrar mapa en mi posición"
         >
-          {/* Water bay area */}
-          <path
-            d="M 0 0 L 25 0 Q 20 40 10 70 Q 5 85 0 100 Z"
-            fill="#0f172a"
-            opacity="0.6"
-          />
-          <path
-            d="M 0 0 L 23 0 Q 18 38 8 68 Q 3 83 0 98 Z"
-            fill="#0284c7"
-            opacity="0.1"
-          />
+          <Crosshair className="w-4 h-4" />
+        </button>
 
-          {/* Main Road Grid Networks */}
-          <g stroke="#334155" strokeWidth="0.4" opacity="0.6" strokeDasharray="none">
-            {/* Major Avenues */}
-            <line x1="10" y1="20" x2="90" y2="20" stroke="#475569" strokeWidth="0.8" />
-            <line x1="10" y1="45" x2="95" y2="45" stroke="#475569" strokeWidth="1.2" />
-            <line x1="5" y1="75" x2="95" y2="75" stroke="#475569" strokeWidth="0.9" />
-
-            <line x1="25" y1="5" x2="25" y2="95" stroke="#475569" strokeWidth="1" />
-            <line x1="50" y1="5" x2="50" y2="95" stroke="#475569" strokeWidth="1.4" />
-            <line x1="75" y1="5" x2="75" y2="95" stroke="#475569" strokeWidth="1" />
-
-            {/* Secondary Diagonal Expressways */}
-            <line x1="20" y1="10" x2="80" y2="85" stroke="#3b82f6" strokeWidth="0.8" opacity="0.4" />
-            <line x1="85" y1="15" x2="15" y2="80" stroke="#f59e0b" strokeWidth="0.6" opacity="0.3" />
-
-            {/* Grid blocks */}
-            {Array.from({ length: 8 }).map((_, i) => (
-              <line key={`h-${i}`} x1="10" y1={10 + i * 11} x2="90" y2={10 + i * 11} />
-            ))}
-            {Array.from({ length: 9 }).map((_, i) => (
-              <line key={`v-${i}`} x1={15 + i * 9} y1="10" x2={15 + i * 9} y2="90" />
-            ))}
-          </g>
-
-          {/* District Labels */}
-          <g textAnchor="middle" fill="#64748b" fontSize="2.2" fontWeight="700">
-            <text x="28" y="28">MIRAFLORES</text>
-            <text x="58" y="22">SAN ISIDRO</text>
-            <text x="42" y="62">SURCO</text>
-            <text x="75" y="55">SAN BORJA</text>
-            <text x="22" y="80">BARRANCO</text>
-            <text x="78" y="82">LA MOLINA</text>
-          </g>
-
-          {/* Active Route Polylines to active delivery points */}
-          {filteredDrivers.map((driver) => {
-            if (driver.estado !== 'en_camino') return null;
-            // Target order
-            const activeOrder = orders.find((o) => o.repartidorId === driver.id);
-            const targetX = driver.lng + 12;
-            const targetY = driver.lat - 8;
-
-            return (
-              <g key={`route-${driver.id}`}>
-                <line
-                  x1={driver.lng}
-                  y1={driver.lat}
-                  x2={targetX}
-                  y2={targetY}
-                  stroke={driver.id === selectedDriverId ? '#3b82f6' : '#10b981'}
-                  strokeWidth="0.7"
-                  strokeDasharray="1.5 1"
-                  opacity="0.8"
-                />
-                {/* Destination Drop Pin */}
-                <circle cx={targetX} cy={targetY} r="1.5" fill="#ef4444" opacity="0.8" />
-                <circle cx={targetX} cy={targetY} r="3" fill="none" stroke="#ef4444" strokeWidth="0.4" opacity="0.5" />
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* Driver Pins Layer */}
-        <div className="absolute inset-0">
-          {filteredDrivers.map((driver) => {
-            const isSelected = driver.id === selectedDriverId;
-            const statusColor =
-              driver.estado === 'en_camino'
-                ? 'bg-emerald-500 text-emerald-950 border-emerald-300'
-                : driver.estado === 'disponible'
-                ? 'bg-blue-500 text-blue-950 border-blue-300'
-                : 'bg-amber-500 text-amber-950 border-amber-300';
-
-            return (
-              <div
-                key={driver.id}
-                onClick={() => {
-                  setSelectedDriverId(driver.id);
-                  if (onSelectDriver) onSelectDriver(driver);
-                }}
-                style={{
-                  left: `${driver.lng}%`,
-                  top: `${driver.lat}%`,
-                  transform: 'translate(-50%, -50%)',
-                }}
-                className="absolute cursor-pointer group transition-all duration-300 z-20"
-              >
-                {/* Pulse halo */}
-                <span
-                  className={`absolute -inset-2 rounded-full opacity-60 animate-ping pointer-events-none ${
-                    isSelected ? 'bg-blue-500' : driver.estado === 'en_camino' ? 'bg-emerald-500' : 'bg-blue-400'
-                  }`}
-                />
-
-                {/* Driver Pin Marker */}
-                <div
-                  className={`relative flex items-center justify-center w-8 h-8 rounded-full border-2 shadow-xl font-bold text-xs transition-transform ${statusColor} ${
-                    isSelected ? 'scale-125 ring-4 ring-blue-500/50 z-30' : 'group-hover:scale-110'
-                  }`}
-                >
-                  <Bike className="w-4 h-4" />
-                </div>
-
-                {/* Mini Driver Label Box */}
-                <div
-                  className={`absolute left-1/2 -bottom-7 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900/90 text-white text-[10px] font-bold whitespace-nowrap border border-slate-700 shadow-md backdrop-blur-md pointer-events-none transition-all ${
-                    isSelected ? 'bg-blue-900 border-blue-500 text-white scale-105' : ''
-                  }`}
-                >
-                  {driver.nombre.split(' ')[0]} ({driver.velocidadActual} km/h)
-                </div>
-              </div>
-            );
-          })}
+        {/* Leyenda */}
+        <div className="absolute top-3 left-3 z-[500] flex flex-col gap-1 px-2.5 py-2 rounded-xl bg-slate-900/80 backdrop-blur-md border border-slate-700 text-[10px] font-bold text-slate-300">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white/60" /> Tú (GPS)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Pendiente
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Entregado
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Fallido
+          </span>
         </div>
 
-        {/* Zoom & View Controls Overlay */}
-        <div className="absolute top-4 right-4 flex flex-col gap-1.5 z-20">
-          <button
-            onClick={() => setZoomLevel((z) => Math.min(1.8, z + 0.2))}
-            className="p-2 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg text-xs font-bold"
-            title="Acercar mapa"
-          >
-            +
-          </button>
-          <button
-            onClick={() => setZoomLevel(1)}
-            className="p-2 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg text-xs"
-            title="Restablecer vista"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setZoomLevel((z) => Math.max(0.9, z - 0.2))}
-            className="p-2 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg text-xs font-bold"
-            title="Alejar mapa"
-          >
-            -
-          </button>
-        </div>
-
-        {/* Active Driver Floating Telemetry Card Overlay (Bottom Left) */}
-        {activeDriver && (
-          <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:w-80 p-4 rounded-2xl bg-slate-900/95 dark:bg-slate-900/95 light:bg-slate-900 border border-slate-700/80 shadow-2xl backdrop-blur-md z-30 transition-all">
-            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <img
-                  src={activeDriver.foto}
-                  alt={activeDriver.nombre}
-                  className="w-11 h-11 rounded-xl object-cover ring-2 ring-blue-500/50"
-                />
-                <div>
-                  <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
-                    {activeDriver.nombre}
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-medium">
-                      ⭐ {activeDriver.calificacion}
-                    </span>
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    {activeDriver.vehiculo} • Placa: {activeDriver.placa}
-                  </p>
-                </div>
-              </div>
-
-              {/* Status Badge */}
-              <span
-                className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${
-                  activeDriver.estado === 'en_camino'
-                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                    : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-                }`}
-              >
-                {activeDriver.estado === 'en_camino' ? 'En Ruta' : 'Disponible'}
-              </span>
-            </div>
-
-            {/* Metrics Row */}
-            <div className="grid grid-cols-3 gap-2 py-3 text-center">
-              <div className="p-2 rounded-xl bg-slate-800/60 border border-slate-800">
-                <span className="text-[10px] text-slate-400 block">Velocidad</span>
-                <span className="text-sm font-black text-blue-400 flex items-center justify-center gap-0.5">
-                  <Navigation2 className="w-3 h-3 animate-pulse" /> {activeDriver.velocidadActual} km/h
-                </span>
-              </div>
-
-              <div className="p-2 rounded-xl bg-slate-800/60 border border-slate-800">
-                <span className="text-[10px] text-slate-400 block">Batería GPS</span>
-                <span className="text-sm font-black text-emerald-400 flex items-center justify-center gap-0.5">
-                  <BatteryCharging className="w-3 h-3" /> {activeDriver.bateria}%
-                </span>
-              </div>
-
-              <div className="p-2 rounded-xl bg-slate-800/60 border border-slate-800">
-                <span className="text-[10px] text-slate-400 block">Último Ping</span>
-                <span className="text-xs font-bold text-slate-200 mt-0.5 block truncate">
-                  {activeDriver.ultimaActualizacion}
-                </span>
-              </div>
-            </div>
-
-            {/* Location & Quick Action */}
-            <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                <MapPin className="w-3.5 h-3.5 text-red-400" />
-                <span className="font-medium">{activeDriver.distritoActual}</span>
-              </div>
-
-              {onOpenWhatsApp && (
-                <button
-                  onClick={() => onOpenWhatsApp(activeDriver.telefono, activeDriver.nombre)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
-                </button>
-              )}
+        {/* Estado vacío: sin clientes */}
+        {orders.length === 0 && (
+          <div className="absolute inset-0 z-[600] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-6">
+            <div className="max-w-xs text-center p-5 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl">
+              <MapPin className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+              <h4 className="font-bold text-white text-sm">La ruta de hoy está vacía</h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Importa tu Excel o agrega clientes en <b>Mi Ruta</b> y aparecerán aquí con su ubicación real.
+              </p>
             </div>
           </div>
         )}
+
+        {/* Estado vacío: clientes sin ubicación */}
+        {orders.length > 0 && ubicados.length === 0 && (
+          <div className="absolute inset-0 z-[600] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-6">
+            <div className="max-w-xs text-center p-5 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl">
+              <RouteIcon className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+              <h4 className="font-bold text-white text-sm">
+                {orders.length} clientes aún sin ubicación
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Ve a <b>Mi Ruta</b> y toca el botón <b>“Ruta”</b> para ubicar las direcciones.
+                Después verás cada parada en el mapa y la línea de la ruta.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Barra inferior: siguiente parada + estimación de ruta */}
+      <div className="p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-t border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        {siguienteParada ? (
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">
+              Siguiente parada
+            </p>
+            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900 truncate">
+              #{siguienteParada.num ?? '·'} {siguienteParada.cliente}
+            </p>
+            <p className="text-[11px] text-slate-400 truncate">
+              {siguienteParada.direccion}
+              {siguienteParada.distrito ? `, ${siguienteParada.distrito}` : ''}
+            </p>
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Ruta</p>
+            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900">
+              {orders.length === 0
+                ? 'Sin clientes'
+                : entregados === orders.length
+                ? '¡Ruta completada! 🎉'
+                : 'Sin paradas pendientes'}
+            </p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Estimación real de la ruta */}
+          {ubicados.length > 0 && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[11px] font-bold">
+              <RouteIcon className="w-3.5 h-3.5" />
+              ~{estimacion.km} km · {estimacion.min} min
+            </span>
+          )}
+
+          {siguienteParada?.clienteTelefono && onOpenWhatsApp && (
+            <button
+              onClick={() => onOpenWhatsApp(siguienteParada.clienteTelefono, siguienteParada.cliente)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition-all"
+            >
+              <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
+            </button>
+          )}
+
+          {siguienteParada?.lat != null && siguienteParada.lng != null && (
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${siguienteParada.lat},${siguienteParada.lng}&travelmode=two_wheeler`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md transition-all"
+            >
+              <Navigation className="w-3.5 h-3.5" /> Navegar
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

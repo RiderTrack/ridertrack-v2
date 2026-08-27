@@ -51,6 +51,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Estado de optimización en curso (Fase 1.3 — progreso real)
+  const [optimizando, setOptimizando] = useState(false);
+  const [optimizandoMsg, setOptimizandoMsg] = useState('');
+
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
   const [numTemporal, setNumTemporal] = useState('');
@@ -384,20 +388,38 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </button>
             <button
               onClick={async () => {
-                if (!confirm('🚀 ¿Optimizar ruta?\n\nSe ordenarán los clientes por distrito (mismo distrito juntos) para minimizar la distancia recorrida.\n\nSe reasignarán los números de orden (1, 2, 3...).')) return;
+                if (!confirm('🚀 ¿Optimizar ruta por distancia real?\n\n1. Se ubicarán las direcciones que falten (la primera vez tarda ~1 seg por dirección nueva)\n2. Se ordenarán las paradas por distancia real desde tu posición GPS\n3. Se reasignarán los números de orden (1, 2, 3...)\n\nLos clientes sin dirección ubicable van al final, agrupados por distrito.')) return;
+                setOptimizando(true);
+                setOptimizandoMsg('Preparando…');
                 try {
-                  const count = await optimizarRuta();
-                  onShowToast?.('🚀 Ruta optimizada', `${count} clientes ordenados por distrito`, 'success');
+                  const res = await optimizarRuta((msg) => setOptimizandoMsg(msg));
+                  if (!res) return;
+                  const partes: string[] = [];
+                  partes.push(`${res.conUbicacion} paradas ordenadas por distancia real`);
+                  if (res.geocodificadosAhora > 0) partes.push(`${res.geocodificadosAhora} direcciones ubicadas ahora`);
+                  if (res.desdeCache > 0) partes.push(`${res.desdeCache} reutilizadas de caché`);
+                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min en moto`);
+                  if (res.ahorroPct > 0) partes.push(`${res.ahorroPct}% menos que el orden anterior`);
+                  if (res.sinUbicacion > 0) partes.push(`⚠️ ${res.sinUbicacion} sin ubicar (van al final)`);
+                  partes.push(res.conGPS ? 'Partiste de tu posición GPS' : 'Sin GPS: partiste del centro de Lima');
+                  onShowToast?.(
+                    '🚀 Ruta optimizada',
+                    partes.join(' · '),
+                    res.sinUbicacion > 0 ? 'warning' : 'success'
+                  );
                 } catch (e: any) {
                   onShowToast?.('❌ Error', e.message || 'No se pudo optimizar', 'error');
+                } finally {
+                  setOptimizando(false);
+                  setOptimizandoMsg('');
                 }
               }}
-              disabled={sincronizando || clientes.length === 0}
+              disabled={sincronizando || optimizando || clientes.length === 0}
               className="flex items-center gap-1 px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
-              title="Optimizar ruta por distrito"
+              title="Optimizar ruta por distancia real (GPS + geocodificación)"
             >
-              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
-              <span>Ruta</span>
+              {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+              <span className="max-w-[120px] truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
             </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}

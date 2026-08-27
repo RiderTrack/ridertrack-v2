@@ -16,7 +16,7 @@ import {
   AlertTriangle,
   Target,
 } from 'lucide-react';
-import { Order, Driver, ActivityItem, WhatsAppMessage } from '../types';
+import { Order, ActivityItem, WhatsAppMessage } from '../types';
 import { construirGraficoHorario, ETIQUETAS_ESTADO } from '../utils/realData';
 import { LiveMap } from './LiveMap';
 import { KPIStatCard, Badge, Button, Card } from './ui';
@@ -33,7 +33,6 @@ interface DashboardStats {
 
 interface DashboardViewProps {
   orders: Order[];
-  drivers: Driver[];
   activities: ActivityItem[];
   whatsAppMessages: WhatsAppMessage[];
   stats: DashboardStats;
@@ -45,7 +44,6 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   orders,
-  drivers,
   activities,
   whatsAppMessages,
   stats,
@@ -460,7 +458,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Live Map Panel */}
       <div className="space-y-2">
         <LiveMap
-          drivers={drivers}
           orders={orders}
           onOpenWhatsApp={(phone, name) => onOpenWhatsAppModal(phone, name)}
         />
