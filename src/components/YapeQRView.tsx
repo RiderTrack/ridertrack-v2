@@ -263,11 +263,16 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
   const kbQR = qrBase64 ? Math.round(qrBase64.length / 1024) : 0;
   const numLimpioLen = numero.replace(/\D/g, '').length;
 
-  // ── Loading ──
+  // ── Loading (Fase 2.1: nunca infinito — con texto para que se
+  //    entienda qué pasa si la red está lenta) ──
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
+      <div className="flex flex-col items-center justify-center py-24 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+        <p className="text-xs text-slate-400">Cargando tu configuración de Yape…</p>
+        <p className="text-[10px] text-slate-500">
+          Si demora, tu conexión está lenta — la pantalla se abrirá sola en unos segundos
+        </p>
       </div>
     );
   }
