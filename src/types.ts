@@ -6,6 +6,7 @@ export type NavigationTab =
   | 'clientes'
   | 'repartidores'
   | 'mapa'
+  | 'motorizados'
   | 'whatsapp'
   | 'reportes'
   | 'estadisticas'

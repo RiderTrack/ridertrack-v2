@@ -9,6 +9,9 @@ import { OrdersView } from './components/OrdersView';
 import { CustomersView } from './components/CustomersView';
 import { DriversView } from './components/DriversView';
 import { LiveMap } from './components/LiveMap';
+import { MotorizadosView } from './components/MotorizadosView';
+import { CronometroPill } from './components/CronometroRuta';
+import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppView } from './components/WhatsAppView';
 import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
@@ -22,6 +25,8 @@ import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
 import { YapeQRView } from './components/YapeQRView';
+import { guardarAvatarRider, sincronizarCronometroAlBot } from './services/firestore';
+import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
 import {
   clientesAOrdenes,
   clientesACustomers,
@@ -50,10 +55,21 @@ export default function App() {
     guardarFotoEntrega,
   } = useClientes();
 
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    try {
+      const guardado = localStorage.getItem('rt_theme');
+      if (guardado === 'light' || guardado === 'dark') return guardado;
+    } catch {
+      // sin storage
+    }
+    return 'dark';
+  });
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Picker de avatar (se abre desde header y sidebar) — Fase 1.5
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   // Log de mensajes WhatsApp despachados desde la app (sesión actual)
   const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
@@ -95,13 +111,33 @@ export default function App() {
     ]);
   };
 
-  // Theme Toggler effect
+  // Theme Toggler effect — Fase 1.5: conversión COMPLETA (la
+  // paleta se invierte por variables CSS en index.css) + el mapa
+  // sigue al tema + se recuerda tu preferencia.
   const handleToggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
+    try {
+      localStorage.setItem('rt_theme', nextTheme);
+    } catch {
+      // sin storage
+    }
+
+    // El mapa acompaña al tema (si usas un skin auto: oscuro/claro)
+    const estiloActual = getEstiloMapa();
+    if (estiloActual === 'oscuro' || estiloActual === 'claro') {
+      const nuevoEstilo: EstiloMapa = nextTheme === 'light' ? 'claro' : 'oscuro';
+      if (nuevoEstilo !== estiloActual) {
+        setEstiloMapa(nuevoEstilo);
+        window.dispatchEvent(new Event('rt_theme'));
+      }
+    }
+
     showToast(
       `Modo ${nextTheme === 'dark' ? 'Oscuro' : 'Claro'} Activado`,
-      'Preferencia visual actualizada',
+      nextTheme === 'light'
+        ? 'Ideal para el sol: todo se convierte (letras, botones y mapa)'
+        : 'Tema oscuro de siempre',
       'info'
     );
   };
@@ -372,6 +408,34 @@ export default function App() {
     showToast('Notificaciones Leídas', 'Todas las notificaciones han sido marcadas', 'info');
   };
 
+  // ═════════════════════════════════════════════════════
+  // 🎭 AVATAR DEL RIDER (Fase 1.5)
+  // ═════════════════════════════════════════════════════
+  // Preferencia local instantánea + respaldo en Firestore
+  // (profile.avatar llega por el listener de useAuth).
+  const [avatarLocal, setAvatarLocal] = useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem('rt_avatar') || undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+  const avatarEfectivo = profile?.avatar || avatarLocal;
+
+  const handleSeleccionarAvatar = async (avatarId: string) => {
+    if (!user) throw new Error('Sin sesión');
+    // 1. Firestore (fuente de verdad, multi-dispositivo)
+    await guardarAvatarRider(user.uid, avatarId);
+    // 2. Local (instantáneo, sobrevive sin red)
+    setAvatarLocal(avatarId);
+    try {
+      localStorage.setItem('rt_avatar', avatarId);
+    } catch {
+      // sin storage
+    }
+  };
+
   // 🔄 Mostrar loading mientras verifica auth
   if (authLoading) {
     return (
@@ -391,9 +455,7 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen ${
-        theme === 'dark' ? 'bg-[#0f172a] text-slate-100' : 'bg-slate-100 text-slate-900'
-      } font-sans transition-colors duration-200`}
+      className="min-h-screen bg-slate-950 text-slate-100 font-sans transition-colors duration-200"
     >
       {/* Top Bar Header */}
       <Header
@@ -405,8 +467,9 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onShowToast={showToast}
-        profile={profile}
-        onOpenProfile={() => setActiveTab('perfil')}
+        riderName={riderName}
+        riderAvatar={avatarEfectivo}
+        onAbrirAvatarPicker={() => setAvatarPickerOpen(true)}
       />
 
       {/* Main App Layout */}
@@ -421,6 +484,10 @@ export default function App() {
           onCloseMobile={() => setIsMobileMenuOpen(false)}
           activeOrdersCount={pendientesCount}
           activeDriversCount={1}
+          riderName={riderName}
+          riderAvatar={avatarEfectivo}
+          onSeleccionarAvatar={handleSeleccionarAvatar}
+          onShowToast={showToast}
         />
 
         {/* Content Area - Mobile first: full width, no left margin on mobile */}
@@ -497,6 +564,10 @@ export default function App() {
             </div>
           )}
 
+          {activeTab === 'motorizados' && (
+            <MotorizadosView orders={orders} onShowToast={showToast} />
+          )}
+
           {activeTab === 'whatsapp' && (
             <WhatsAppView
               messages={whatsAppMessages}
@@ -515,6 +586,22 @@ export default function App() {
 
       {/* Toast Notifications Overlay */}
       <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
+
+      {/* ⏱️ Cronómetro de ruta flotante (Fase 1.5): visible en
+          cualquier pantalla mientras corre; abre GPS del Motorizado */}
+      <CronometroPill
+        onSync={(e) => (user ? sincronizarCronometroAlBot(user.uid, e) : Promise.resolve())}
+        onAbrir={() => setActiveTab('motorizados')}
+      />
+
+      {/* 🎭 Picker de avatar (desde el header) */}
+      <AvatarPicker
+        isOpen={avatarPickerOpen}
+        onClose={() => setAvatarPickerOpen(false)}
+        avatarActual={avatarEfectivo}
+        onSeleccionar={handleSeleccionarAvatar}
+        onShowToast={showToast}
+      />
 
       {/* WhatsApp Message Modal */}
       <WhatsAppModal
