@@ -32,6 +32,12 @@ import {
   PuntoGeo,
   OpcionesRuta,
 } from '../services/routeOptimizer';
+import {
+  optimizarConDirections,
+  guardarRutaOptimizada,
+  firmaRuta as firmaRutaGoogle,
+} from '../services/googleDirections';
+import { getGoogleApiKey } from '../services/googleMaps';
 import { useAuth } from './useAuth';
 import type { ConfigRuta } from '../services/firestore';
 
@@ -49,6 +55,8 @@ export interface ResultadoOptimizarRuta {
   tiempoEstimadoMin: number;
   origen: 'inicio' | 'gps' | 'lima';  // desde dónde se partió
   conFin: boolean;            // si la ruta termina en una dirección fija
+  /** Fase 2.0: cómo se optimizó */
+  motor: 'google' | 'local';
 }
 
 interface ClienteGeo extends PuntoGeo {
@@ -353,7 +361,55 @@ export function useClientes() {
         ? distanciaRutaKm(conCoords, inicio, opciones)
         : 0;
 
-      const optimizado = optimizarOrden<ClienteGeo>(conCoords, inicio, opciones);
+      // ── Paso 4b (Fase 2.0): Google Directions — CALLES REALES
+      // Google ordena las paradas midiendo por calles de verdad
+      // (sentidos, óvalos, vías expresas de Lima) y devuelve km/min
+      // REALES + la geometría de la ruta para el mapa.
+      let ordenFinal: Array<{ lat: number; lng: number; cliente: Cliente }>;
+      let distanciaDespuesKm: number;
+      let tiempoEstimadoMin: number;
+      let motor: 'google' | 'local' = 'local';
+
+      const claveGoogle = getGoogleApiKey();
+      let resultadoGoogle = null as Awaited<ReturnType<typeof optimizarConDirections<ClienteGeo>>> | null;
+      if (claveGoogle && conCoords.length >= 2 && conCoords.length <= 23) {
+        resultadoGoogle = await optimizarConDirections<ClienteGeo>(
+          conCoords,
+          inicio,
+          { fin, cerrarCiclo: opciones.cerrarCiclo },
+          onProgress
+        );
+      }
+
+      if (resultadoGoogle) {
+        ordenFinal = resultadoGoogle.orden;
+        distanciaDespuesKm = resultadoGoogle.distanciaKm;
+        tiempoEstimadoMin = resultadoGoogle.tiempoMin;
+        motor = 'google';
+        // Guardar la geometría para que el mapa la tenga lista
+        if (resultadoGoogle.puntos.length > 1) {
+          guardarRutaOptimizada({
+            puntos: resultadoGoogle.puntos,
+            distanciaKm: resultadoGoogle.distanciaKm,
+            tiempoMin: resultadoGoogle.tiempoMin,
+            firma: firmaRutaGoogle(
+              inicio,
+              resultadoGoogle.orden.map((c) => ({ lat: c.lat, lng: c.lng })),
+              fin
+            ),
+            ts: Date.now(),
+          });
+        }
+      } else {
+        // Optimizador local (vecino más cercano + 2-opt) — respaldo
+        if (claveGoogle && conCoords.length >= 2) {
+          onProgress?.('Google no respondió — optimizando localmente…');
+        }
+        const optimizado = optimizarOrden<ClienteGeo>(conCoords, inicio, opciones);
+        ordenFinal = optimizado.orden;
+        distanciaDespuesKm = optimizado.distanciaKm;
+        tiempoEstimadoMin = optimizado.tiempoMin;
+      }
 
       // ── Paso 5: sin ubicación al final, agrupados por distrito
       const sinUbicacionOrdenados = [...sinCoords].sort((a, b) => {
@@ -365,16 +421,16 @@ export function useClientes() {
       });
 
       const listaFinal: Cliente[] = [
-        ...optimizado.orden.map((cg) => cg.cliente),
+        ...ordenFinal.map((cg) => cg.cliente),
         ...sinUbicacionOrdenados,
       ].map((c, idx) => ({ ...c, num: idx + 1 }));
 
       // ── Paso 6: persistir (nuevo orden + coordenadas nuevas)
       await guardar(listaFinal);
 
-      const conUbicacion = optimizado.orden.length;
-      const ahorro = distanciaAntesKm > 0 && optimizado.distanciaKm > 0
-        ? Math.max(0, Math.round((1 - optimizado.distanciaKm / distanciaAntesKm) * 100))
+      const conUbicacion = ordenFinal.length;
+      const ahorro = distanciaAntesKm > 0 && distanciaDespuesKm > 0
+        ? Math.max(0, Math.round((1 - distanciaDespuesKm / distanciaAntesKm) * 100))
         : 0;
 
       return {
@@ -385,11 +441,12 @@ export function useClientes() {
         desdeCache,
         aproximados,
         distanciaAntesKm,
-        distanciaDespuesKm: optimizado.distanciaKm,
+        distanciaDespuesKm,
         ahorroPct: ahorro,
-        tiempoEstimadoMin: optimizado.tiempoMin,
+        tiempoEstimadoMin,
         origen,
         conFin: !!fin,
+        motor,
       };
     } finally {
       setSincronizando(false);
