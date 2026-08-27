@@ -898,30 +898,47 @@ export async function subirFotoPago(
 /**
  * Sube una foto de evidencia de entrega a Firebase Storage.
  * Ruta: entregas/{uid}/{clienteId}_{timestamp}.jpg
+ *
+ * Fallback (Fase 1.2): si Storage no está disponible o las reglas
+ * rechazan la escritura, devuelve el dataURL base64 comprimido para
+ * guardar directo en Firestore (mismo patrón que usaba el Modular /
+ * ClienteTrack con base64 inline).
  */
 export async function subirFotoEntrega(
   uid: string,
   clienteId: string | number,
-  file: File | Blob
+  file: File | Blob,
+  dataUrlFallback?: string
 ): Promise<string> {
-  if (!storage) throw new Error('Storage no inicializado');
-
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
-  const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
-  const refImg = storageRef(storage, ruta);
 
-  await uploadBytes(refImg, file, {
-    contentType: 'image/jpeg',
-    customMetadata: {
-      clienteId: String(clienteId),
-      uid: uid,
-      fecha: new Date().toISOString(),
-      tipo: 'entrega',
-    },
-  });
+  if (storage) {
+    try {
+      const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
+      const refImg = storageRef(storage, ruta);
 
-  const url = await getDownloadURL(refImg);
-  console.log('✅ Foto de entrega subida:', ruta);
-  return url;
+      await uploadBytes(refImg, file, {
+        contentType: 'image/jpeg',
+        customMetadata: {
+          clienteId: String(clienteId),
+          uid: uid,
+          fecha: new Date().toISOString(),
+          tipo: 'entrega',
+        },
+      });
+
+      const url = await getDownloadURL(refImg);
+      console.log('✅ Foto de entrega subida a Storage:', ruta);
+      return url;
+    } catch (e) {
+      console.warn('⚠️ Storage no disponible, usando base64 en Firestore:', e);
+    }
+  }
+
+  // Fallback: base64 directo en Firestore (como el Modular/ClienteTrack)
+  if (dataUrlFallback) {
+    return dataUrlFallback;
+  }
+  throw new Error('No se pudo subir la foto (Storage y base64 no disponibles)');
 }
