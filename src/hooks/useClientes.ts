@@ -18,7 +18,36 @@ import {
   limpiarRutaSinGuardar,
   subirFotoEntrega,
 } from '../services/firestore';
+import {
+  batchGeocodificar,
+  obtenerPosicionActual,
+  Coordenadas,
+} from '../services/geocoding';
+import {
+  optimizarOrden,
+  distanciaRutaKm,
+  LIMA_CENTRO,
+  PuntoGeo,
+} from '../services/routeOptimizer';
 import { useAuth } from './useAuth';
+
+/** Resultado detallado de la optimización (para mostrar en UI) */
+export interface ResultadoOptimizarRuta {
+  total: number;              // clientes totales
+  conUbicacion: number;       // clientes ordenados por distancia real
+  sinUbicacion: number;       // clientes sin dirección geocodificable
+  geocodificadosAhora: number;// direcciones ubicadas en esta corrida
+  desdeCache: number;         // direcciones que ya estaban en caché
+  distanciaAntesKm: number;
+  distanciaDespuesKm: number;
+  ahorroPct: number;          // % de km ahorrados
+  tiempoEstimadoMin: number;
+  conGPS: boolean;            // si se usó tu posición real como inicio
+}
+
+interface ClienteGeo extends PuntoGeo {
+  cliente: Cliente;
+}
 
 export function useClientes() {
   const { user, profile } = useAuth();
@@ -207,29 +236,104 @@ export function useClientes() {
     }
   }, [user]);
 
-  // 🚀 OPTIMIZAR RUTA: ordena clientes por distrito (mismo distrito juntos)
-  // Esto minimiza la distancia recorrida al agrupar entregas por zona
-  const optimizarRuta = useCallback(async () => {
-    if (clientes.length === 0) return 0;
+  // 🚀 OPTIMIZAR RUTA (Fase 1.3 — distancia REAL)
+  // 1. Geocodifica las direcciones que faltan (con caché y rate
+  //    limit — nunca inventa coordenadas)
+  // 2. Guarda las coordenadas en Firestore (no se vuelve a
+  //    geocodificar la misma dirección jamás)
+  // 3. Ordena con vecino-más-cercano + 2-opt desde tu posición
+  //    GPS (o centro de Lima si no hay señal)
+  // 4. Los que no se pudieron ubicar van al final, agrupados
+  //    por distrito (comportamiento honesto, sin mentir)
+  const optimizarRuta = useCallback(async (
+    onProgress?: (mensaje: string) => void
+  ): Promise<ResultadoOptimizarRuta | null> => {
+    if (clientes.length === 0) return null;
     setSincronizando(true);
     try {
-      // Ordenar por distrito (alfabético) manteniendo el orden original dentro de cada distrito
-      const optimizados = [...clientes].sort((a, b) => {
+      // ── Paso 1: separar los que ya tienen coordenadas guardadas
+      let conCoords: ClienteGeo[] = [];
+      let sinCoords: Cliente[] = [];
+      for (const c of clientes) {
+        if (
+          typeof c.lat === 'number' && typeof c.lng === 'number' &&
+          !isNaN(c.lat) && !isNaN(c.lng)
+        ) {
+          conCoords.push({ lat: c.lat, lng: c.lng, cliente: c });
+        } else {
+          sinCoords.push(c);
+        }
+      }
+
+      // ── Paso 2: geocodificar los que faltan
+      let geocodificadosAhora = 0;
+      let desdeCache = 0;
+      if (sinCoords.length > 0) {
+        const items = sinCoords.map((c) => ({
+          item: c,
+          dir: c.dir || '',
+          dist: c.dist || '',
+        }));
+        const { resueltos, fallidos, desdeCache: nCache } = await batchGeocodificar<Cliente>(
+          items,
+          onProgress
+        );
+        desdeCache = nCache;
+        geocodificadosAhora = resueltos.size;
+        resueltos.forEach((coords: Coordenadas, c: Cliente) => {
+          conCoords.push({ lat: coords.lat, lng: coords.lng, cliente: { ...c, lat: coords.lat, lng: coords.lng } });
+        });
+        sinCoords = fallidos;
+      }
+
+      // ── Paso 3: posición GPS actual como punto de partida
+      onProgress?.('Obteniendo tu posición GPS…');
+      const gps = await obtenerPosicionActual(5000);
+      const inicio = gps ?? LIMA_CENTRO;
+
+      // ── Paso 4: distancia ANTES (orden actual) vs optimizada
+      onProgress?.('Calculando la mejor ruta…');
+      const ordenActual = conCoords.map((cg) => cg.cliente);
+      const distanciaAntesKm = ordenActual.length > 0
+        ? distanciaRutaKm(conCoords, inicio)
+        : 0;
+
+      const optimizado = optimizarOrden<ClienteGeo>(conCoords, inicio);
+
+      // ── Paso 5: sin ubicación al final, agrupados por distrito
+      const sinUbicacionOrdenados = [...sinCoords].sort((a, b) => {
         const distA = (a.dist || '').toLowerCase().trim();
         const distB = (b.dist || '').toLowerCase().trim();
-        if (distA && !distB) return -1;  // a con distrito primero
-        if (!distA && distB) return 1;   // b con distrito primero
+        if (distA && !distB) return -1;
+        if (!distA && distB) return 1;
         return distA.localeCompare(distB);
       });
 
-      // Reasignar números de orden (1, 2, 3...)
-      const conNuevoOrden = optimizados.map((c, idx) => ({
-        ...c,
-        num: idx + 1,
-      }));
+      const listaFinal: Cliente[] = [
+        ...optimizado.orden.map((cg) => cg.cliente),
+        ...sinUbicacionOrdenados,
+      ].map((c, idx) => ({ ...c, num: idx + 1 }));
 
-      await guardar(conNuevoOrden);
-      return conNuevoOrden.length;
+      // ── Paso 6: persistir (nuevo orden + coordenadas nuevas)
+      await guardar(listaFinal);
+
+      const conUbicacion = optimizado.orden.length;
+      const ahorro = distanciaAntesKm > 0 && optimizado.distanciaKm > 0
+        ? Math.max(0, Math.round((1 - optimizado.distanciaKm / distanciaAntesKm) * 100))
+        : 0;
+
+      return {
+        total: listaFinal.length,
+        conUbicacion,
+        sinUbicacion: sinCoords.length,
+        geocodificadosAhora,
+        desdeCache,
+        distanciaAntesKm,
+        distanciaDespuesKm: optimizado.distanciaKm,
+        ahorroPct: ahorro,
+        tiempoEstimadoMin: optimizado.tiempoMin,
+        conGPS: !!gps,
+      };
     } finally {
       setSincronizando(false);
     }
