@@ -490,6 +490,7 @@ export default function App() {
                 orders={orders}
                 riderName={profile?.nombre || user?.displayName || 'Rider'}
                 onOpenWhatsApp={(phone, name) => handleOpenWhatsAppModal(phone, name)}
+                onNavigateTab={setActiveTab}
               />
             </div>
           )}

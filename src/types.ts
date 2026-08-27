@@ -38,6 +38,7 @@ export interface Order {
   obs?: string;          // Observación original del pedido
   lat?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
   lng?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
+  latSrc?: 'google' | 'nominatim' | 'aprox' | 'manual'; // Origen de la coordenada (Fase 1.4)
 }
 
 export interface Driver {
