@@ -1,21 +1,29 @@
 // ═══════════════════════════════════════════════════════════
-// 🔍 ADDRESS AUTOCOMPLETE - RiderTrack V2 (Fase 1.4)
-// Buscador de direcciones con autocompletado (estilo Circuit):
+// 🔍 ADDRESS AUTOCOMPLETE - RiderTrack V2 (Fase 2.0)
+// Buscador de direcciones con autocompletado — estilo Circuit:
 // escribes "av sucre" y aparecen candidatos con su distrito:
 //   "Avenida Sucre — San Miguel"
 //   "Avenida Sucre — Bellavista"
 //   ...
 // Seleccionas uno y queda guardado con coordenadas exactas.
 //
-// Motor: Nominatim (OpenStreetMap, gratis) con viewbox de Lima
-// Metropolitana + Callao para priorizar resultados locales.
-// Debounce de 550ms y mínimo 3 caracteres para no gastar la
-// cuota de 1 req/segundo.
+// Motor (Fase 2.0): GOOGLE PLACES AUTOCOMPLETE (New) — el mismo
+// que usa Circuit, con sesiones agrupadas (autocomplete +
+// detalle = 1 sesión). Si Google no responde, respaldo gratis
+// con Nominatim (OpenStreetMap).
+//
+// Debounce de 450ms y mínimo 3 caracteres.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, MapPin, Loader2, X, CheckCircle2, Navigation } from 'lucide-react';
-import { buscarDirecciones, DireccionSugerida } from '../services/geocoding';
+import {
+  buscarDirecciones,
+  detalleLugarGoogle,
+  iniciarSesionAutocomplete,
+  DireccionSugerida,
+} from '../services/geocoding';
+import { getGoogleApiKey } from '../services/googleMaps';
 
 export interface DireccionElegida {
   nombre: string;      // etiqueta completa "Avenida Sucre 523, San Miguel"
@@ -55,9 +63,14 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
   const [sugerencias, setSugerencias] = useState<DireccionSugerida[]>([]);
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState('');
+  const [detalleCargando, setDetalleCargando] = useState(false);
+  /** ¿Las sugerencias vienen de Google Places? (para el badge) */
+  const [deGoogle, setDeGoogle] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contenedorRef = useRef<HTMLDivElement>(null);
+  // Sesión de Places: agrupa autocomplete + detalle (facturación)
+  const sesionRef = useRef<string>(iniciarSesionAutocomplete());
 
   // Cerrar sugerencias al tocar fuera
   useEffect(() => {
@@ -70,7 +83,7 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
     return () => document.removeEventListener('mousedown', clicFuera);
   }, []);
 
-  // Búsqueda con debounce (550ms) — mínimo 3 caracteres
+  // Búsqueda con debounce (450ms) — mínimo 3 caracteres
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const t = texto.trim();
@@ -85,31 +98,65 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
     setBuscando(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await buscarDirecciones(t, 6);
+        const res = await buscarDirecciones(t, 6, sesionRef.current);
         setSugerencias(res);
+        setDeGoogle(res.length > 0 && res[0].origen === 'google');
         setAbierto(true);
-        setError(res.length === 0 ? 'Sin resultados — prueba con el nombre de la avenida o el distrito' : '');
+        setError(
+          res.length === 0
+            ? 'Sin resultados — prueba con el nombre de la avenida o el distrito'
+            : ''
+        );
       } catch {
         setError('No se pudo buscar — revisa tu conexión');
         setSugerencias([]);
       } finally {
         setBuscando(false);
       }
-    }, 550);
+    }, 450);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [texto]);
 
+  /** Elegir una sugerencia: si es de Google trae placeId → se piden
+   *  sus coordenadas exactas (Place Details, misma sesión) */
   const elegir = useCallback(
-    (s: DireccionSugerida) => {
+    async (s: DireccionSugerida) => {
+      setAbierto(false);
+      setError('');
+
+      // Sugerencia de Google: pedir coordenadas con Place Details
+      if (s.placeId) {
+        setDetalleCargando(true);
+        try {
+          const detalle = await detalleLugarGoogle(s.placeId, sesionRef.current);
+          // Nueva sesión para la próxima búsqueda (la actual ya cerró)
+          sesionRef.current = iniciarSesionAutocomplete();
+          if (detalle) {
+            onElegir({
+              nombre: detalle.direccion || `${s.etiqueta}, ${s.detalle}`,
+              distrito: s.distrito || detalle.distrito,
+              lat: detalle.lat,
+              lng: detalle.lng,
+            });
+            setTexto('');
+            setSugerencias([]);
+            return;
+          }
+          setError('No se pudieron obtener las coordenadas — inténtalo de nuevo');
+          return;
+        } finally {
+          setDetalleCargando(false);
+        }
+      }
+
+      // Sugerencia de Nominatim: ya trae coordenadas
       const nombreCompleto = s.detalle ? `${s.etiqueta}, ${s.detalle}` : s.etiqueta;
       onElegir({ nombre: nombreCompleto, distrito: s.distrito, lat: s.lat, lng: s.lng });
       setTexto('');
       setSugerencias([]);
-      setAbierto(false);
-      setError('');
     },
     [onElegir]
   );
@@ -118,6 +165,8 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
     icono === 'inicio' ? <Navigation className="w-4 h-4 text-emerald-400" />
     : icono === 'fin' ? <MapPin className="w-4 h-4 text-rose-400" />
     : <MapPin className="w-4 h-4 text-indigo-400" />;
+
+  const usaGoogle = !!getGoogleApiKey();
 
   return (
     <div ref={contenedorRef} className="relative">
@@ -159,8 +208,10 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
               autoCapitalize="sentences"
               autoCorrect="off"
             />
-            {buscando && <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />}
-            {!buscando && texto && (
+            {(buscando || detalleCargando) && (
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+            )}
+            {!buscando && !detalleCargando && texto && (
               <button
                 onClick={() => {
                   setTexto('');
@@ -182,16 +233,32 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
           {/* Lista de sugerencias con distrito */}
           {abierto && sugerencias.length > 0 && (
             <div className="absolute z-[700] left-0 right-0 mt-1 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
+              {deGoogle && usaGoogle && (
+                <div className="px-3 py-1.5 bg-slate-800/80 border-b border-slate-700 flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-blue-500 border border-white/40" />
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">
+                    Google Places — como Circuit
+                  </span>
+                </div>
+              )}
               {sugerencias.map((s, i) => (
                 <button
-                  key={`${s.lat}-${s.lng}-${i}`}
+                  key={`${s.lat}-${s.lng}-${s.placeId || ''}-${i}`}
                   onClick={() => elegir(s)}
                   className="w-full text-left px-3 py-2.5 hover:bg-indigo-500/10 border-b border-slate-800/60 last:border-0 transition-colors flex items-start gap-2"
                 >
                   <MapPin className="w-3.5 h-3.5 text-indigo-400 mt-0.5 shrink-0" />
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-white truncate">{s.etiqueta}</p>
-                    {s.detalle && <p className="text-[10px] text-slate-400 truncate">{s.detalle}</p>}
+                    {s.distrito && (
+                      <p className="text-[10px] text-emerald-400/90 truncate">
+                        📍 {s.distrito}
+                        {s.detalle && s.detalle !== s.distrito ? ` · ${s.detalle}` : ''}
+                      </p>
+                    )}
+                    {!s.distrito && s.detalle && (
+                      <p className="text-[10px] text-slate-400 truncate">{s.detalle}</p>
+                    )}
                   </div>
                 </button>
               ))}

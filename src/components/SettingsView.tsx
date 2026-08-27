@@ -24,9 +24,10 @@ import { ConfigCuentasModal } from './ConfigCuentasModal';
 import {
   getGoogleApiKey,
   setGoogleApiKey,
-  tamanoCache,
-  limpiarCacheGeocodificacion,
-} from '../services/geocoding';
+  clavePersonalizada,
+  DEFAULT_GOOGLE_MAPS_API_KEY,
+} from '../services/googleMaps';
+import { tamanoCache, limpiarCacheGeocodificacion } from '../services/geocoding';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from '../services/mapStyle';
 
 interface SettingsViewProps {
@@ -64,17 +65,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
 
   const guardarApiKey = () => {
     setGoogleApiKey(apiKeyInput);
-    const nuevoMotor = apiKeyInput.trim() ? 'google' : 'nominatim';
-    setMotor(nuevoMotor);
-    if (apiKeyInput.trim()) {
-      onShowToast?.(
-        '🗺️ Google Geocoding activado',
-        'Las direcciones se ubicarán con Google (más precisión). Funciona en la próxima optimización de ruta.',
-        'success'
-      );
-    } else {
-      onShowToast?.('🌐 Google desactivado', 'Se vuelve al motor gratis Nominatim (OpenStreetMap)', 'info');
-    }
+    // Con la clave de fábrica o una propia, el motor es Google
+    setMotor(apiKeyInput.trim() ? 'google' : 'google');
+    onShowToast?.(
+      '🗺️ Google Maps activo',
+      apiKeyInput.trim()
+        ? 'Mapa, búsqueda de direcciones y optimización por calles reales con Google. Funciona en la próxima optimización.'
+        : 'Se restauró la clave de fábrica del proyecto RiderTrack.',
+      'success'
+    );
+  };
+
+  const restaurarClaveFabrica = () => {
+    setApiKeyInput(DEFAULT_GOOGLE_MAPS_API_KEY);
+    setGoogleApiKey(''); // borra la personalizada → vuelve la de fábrica
+    setMotor('google');
+    onShowToast?.(
+      '🔄 Clave de fábrica restaurada',
+      'Se volvió a la clave del proyecto RiderTrack en Google Cloud.',
+      'info'
+    );
   };
 
   const limpiarCache = () => {
@@ -229,9 +239,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           {/* Motor activo */}
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="font-bold text-white text-sm">Motor de ubicación de direcciones</h3>
+              <h3 className="font-bold text-white text-sm">Google Maps Platform</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Convierte “Av. Larco 123, Miraflores” en coordenadas para optimizar tu ruta y dibujarla en el mapa.
+                Mapa de entregas, búsqueda de direcciones (como Circuit) y optimización de ruta por
+                calles reales — todo con Google. Activo con la clave de fábrica del proyecto RiderTrack.
               </p>
             </div>
             <span
@@ -255,7 +266,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               {([
                 { id: 'oscuro', label: 'Oscuro', desc: 'bonito, combina con la app', emoji: '🌙' },
                 { id: 'claro', label: 'Claro', desc: 'día, alto contraste', emoji: '☀️' },
-                { id: 'estandar', label: 'Estándar', desc: 'OpenStreetMap clásico', emoji: '🗺️' },
+                { id: 'estandar', label: 'Estándar', desc: 'limpio, sin locales', emoji: '🗺️' },
               ] as Array<{ id: EstiloMapa; label: string; desc: string; emoji: string }>).map((op) => (
                 <button
                   key={op.id}
@@ -273,8 +284,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               ))}
             </div>
             <p className="text-[11px] text-slate-500">
-              Los 3 usan mapas gratuitos sin API key (el oscuro y el claro son de CARTO sobre
-              datos de OpenStreetMap). También puedes cambiarlo al toque desde el botón 🎨 del mapa.
+              El mapa usa GOOGLE MAPS con estos 3 estilos (la clave del proyecto ya está configurada).
+              Si Google no carga (sin internet), la app cae sola a mapas gratis sin key. También puedes
+              cambiarlo al toque desde el botón 🎨 del mapa.
             </p>
           </div>
 
@@ -282,13 +294,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              Google Maps API Key (opcional)
+              Google Maps API Key {clavePersonalizada() ? '(personalizada)' : '(de fábrica — ya configurada)'}
             </label>
             <div className="flex gap-2">
               <input
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="AIza… (vacío = Nominatim gratis)"
+                placeholder="AIza… (la de fábrica ya funciona)"
                 className="flex-1 bg-slate-900 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-700 focus:border-indigo-500 outline-none font-mono"
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -300,14 +312,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               >
                 <Save className="w-3.5 h-3.5" /> Guardar
               </button>
+              {clavePersonalizada() && (
+                <button
+                  onClick={restaurarClaveFabrica}
+                  className="flex items-center gap-1 px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
+                  title="Volver a la clave del proyecto RiderTrack"
+                >
+                  🔄 Fábrica
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Con key: Google ubica direcciones peruanas con mayor precisión (Geocoding API — se habilita en{' '}
-              <a href="https://console.cloud.google.com/apis/library/geocodingapi" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">
-                Google Cloud
-              </a>
-              , tiene capa gratuita mensual y requiere tarjeta). Sin key: Nominatim/OpenStreetMap gratis — ya funciona, solo un poco menos preciso.
-              La key se guarda únicamente en este dispositivo.
+              La clave de fábrica (proyecto <b className="text-slate-400">RiderTrack</b> en Google Cloud) ya viene
+              configurada y habilitada para Maps, Geocoding, Places y Directions. Solo cambia esta clave si quieres
+              usar otra cuenta de Google Cloud. Si la borras, vuelve la de fábrica.
             </p>
           </div>
 
@@ -328,8 +346,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           </div>
 
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            ℹ️ El mapa de entregas usa OpenStreetMap (gratis, sin key). La optimización de ruta ordena tus paradas
-            por distancia real con tu GPS: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
+            ℹ️ Todo el sistema de mapas usa <b className="text-slate-400">Google Maps Platform</b> (clave de fábrica):
+            el mapa de entregas con skin oscuro, el motito GPS, la búsqueda de direcciones estilo Circuit y la
+            optimización <b className="text-slate-400">por calles reales</b>: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
+            Google incluye US$200 de crédito mensual — para un rider ese uso queda dentro de lo gratis.
           </p>
         </div>
       )}

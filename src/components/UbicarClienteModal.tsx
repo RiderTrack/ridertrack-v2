@@ -63,9 +63,13 @@ export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
       zoomControl: true,
       attributionControl: false,
     });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    // Fase 2.0: tiles ESRI dark (sin API key — CARTO empezó a pedir
+    // key y mostraba "API KEY REQUIRED" sobre el mapa)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
-      subdomains: 'abcd',
+    }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
     }).addTo(map);
     mapRef.current = map;
     return () => {

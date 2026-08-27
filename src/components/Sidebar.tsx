@@ -233,12 +233,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Mobile Overlay & Drawer */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-[1200] flex">
+          {/* FIX Fase 2.0: el drawer vive por ENCIMA de todo (antes
+              z-50: los mapas Leaflet/Google con z-index 400-1000
+              internos quedaban por encima y tapaban el menú) */}
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
             onClick={onCloseMobile}
           />
-          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-50">
+          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-[1201]">
             {sidebarContent}
           </div>
         </div>
