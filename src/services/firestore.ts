@@ -18,7 +18,6 @@ import {
   limit,
   getDocs,
   getDoc,
-  getDocFromCache,
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
@@ -615,8 +614,7 @@ export interface ConfigCuentas {
   bcp?: { titular: string; cci: string; numero: string; };
   bbva?: { titular: string; cci: string; numero: string; };
   interbank?: { titular: string; cci: string; numero: string; };
-  /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
-  plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
+  plin?: { nombre: string; telefono: string; qrBase64?: string; qrUrl?: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
   /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
   ruta?: ConfigRuta;
@@ -627,94 +625,44 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   bcp: { titular: 'Rudy Alen', cci: '002-999-999999999999-99', numero: '999-99999999-9-99' },
   bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
-  plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
+  plin: { nombre: 'Rudy Alen', telefono: '999999999', qrBase64: '', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
   ruta: { inicio: null, fin: null, volverAlInicio: false },
 };
 
-// ── Fase 2.1: utilidades a prueba de red muerta ─────────────
-// Un getDoc/setDoc sin límite de tiempo queda PENDIENTE PARA SIEMPRE
-// cuando la red está muerta (0 KB/s) — así se colgaba la pantalla
-// del QR. Estas envolturas ponen tope y degradan con elegancia.
-
-/** Carrera entre una promesa Firestore y un timeout */
-function conTimeout<T>(promesa: Promise<T>, ms: number, mensaje = 'sin-conexion'): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(mensaje)), ms);
-    promesa.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      (e) => { clearTimeout(t); reject(e); }
-    );
-  });
-}
-
-/** Fusiona un doc crudo de config_empresa con los defaults */
-function fusionarConfig(data: any): ConfigCuentas {
-  return {
-    ...CONFIG_CUENTAS_DEFAULT,
-    ...data,
-    yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data?.yape },
-    bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data?.bcp },
-    bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
-    interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
-    plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
-    empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
-    ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
-  };
-}
-
-/**
- * Carga la config (Fase 2.1 — NUNCA se cuelga):
- *   1. Caché local de Firestore (instantáneo, funciona SIN internet)
- *   2. Servidor con tope de 9 s
- *   3. Defaults — la pantalla siempre se muestra
- */
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
   if (!db || !userId) return CONFIG_CUENTAS_DEFAULT;
-
-  const ref = doc(db, 'config_empresa', userId);
-
-  // 1) Caché local primero — instantáneo y offline
   try {
-    const snapCache = await getDocFromCache(ref);
-    if (snapCache.exists()) return fusionarConfig(snapCache.data());
-  } catch {
-    // No está en caché todavía (primera vez) — seguir al servidor
-  }
-
-  // 2) Servidor con tope de tiempo
-  try {
-    const snap = await conTimeout(getDoc(ref), 9000);
-    if (snap.exists()) return fusionarConfig(snap.data());
+    const ref = doc(db, 'config_empresa', userId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        ...CONFIG_CUENTAS_DEFAULT,
+        ...data,
+        yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data.yape },
+        bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data.bcp },
+        bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data.bbva },
+        interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data.interbank },
+        plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data.plin },
+        empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data.empresa },
+        ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data.ruta },
+      };
+    }
     return CONFIG_CUENTAS_DEFAULT;
   } catch (e: any) {
-    console.warn('⚠️ Config sin conexión al servidor (usando defaults):', e?.message || e);
+    console.error('❌ Error cargando config de cuentas:', e);
     return CONFIG_CUENTAS_DEFAULT;
   }
 }
 
-/**
- * Guarda la config (Fase 2.1): con red muerta el setDoc queda
- * pendiente indefinidamente → tope de 9 s. Firestore encola la
- * escritura localmente (IndexedDB) y la sincroniza solo cuando
- * vuelve la conexión, así que tras el tope el guardado SE CONSIDERA
- * hecho (llegará al servidor al reconectar).
- */
 export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<void> {
   if (!db || !userId) return;
   try {
     const ref = doc(db, 'config_empresa', userId);
-    await conTimeout(
-      setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
+    await setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true });
     console.log('🏦 Config de cuentas guardada');
   } catch (e: any) {
-    if (e?.message === 'guardado-local') {
-      console.warn('🏦 Config guardada LOCALMENTE — se sincronizará al reconectar');
-      return; // optimista: Firestore la envía cuando haya red
-    }
     console.error('❌ Error guardando config de cuentas:', e);
     throw e;
   }
@@ -741,31 +689,22 @@ export interface YapeBotConfig {
  * Sincroniza la config de Yape (QR + datos) a ruta_activa/{uid}.yape
  * para que el bot pueda enviar el QR por WhatsApp.
  * Usa merge:true → NO toca clientes ni otros campos de la ruta.
- * Fase 2.1: con tope de tiempo — offline queda encolada localmente.
  */
 export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<void> {
   if (!db || !userId) throw new Error('Firebase no disponible');
   try {
-    await conTimeout(
-      setDoc(doc(db, 'ruta_activa', userId), {
-        yape: {
-          qrBase64: yape.qrBase64 || '',
-          qrUrl: yape.qrUrl || '',
-          numero: yape.numero || '',
-          titular: yape.titular || '',
-          cci: yape.cci || '',
-          bancos: yape.bancos || '',
-        },
-        actualizadaAt: new Date().toISOString(),
-      }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
+    await setDoc(doc(db, 'ruta_activa', userId), {
+      yape: {
+        qrBase64: yape.qrBase64 || '',
+        qrUrl: yape.qrUrl || '',
+        numero: yape.numero || '',
+        titular: yape.titular || '',
+        cci: yape.cci || '',
+        bancos: yape.bancos || '',
+      },
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true });
   } catch (e: any) {
-    if (e?.message === 'guardado-local') {
-      console.warn('💜 Yape sincronizado LOCALMENTE — llegará al bot al reconectar');
-      return; // optimista: se envía cuando vuelva la red
-    }
     console.error('❌ Error sincronizando Yape al bot:', e);
     throw e;
   }
@@ -774,217 +713,26 @@ export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig):
 /**
  * Lee la config de Yape que el bot ve (ruta_activa/{uid}.yape).
  * Sirve para mostrar el estado de sincronización en la pantalla de QR.
- * Fase 2.1: caché primero + servidor con tope — NUNCA se cuelga
- * (antes, con red muerta, la pantallita de sync quedaba girando
- * para siempre).
  */
 export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig | null> {
   if (!db || !userId) return null;
-
-  const ref = doc(db, 'ruta_activa', userId);
-  const extraer = (data: any): YapeBotConfig | null => {
-    if (!data?.yape) return null;
-    const y = data.yape;
-    return {
-      qrBase64: y.qrBase64 || '',
-      qrUrl: y.qrUrl || '',
-      numero: y.numero || '',
-      titular: y.titular || '',
-      cci: y.cci || '',
-      bancos: y.bancos || '',
-    };
-  };
-
-  // 1) Caché local (instantáneo, offline)
   try {
-    const snapCache = await getDocFromCache(ref);
-    const yapeCache = extraer(snapCache.exists() ? snapCache.data() : null);
-    if (yapeCache) return yapeCache;
-  } catch {
-    // sin caché todavía
-  }
-
-  // 2) Servidor con tope de tiempo
-  try {
-    const snap = await conTimeout(getDoc(ref), 9000);
-    return extraer(snap.exists() ? snap.data() : null);
-  } catch (e: any) {
-    console.warn('⚠️ Yape del bot no disponible (sin conexión):', e?.message || e);
+    const snap = await getDoc(doc(db, 'ruta_activa', userId));
+    if (snap.exists() && snap.data().yape) {
+      const y = snap.data().yape;
+      return {
+        qrBase64: y.qrBase64 || '',
+        qrUrl: y.qrUrl || '',
+        numero: y.numero || '',
+        titular: y.titular || '',
+        cci: y.cci || '',
+        bancos: y.bancos || '',
+      };
+    }
     return null;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// 🔷 QR PLIN — SINCRONIZACIÓN CON EL BOT (Fase 2.2)
-// ═══════════════════════════════════════════════════════════
-// Mismo mecanismo que Yape, pero en ruta_activa/{uid}.plin:
-// el bot podrá leer el QR de Plin y mandarlo por WhatsApp con
-// la acción "enviar_plin" (cuando el bot tenga su handler —
-// la app ya deja todo listo en Firebase).
-
-export interface PlinBotConfig {
-  qrBase64?: string;   // imagen del QR (data URI, máx ~900KB para Firestore)
-  qrUrl?: string;      // alternativa: URL pública del QR
-  numero: string;      // número de celular asociado a Plin (9 dígitos)
-  titular: string;     // nombre del titular
-}
-
-/**
- * Sincroniza la config de Plin (QR + datos) a ruta_activa/{uid}.plin
- * Usa merge:true → NO toca clientes ni otros campos de la ruta.
- * Fase 2.2: con tope de tiempo — offline queda encolada localmente.
- */
-export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<void> {
-  if (!db || !userId) throw new Error('Firebase no disponible');
-  try {
-    await conTimeout(
-      setDoc(doc(db, 'ruta_activa', userId), {
-        plin: {
-          qrBase64: plin.qrBase64 || '',
-          qrUrl: plin.qrUrl || '',
-          numero: plin.numero || '',
-          titular: plin.titular || '',
-        },
-        actualizadaAt: new Date().toISOString(),
-      }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
   } catch (e: any) {
-    if (e?.message === 'guardado-local') {
-      console.warn('🔷 Plin sincronizado LOCALMENTE — llegará al bot al reconectar');
-      return; // optimista: se envía cuando vuelva la red
-    }
-    console.error('❌ Error sincronizando Plin al bot:', e);
-    throw e;
-  }
-}
-
-/**
- * Lee la config de Plin que el bot ve (ruta_activa/{uid}.plin).
- * Fase 2.2: caché primero + servidor con tope — NUNCA se cuelga.
- */
-export async function obtenerPlinDelBot(userId: string): Promise<PlinBotConfig | null> {
-  if (!db || !userId) return null;
-
-  const ref = doc(db, 'ruta_activa', userId);
-  const extraer = (data: any): PlinBotConfig | null => {
-    if (!data?.plin) return null;
-    const p = data.plin;
-    return {
-      qrBase64: p.qrBase64 || '',
-      qrUrl: p.qrUrl || '',
-      numero: p.numero || '',
-      titular: p.titular || '',
-    };
-  };
-
-  // 1) Caché local (instantáneo, offline)
-  try {
-    const snapCache = await getDocFromCache(ref);
-    const plinCache = extraer(snapCache.exists() ? snapCache.data() : null);
-    if (plinCache) return plinCache;
-  } catch {
-    // sin caché todavía
-  }
-
-  // 2) Servidor con tope de tiempo
-  try {
-    const snap = await conTimeout(getDoc(ref), 9000);
-    return extraer(snap.exists() ? snap.data() : null);
-  } catch (e: any) {
-    console.warn('⚠️ Plin del bot no disponible (sin conexión):', e?.message || e);
+    console.error('❌ Error leyendo Yape del bot:', e);
     return null;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// ⏱ CRONÓMETRO DE RUTA → AVISO SILENCIOSO AL BOT (Fase 2.2)
-// ═══════════════════════════════════════════════════════════
-// Recuperado del Rider modular: al INICIAR el cronómetro se
-// publica la ruta completa en ruta_activa/{UID_BOT} con
-// activa:true + iniciadaAt + rider + clientes. Con eso, cuando
-// un cliente escribe por WhatsApp, el bot lo reconoce por su
-// número y le habla por su nombre ("Hola José…"). Al TERMINAR
-// la ruta se marca activa:false y el bot vuelve al modo
-// genérico ("Hola cliente…").
-
-/**
- * Publica la ruta activa COMPLETA (al iniciar el cronómetro).
- * Mismo shape que usaba el Rider modular → el bot no necesita
- * ningún cambio. merge:true conserva yape/plin ya guardados.
- */
-export async function iniciarRutaConBot(
-  clientes: Cliente[],
-  rider: { nombre: string; telefono: string; empresa: string }
-): Promise<void> {
-  if (!db) throw new Error('Firebase no disponible');
-  await conTimeout(
-    setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
-      activa: true,
-      iniciadaAt: new Date().toISOString(),
-      actualizadaAt: new Date().toISOString(),
-      rider: rider,
-      clientes: clientes.map((c, idx) => ({
-        idx: idx,
-        id: c.id,
-        num: c.num || (idx + 1),
-        nombre: c.nombre || 'Cliente',
-        cel: _botCel(c.cel || ''),
-        cobrar: parseFloat(String(c.cobrar || 0)),
-        precio: parseFloat(String(c.precio || 0)),
-        prod: c.prod || '',
-        dir: c.dir || '',
-        dist: c.dist || '',
-        st: c.st || 'pendiente',
-        nota: c.nota || '',
-        obs: c.obs || '',
-        hora: c.hora || '',
-        ...(typeof c.lat === 'number' && typeof c.lng === 'number'
-          ? { lat: c.lat, lng: c.lng }
-          : {}),
-        ...(c.latSrc ? { latSrc: c.latSrc } : {}),
-      })),
-      clienteActualIdx: -1,
-      totalClientes: clientes.length,
-      pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
-    }, { merge: true }),
-    9000,
-    'guardado-local'
-  ).catch((e: any) => {
-    if (e?.message === 'guardado-local') {
-      console.warn('⏱ Ruta publicada LOCALMENTE — llegará al bot al reconectar');
-      return;
-    }
-    console.error('❌ Error publicando ruta para el bot:', e);
-    throw e;
-  });
-}
-
-/**
- * Marca la ruta como finalizada para el bot (al terminar la ruta
- * desde el cronómetro). El bot deja de reconocer clientes por
- * nombre hasta la próxima publicación.
- */
-export async function finalizarRutaActivaBot(): Promise<void> {
-  if (!db) return;
-  try {
-    await conTimeout(
-      setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
-        activa: false,
-        finalizadaAt: new Date().toISOString(),
-        actualizadaAt: new Date().toISOString(),
-      }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
-    console.log('✅ Ruta marcada como finalizada para el bot');
-  } catch (e: any) {
-    if (e?.message === 'guardado-local') {
-      console.warn('⏱ Finalización guardada LOCALMENTE — llegará al bot al reconectar');
-      return;
-    }
-    console.warn('Error finalizando ruta para el bot:', e);
   }
 }
 
@@ -1236,4 +984,138 @@ export async function subirFotoEntrega(
     return dataUrlFallback;
   }
   throw new Error('No se pudo subir la foto (Storage y base64 no disponibles)');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 💚 QR PLIN — SINCRONIZACIÓN CON EL BOT (Fase 1.5)
+// ═══════════════════════════════════════════════════════════
+// Igual que Yape pero para Plin: la config (número + titular +
+// imagen del QR subida desde la app del banco) vive en
+// config_empresa/{uid}.plin y se sincroniza a
+// ruta_activa/{uid}.plin para que el bot pueda enviarla.
+
+export interface PlinBotConfig {
+  qrBase64?: string;
+  qrUrl?: string;
+  numero: string;
+  titular: string;
+}
+
+export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await setDoc(doc(db, 'ruta_activa', userId), {
+      plin: {
+        qrBase64: plin.qrBase64 || '',
+        qrUrl: plin.qrUrl || '',
+        numero: plin.numero || '',
+        titular: plin.titular || '',
+      },
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (e: any) {
+    console.error('❌ Error sincronizando Plin al bot:', e);
+    throw e;
+  }
+}
+
+export async function obtenerPlinDelBot(userId: string): Promise<PlinBotConfig | null> {
+  if (!db || !userId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'ruta_activa', userId));
+    if (snap.exists() && snap.data().plin) {
+      const p = snap.data().plin;
+      return {
+        qrBase64: p.qrBase64 || '',
+        qrUrl: p.qrUrl || '',
+        numero: p.numero || '',
+        titular: p.titular || '',
+      };
+    }
+    return null;
+  } catch (e: any) {
+    console.error('❌ Error leyendo Plin del bot:', e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ⏱️ CRONÓMETRO DE RUTA — AVISO SILENCIOSO (Fase 1.5)
+// ═══════════════════════════════════════════════════════════
+// Recupera la función del Rider modular: mientras el cronómetro
+// está activo, el "aviso silencioso" queda encendido en
+// ruta_activa/{uid}.cronometro. El bot lo lee para saber que el
+// rider está EN RUTA y así saludar al cliente por su NOMBRE con
+// la info de su pedido (sin el cronómetro decía "hola cliente").
+
+export interface CronometroBotState {
+  fase: 'idle' | 'corriendo' | 'pausado';
+  iniciadoAt?: string | null;
+  acumuladoSeg?: number;
+  avisoSilencioso: boolean;
+  actualizadoAt: string;
+}
+
+export async function sincronizarCronometroAlBot(
+  userId: string,
+  estado: {
+    fase: 'idle' | 'corriendo' | 'pausado';
+    iniciadoAt: string | null;
+    acumuladoSeg: number;
+    avisoSilencioso: boolean;
+  }
+): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  const payload: CronometroBotState = {
+    fase: estado.fase,
+    iniciadoAt: estado.iniciadoAt || null,
+    acumuladoSeg: Math.round(estado.acumuladoSeg || 0),
+    avisoSilencioso: !!estado.avisoSilencioso,
+    actualizadoAt: new Date().toISOString(),
+  };
+  try {
+    await setDoc(doc(db, 'ruta_activa', userId), { cronometro: payload }, { merge: true });
+  } catch (e: any) {
+    console.error('❌ Error sincronizando cronómetro al bot:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 👤 AVATAR DEL RIDER (Fase 1.5)
+// ═══════════════════════════════════════════════════════════
+
+export async function guardarAvatarRider(userId: string, avatarId: string): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await setDoc(doc(db, 'usuarios', userId), { avatar: avatarId }, { merge: true });
+  } catch (e: any) {
+    console.error('❌ Error guardando avatar:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🛰️ POSICIÓN DEL MOTORIZADO EN VIVO (Fase 1.5)
+// ═══════════════════════════════════════════════════════════
+// La vista "GPS del Motorizado" publica la posición del rider en
+// ruta_activa/{uid}.posicion cada ~10 s (si hay movimiento).
+// Base para el futuro panel de flota (vender RiderTrack como
+// producto: el jefe ve a TODOS sus motorizados en un mapa).
+
+export interface PosicionRider {
+  lat: number;
+  lng: number;
+  velocidadKmh?: number;
+  rumbo?: number;
+  actualizadoAt: string;
+}
+
+export async function publicarPosicionRider(userId: string, pos: PosicionRider): Promise<void> {
+  if (!db || !userId) return; // silencioso: no bloquea la UI si falla
+  try {
+    await setDoc(doc(db, 'ruta_activa', userId), { posicion: pos }, { merge: true });
+  } catch (e: any) {
+    console.warn('⚠️ No se pudo publicar posición del rider:', e?.message);
+  }
 }
