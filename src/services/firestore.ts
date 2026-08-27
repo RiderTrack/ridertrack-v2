@@ -615,7 +615,8 @@ export interface ConfigCuentas {
   bcp?: { titular: string; cci: string; numero: string; };
   bbva?: { titular: string; cci: string; numero: string; };
   interbank?: { titular: string; cci: string; numero: string; };
-  plin?: { nombre: string; telefono: string; };
+  /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
+  plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
   /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
   ruta?: ConfigRuta;
@@ -626,7 +627,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   bcp: { titular: 'Rudy Alen', cci: '002-999-999999999999-99', numero: '999-99999999-9-99' },
   bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
-  plin: { nombre: 'Rudy Alen', telefono: '999999999' },
+  plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
   ruta: { inicio: null, fin: null, volverAlInicio: false },
 };
@@ -810,6 +811,180 @@ export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig |
   } catch (e: any) {
     console.warn('⚠️ Yape del bot no disponible (sin conexión):', e?.message || e);
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🔷 QR PLIN — SINCRONIZACIÓN CON EL BOT (Fase 2.2)
+// ═══════════════════════════════════════════════════════════
+// Mismo mecanismo que Yape, pero en ruta_activa/{uid}.plin:
+// el bot podrá leer el QR de Plin y mandarlo por WhatsApp con
+// la acción "enviar_plin" (cuando el bot tenga su handler —
+// la app ya deja todo listo en Firebase).
+
+export interface PlinBotConfig {
+  qrBase64?: string;   // imagen del QR (data URI, máx ~900KB para Firestore)
+  qrUrl?: string;      // alternativa: URL pública del QR
+  numero: string;      // número de celular asociado a Plin (9 dígitos)
+  titular: string;     // nombre del titular
+}
+
+/**
+ * Sincroniza la config de Plin (QR + datos) a ruta_activa/{uid}.plin
+ * Usa merge:true → NO toca clientes ni otros campos de la ruta.
+ * Fase 2.2: con tope de tiempo — offline queda encolada localmente.
+ */
+export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', userId), {
+        plin: {
+          qrBase64: plin.qrBase64 || '',
+          qrUrl: plin.qrUrl || '',
+          numero: plin.numero || '',
+          titular: plin.titular || '',
+        },
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
+  } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('🔷 Plin sincronizado LOCALMENTE — llegará al bot al reconectar');
+      return; // optimista: se envía cuando vuelva la red
+    }
+    console.error('❌ Error sincronizando Plin al bot:', e);
+    throw e;
+  }
+}
+
+/**
+ * Lee la config de Plin que el bot ve (ruta_activa/{uid}.plin).
+ * Fase 2.2: caché primero + servidor con tope — NUNCA se cuelga.
+ */
+export async function obtenerPlinDelBot(userId: string): Promise<PlinBotConfig | null> {
+  if (!db || !userId) return null;
+
+  const ref = doc(db, 'ruta_activa', userId);
+  const extraer = (data: any): PlinBotConfig | null => {
+    if (!data?.plin) return null;
+    const p = data.plin;
+    return {
+      qrBase64: p.qrBase64 || '',
+      qrUrl: p.qrUrl || '',
+      numero: p.numero || '',
+      titular: p.titular || '',
+    };
+  };
+
+  // 1) Caché local (instantáneo, offline)
+  try {
+    const snapCache = await getDocFromCache(ref);
+    const plinCache = extraer(snapCache.exists() ? snapCache.data() : null);
+    if (plinCache) return plinCache;
+  } catch {
+    // sin caché todavía
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    return extraer(snap.exists() ? snap.data() : null);
+  } catch (e: any) {
+    console.warn('⚠️ Plin del bot no disponible (sin conexión):', e?.message || e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ⏱ CRONÓMETRO DE RUTA → AVISO SILENCIOSO AL BOT (Fase 2.2)
+// ═══════════════════════════════════════════════════════════
+// Recuperado del Rider modular: al INICIAR el cronómetro se
+// publica la ruta completa en ruta_activa/{UID_BOT} con
+// activa:true + iniciadaAt + rider + clientes. Con eso, cuando
+// un cliente escribe por WhatsApp, el bot lo reconoce por su
+// número y le habla por su nombre ("Hola José…"). Al TERMINAR
+// la ruta se marca activa:false y el bot vuelve al modo
+// genérico ("Hola cliente…").
+
+/**
+ * Publica la ruta activa COMPLETA (al iniciar el cronómetro).
+ * Mismo shape que usaba el Rider modular → el bot no necesita
+ * ningún cambio. merge:true conserva yape/plin ya guardados.
+ */
+export async function iniciarRutaConBot(
+  clientes: Cliente[],
+  rider: { nombre: string; telefono: string; empresa: string }
+): Promise<void> {
+  if (!db) throw new Error('Firebase no disponible');
+  await conTimeout(
+    setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+      activa: true,
+      iniciadaAt: new Date().toISOString(),
+      actualizadaAt: new Date().toISOString(),
+      rider: rider,
+      clientes: clientes.map((c, idx) => ({
+        idx: idx,
+        id: c.id,
+        num: c.num || (idx + 1),
+        nombre: c.nombre || 'Cliente',
+        cel: _botCel(c.cel || ''),
+        cobrar: parseFloat(String(c.cobrar || 0)),
+        precio: parseFloat(String(c.precio || 0)),
+        prod: c.prod || '',
+        dir: c.dir || '',
+        dist: c.dist || '',
+        st: c.st || 'pendiente',
+        nota: c.nota || '',
+        obs: c.obs || '',
+        hora: c.hora || '',
+        ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+          ? { lat: c.lat, lng: c.lng }
+          : {}),
+        ...(c.latSrc ? { latSrc: c.latSrc } : {}),
+      })),
+      clienteActualIdx: -1,
+      totalClientes: clientes.length,
+      pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
+    }, { merge: true }),
+    9000,
+    'guardado-local'
+  ).catch((e: any) => {
+    if (e?.message === 'guardado-local') {
+      console.warn('⏱ Ruta publicada LOCALMENTE — llegará al bot al reconectar');
+      return;
+    }
+    console.error('❌ Error publicando ruta para el bot:', e);
+    throw e;
+  });
+}
+
+/**
+ * Marca la ruta como finalizada para el bot (al terminar la ruta
+ * desde el cronómetro). El bot deja de reconocer clientes por
+ * nombre hasta la próxima publicación.
+ */
+export async function finalizarRutaActivaBot(): Promise<void> {
+  if (!db) return;
+  try {
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+        activa: false,
+        finalizadaAt: new Date().toISOString(),
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
+    console.log('✅ Ruta marcada como finalizada para el bot');
+  } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('⏱ Finalización guardada LOCALMENTE — llegará al bot al reconectar');
+      return;
+    }
+    console.warn('Error finalizando ruta para el bot:', e);
   }
 }
 
