@@ -28,10 +28,15 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
+import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
+import { useConfig } from '../hooks/useConfig';
 import { FotoEntregaModal } from './FotoEntregaModal';
+import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
+import { UbicarClienteModal } from './UbicarClienteModal';
+import { recordarCoordenadasCliente } from '../services/geocoding';
+import { Flag, MapPinned } from 'lucide-react';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -39,7 +44,8 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente } = useClientes();
+  const { config, guardar: guardarConfig } = useConfig();
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
@@ -54,6 +60,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // Estado de optimización en curso (Fase 1.3 — progreso real)
   const [optimizando, setOptimizando] = useState(false);
   const [optimizandoMsg, setOptimizandoMsg] = useState('');
+
+  // 🚩 Inicio y fin de ruta (Fase 1.4)
+  const [rutaCardAbierta, setRutaCardAbierta] = useState(false);
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
+
+  // 📍 Ubicar cliente manualmente (Fase 1.4)
+  const [ubicarClienteId, setUbicarClienteId] = useState<string | number | null>(null);
+  const ubicarCliente = ubicarClienteId != null ? clientes.find((c) => c.id === ubicarClienteId) || null : null;
 
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
@@ -144,6 +158,37 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [nuevoMonto, setNuevoMonto] = useState('');
   const [nuevoDir, setNuevoDir] = useState('');
   const [nuevoDist, setNuevoDist] = useState('');
+
+  // 🚩 Guardar cambios parciales de la config de ruta (inicio/fin)
+  const guardarRuta = async (parcial: Partial<ConfigRuta>) => {
+    setGuardandoRuta(true);
+    try {
+      const nuevaRuta = { ...(config?.ruta ?? { inicio: null, fin: null, volverAlInicio: false }), ...parcial };
+      await guardarConfig({ ...config, ruta: nuevaRuta });
+      onShowToast?.(
+        '🚩 Ruta actualizada',
+        parcial.inicio ? 'Dirección de inicio guardada' :
+        parcial.fin ? 'Dirección de fin guardada' :
+        parcial.volverAlInicio !== undefined ? 'Preferencia de regreso guardada' :
+        'Dirección quitada',
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('❌ Error', 'No se pudo guardar. Revisa tu conexión.', 'error');
+    } finally {
+      setGuardandoRuta(false);
+    }
+  };
+
+  // 📍 Guardar la ubicación manual de un cliente (exacta para siempre)
+  const guardarUbicacion = (
+    clienteId: string | number,
+    coords: { lat: number; lng: number; src: 'manual' }
+  ) => {
+    actualizarCliente(clienteId, { lat: coords.lat, lng: coords.lng, latSrc: 'manual' });
+    // Recordarla también en el caché local anti-borrado
+    recordarCoordenadasCliente(clienteId, { ...coords, src: 'manual' });
+  };
 
   // Filtrar clientes
   const clientesFiltrados = useMemo(() => {
@@ -388,20 +433,30 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </button>
             <button
               onClick={async () => {
-                if (!confirm('🚀 ¿Optimizar ruta por distancia real?\n\n1. Se ubicarán las direcciones que falten (la primera vez tarda ~1 seg por dirección nueva)\n2. Se ordenarán las paradas por distancia real desde tu posición GPS\n3. Se reasignarán los números de orden (1, 2, 3...)\n\nLos clientes sin dirección ubicable van al final, agrupados por distrito.')) return;
+                const tieneInicio = !!(config?.ruta?.inicio);
+                const tieneFin = !!(config?.ruta?.fin);
+                const origenTxt = tieneInicio
+                  ? `2. Se ordenarán por distancia real desde tu INICIO configurado${tieneFin ? ' y terminando en tu FIN' : ''}`
+                  : '2. Se ordenarán por distancia real desde tu posición GPS (configura un Inicio en "🚩 Inicio y fin de ruta" para partir siempre del mismo lugar)';
+                if (!confirm(`🚀 ¿Optimizar ruta por distancia real?\n\n1. Se ubicarán las direcciones que falten (la 1ª vez tarda; usa varias estrategias y si no halla la calle exacta, pone el centro del distrito marcado "aprox.")\n${origenTxt}\n3. Se reasignarán los números de orden (1, 2, 3...)\n\nLas paradas "aprox." puedes precisarlas luego con el botón 📍 Ubicar de cada cliente.`)) return;
                 setOptimizando(true);
                 setOptimizandoMsg('Preparando…');
                 try {
-                  const res = await optimizarRuta((msg) => setOptimizandoMsg(msg));
+                  const res = await optimizarRuta((msg) => setOptimizandoMsg(msg), config?.ruta ?? null);
                   if (!res) return;
                   const partes: string[] = [];
-                  partes.push(`${res.conUbicacion} paradas ordenadas por distancia real`);
-                  if (res.geocodificadosAhora > 0) partes.push(`${res.geocodificadosAhora} direcciones ubicadas ahora`);
-                  if (res.desdeCache > 0) partes.push(`${res.desdeCache} reutilizadas de caché`);
-                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min en moto`);
+                  partes.push(`${res.conUbicacion} paradas ordenadas`);
+                  if (res.geocodificadosAhora > 0) partes.push(`${res.geocodificadosAhora} ubicadas ahora`);
+                  if (res.desdeCache > 0) partes.push(`${res.desdeCache} de caché`);
+                  if (res.aproximados > 0) partes.push(`${res.aproximados} aprox. (distrito)`);
+                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min`);
                   if (res.ahorroPct > 0) partes.push(`${res.ahorroPct}% menos que el orden anterior`);
                   if (res.sinUbicacion > 0) partes.push(`⚠️ ${res.sinUbicacion} sin ubicar (van al final)`);
-                  partes.push(res.conGPS ? 'Partiste de tu posición GPS' : 'Sin GPS: partiste del centro de Lima');
+                  partes.push(
+                    res.origen === 'inicio' ? 'Partiste de tu dirección de INICIO' :
+                    res.origen === 'gps' ? 'Partiste de tu posición GPS' :
+                    'Sin GPS ni inicio: partiste del centro de Lima'
+                  );
                   onShowToast?.(
                     '🚀 Ruta optimizada',
                     partes.join(' · '),
@@ -416,7 +471,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               }}
               disabled={sincronizando || optimizando || clientes.length === 0}
               className="flex items-center gap-1 px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
-              title="Optimizar ruta por distancia real (GPS + geocodificación)"
+              title="Optimizar ruta por distancia real (inicio/GPS + geocodificación)"
             >
               {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
               <span className="max-w-[120px] truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
@@ -449,6 +504,119 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <div className="text-sm font-black text-blue-400">{stats.cobrado.toFixed(0)}</div>
           </div>
         </div>
+      </div>
+
+      {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
+      <div className="rounded-xl bg-slate-800 border border-slate-700 overflow-hidden">
+        <button
+          onClick={() => setRutaCardAbierta(!rutaCardAbierta)}
+          className="w-full flex items-center gap-2.5 p-3 hover:bg-slate-700/40 transition-colors text-left"
+        >
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Flag className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-white flex items-center gap-2">
+              Inicio y fin de ruta
+              {(config?.ruta?.inicio || config?.ruta?.fin) && (
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold">
+                  configurado
+                </span>
+              )}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate">
+              {config?.ruta?.inicio
+                ? `Desde: ${config.ruta.inicio.nombre}`
+                : 'Sin inicio — se usa tu GPS al optimizar'}
+              {config?.ruta?.volverAlInicio && !config?.ruta?.fin ? ' · termina donde empezaste' : ''}
+              {config?.ruta?.fin ? ` · Hasta: ${config.ruta.fin.nombre}` : ''}
+            </p>
+          </div>
+          {rutaCardAbierta ? (
+            <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+          )}
+        </button>
+
+        {rutaCardAbierta && (
+          <div className="px-3 pb-3 space-y-3 border-t border-slate-700/50 pt-3">
+            <AddressAutocomplete
+              label="🟢 Dirección de INICIO (tu casa o almacén)"
+              placeholder="ej: av sucre 523…"
+              icono="inicio"
+              valorGuardado={
+                config?.ruta?.inicio
+                  ? {
+                      nombre: config.ruta.inicio.nombre,
+                      distrito: undefined,
+                      lat: config.ruta.inicio.lat,
+                      lng: config.ruta.inicio.lng,
+                    }
+                  : null
+              }
+              onElegir={(d) => guardarRuta({ inicio: { nombre: d.nombre, lat: d.lat, lng: d.lng } })}
+              onLimpiar={() => guardarRuta({ inicio: null })}
+              ayuda="Escribe la avenida/calle y elige de la lista. Se usa como punto de partida de la optimización y aparece en el mapa."
+            />
+
+            <AddressAutocomplete
+              label="🔴 Dirección de FIN (opcional)"
+              placeholder="ej: plaza vea bellavista…"
+              icono="fin"
+              valorGuardado={
+                config?.ruta?.fin
+                  ? {
+                      nombre: config.ruta.fin.nombre,
+                      distrito: undefined,
+                      lat: config.ruta.fin.lat,
+                      lng: config.ruta.fin.lng,
+                    }
+                  : null
+              }
+              onElegir={(d) => guardarRuta({ fin: { nombre: d.nombre, lat: d.lat, lng: d.lng } })}
+              onLimpiar={() => guardarRuta({ fin: null })}
+              ayuda="Si la defines, la ruta optimizada TERMINA ahí (última parada fija)."
+            />
+
+            {/* Toggle: terminar donde empezaste */}
+            <button
+              onClick={() => guardarRuta({ volverAlInicio: !config?.ruta?.volverAlInicio })}
+              disabled={!!config?.ruta?.fin}
+              className={`w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all active:scale-[0.98] disabled:opacity-40 ${
+                config?.ruta?.volverAlInicio
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-slate-900 border-slate-700 hover:border-slate-600'
+              }`}
+            >
+              <div className="text-left">
+                <p className="text-xs font-bold text-white">🔁 Terminar donde empezaste</p>
+                <p className="text-[10px] text-slate-400">
+                  {config?.ruta?.fin
+                    ? 'Desactivado: hay una dirección de FIN configurada'
+                    : 'La optimización cuenta el regreso a tu inicio'}
+                </p>
+              </div>
+              <div
+                className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 ${
+                  config?.ruta?.volverAlInicio ? 'bg-emerald-500' : 'bg-slate-600'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    config?.ruta?.volverAlInicio ? 'translate-x-4' : ''
+                  }`}
+                />
+              </div>
+            </button>
+
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              💡 El inicio/fin queda guardado en tu cuenta y lo usan la optimización de ruta
+              (botón “Ruta”) y el Mapa de Entregas. Ejemplo: escribe “av sucre” y elige
+              “Avenida Sucre — San Miguel”.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Formulario agregar manual */}
@@ -633,6 +801,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       {c.dir && (
                         <div className="text-slate-400">
                           <span className="text-slate-500">📍</span> <span className="text-slate-300">{c.dir}</span>
+                          {typeof c.lat === 'number' && typeof c.lng === 'number' ? (
+                            c.latSrc === 'aprox' ? (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold">≈ aprox. (distrito)</span>
+                            ) : (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold">✓ ubicado</span>
+                            )
+                          ) : (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-700/60 border border-slate-600 text-slate-400 text-[9px] font-bold">sin ubicar</span>
+                          )}
                         </div>
                       )}
                       {c.cel && (
@@ -694,6 +871,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     >
                       <Camera className="w-3 h-3" />
                       {c.fotoUrl ? '📷 Ver/Cambiar foto de entrega' : '📷 Foto de entrega'}
+                    </button>
+
+                    {/* Botón 📍 Ubicar en el mapa (Fase 1.4) */}
+                    <button
+                      onClick={() => setUbicarClienteId(c.id)}
+                      className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 border ${
+                        typeof c.lat === 'number' && c.latSrc !== 'aprox'
+                          ? 'bg-slate-700/40 hover:bg-slate-700/70 border-slate-600 text-slate-300'
+                          : 'bg-indigo-500/15 hover:bg-indigo-500/25 border-indigo-500/40 text-indigo-300'
+                      }`}
+                      title="Buscar la dirección exacta y guardarla (autocompletado con distritos)"
+                    >
+                      <MapPinned className="w-3 h-3" />
+                      {typeof c.lat === 'number'
+                        ? c.latSrc === 'aprox'
+                          ? '📍 Precisar ubicación (está aprox.)'
+                          : '📍 Cambiar ubicación en el mapa'
+                        : '📍 Ubicar en el mapa'}
                     </button>
 
                     {/* Botones de acción */}
@@ -1722,6 +1917,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         <FotoEntregaModal
           cliente={fotoEntregaCliente}
           onClose={() => setFotoEntregaCliente(null)}
+          onShowToast={onShowToast}
+        />
+      )}
+
+      {/* 📍 Ubicar cliente en el mapa (Fase 1.4) */}
+      {ubicarCliente && (
+        <UbicarClienteModal
+          cliente={ubicarCliente}
+          onClose={() => setUbicarClienteId(null)}
+          onGuardar={guardarUbicacion}
           onShowToast={onShowToast}
         />
       )}

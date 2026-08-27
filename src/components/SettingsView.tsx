@@ -27,6 +27,7 @@ import {
   tamanoCache,
   limpiarCacheGeocodificacion,
 } from '../services/geocoding';
+import { getEstiloMapa, setEstiloMapa, EstiloMapa } from '../services/mapStyle';
 
 interface SettingsViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -42,6 +43,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
     getGoogleApiKey() ? 'google' : 'nominatim'
   );
   const [cacheN, setCacheN] = useState(0);
+  const [estiloMapa, setEstiloMapaState] = useState<EstiloMapa>(getEstiloMapa());
+
+  const cambiarEstiloMapa = (e: EstiloMapa) => {
+    setEstiloMapa(e);
+    setEstiloMapaState(e);
+    onShowToast?.(
+      '🎨 Estilo de mapa cambiado',
+      e === 'oscuro' ? 'Mapa oscuro (bonito, combina con la app)' : e === 'claro' ? 'Mapa claro' : 'Mapa estándar OpenStreetMap',
+      'success'
+    );
+  };
 
   const abrirMapas = () => {
     setApiKeyInput(getGoogleApiKey());
@@ -231,6 +243,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             >
               {motor === 'google' ? 'Google activo' : 'Nominatim (gratis)'}
             </span>
+          </div>
+
+          {/* Estilo del mapa (skin) — Fase 1.4 */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+              Estilo del mapa de entregas
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { id: 'oscuro', label: 'Oscuro', desc: 'bonito, combina con la app', emoji: '🌙' },
+                { id: 'claro', label: 'Claro', desc: 'día, alto contraste', emoji: '☀️' },
+                { id: 'estandar', label: 'Estándar', desc: 'OpenStreetMap clásico', emoji: '🗺️' },
+              ] as Array<{ id: EstiloMapa; label: string; desc: string; emoji: string }>).map((op) => (
+                <button
+                  key={op.id}
+                  onClick={() => cambiarEstiloMapa(op.id)}
+                  className={`p-2.5 rounded-xl border text-center transition-all active:scale-95 ${
+                    estiloMapa === op.id
+                      ? 'bg-indigo-500/20 border-indigo-500 text-white'
+                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                  }`}
+                >
+                  <div className="text-lg leading-none mb-1">{op.emoji}</div>
+                  <div className="text-[11px] font-bold">{op.label}</div>
+                  <div className="text-[9px] opacity-70 leading-tight mt-0.5">{op.desc}</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Los 3 usan mapas gratuitos sin API key (el oscuro y el claro son de CARTO sobre
+              datos de OpenStreetMap). También puedes cambiarlo al toque desde el botón 🎨 del mapa.
+            </p>
           </div>
 
           {/* API Key de Google */}
