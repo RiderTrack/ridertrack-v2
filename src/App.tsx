@@ -1,14 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage } from './types';
-import {
-  INITIAL_DRIVERS,
-  INITIAL_ORDERS,
-  INITIAL_CUSTOMERS,
-  INITIAL_ACTIVITIES,
-  INITIAL_WHATSAPP_MESSAGES,
-  INITIAL_NOTIFICATIONS,
-} from './data/mockData';
+import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
+import { Cliente } from './services/firestore';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -25,26 +18,49 @@ import { WhatsAppModal } from './components/WhatsAppModal';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './hooks/useAuth';
+import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
 import { YapeQRView } from './components/YapeQRView';
+import {
+  clientesAOrdenes,
+  clientesACustomers,
+  riderADriver,
+  construirActividades,
+  construirNotificaciones,
+  METODO_PANEL_A_ST,
+  ETIQUETAS_ESTADO,
+  linkWhatsApp,
+} from './utils/realData';
 
 export default function App() {
   // 🔐 Autenticación
   const { user, profile, loading: authLoading } = useAuth();
+
+  // 📋 Datos REALES de la ruta (Firestore: ruta_activa + clientes_registrados)
+  const {
+    clientes,
+    loading: clientesLoading,
+    sincronizando,
+    stats,
+    agregarCliente,
+    actualizarCliente,
+    eliminarCliente,
+    cambiarEstado,
+    guardarFotoEntrega,
+  } = useClientes();
 
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Core Application Data States
-  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [drivers, setDrivers] = useState<Driver[]>(INITIAL_DRIVERS);
-  const [customers, setCustomers] = useState(INITIAL_CUSTOMERS);
-  const [activities, setActivities] = useState(INITIAL_ACTIVITIES);
-  const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>(INITIAL_WHATSAPP_MESSAGES);
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  // Log de mensajes WhatsApp despachados desde la app (sesión actual)
+  const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
+
+  // Actividades en vivo (eventos de esta sesión, se fusionan con las derivadas)
+  const [liveActivities, setLiveActivities] = useState<ActivityItem[]>([]);
+  const [notificacionesLeidas, setNotificacionesLeidas] = useState(false);
 
   // Toasts system
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -62,6 +78,21 @@ export default function App() {
 
   const handleDismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const registrarActividad = (titulo: string, descripcion: string, tipo: ActivityItem['tipo'], tipoColor: ActivityItem['tipoColor'], icono: string) => {
+    setLiveActivities((prev) => [
+      {
+        id: `ACT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tipo,
+        titulo,
+        descripcion,
+        tiempo: 'Hace un instante',
+        icono,
+        tipoColor,
+      },
+      ...prev,
+    ]);
   };
 
   // Theme Toggler effect
@@ -97,114 +128,199 @@ export default function App() {
     }
   }, []);
 
-  // Order Handlers
-  const handleCreateOrder = (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
+  // ═════════════════════════════════════════════════════════
+  // 🔄 DERIVADOS: datos reales → formato de la UI
+  // ═════════════════════════════════════════════════════════
 
-    // Append Activity Log
-    setActivities((prev) => [
-      {
-        id: `ACT-${Date.now()}`,
-        tipo: 'pedido',
-        titulo: 'Nuevo Pedido Creado',
-        descripcion: `Pedido ${newOrder.id} de ${newOrder.cliente} en ${newOrder.distrito}`,
-        tiempo: 'Hace un instante',
-        icono: 'ShoppingBag',
-        tipoColor: 'blue',
-      },
-      ...prev,
-    ]);
+  const riderName = profile?.nombre || 'Rider';
+
+  const orders = useMemo(
+    () => clientesAOrdenes(clientes, riderName),
+    [clientes, riderName]
+  );
+
+  const customers = useMemo(() => clientesACustomers(clientes), [clientes]);
+
+  const drivers = useMemo<Driver[]>(
+    () => [riderADriver(user?.uid || 'rider', riderName, profile?.foto, stats.entregados)],
+    [user, riderName, profile, stats.entregados]
+  );
+
+  const derivedActivities = useMemo(() => construirActividades(clientes), [clientes]);
+  const activities = useMemo(
+    () => [...liveActivities, ...derivedActivities].slice(0, 12),
+    [liveActivities, derivedActivities]
+  );
+
+  const notifications = useMemo<AppNotification[]>(() => {
+    const base = construirNotificaciones(clientes, stats);
+    return notificacionesLeidas ? base.map((n) => ({ ...n, leido: true })) : base;
+  }, [clientes, stats, notificacionesLeidas]);
+
+  const pendientesCount = stats.pendientes;
+
+  // ═════════════════════════════════════════════════════════
+  // 🔎 HELPERS: buscar el Cliente real detrás de una Orden
+  // ═════════════════════════════════════════════════════════
+
+  const clientePorOrdenId = (orderId: string): Cliente | undefined =>
+    clientes.find((c) => String(c.id) === orderId);
+
+  // ═════════════════════════════════════════════════════════
+  // ✅ HANDLERS: todos persisten en Firestore (ruta_activa)
+  // ═════════════════════════════════════════════════════════
+
+  // Crear pedido (= agregar cliente a la ruta actual)
+  const handleCreateOrder = (draft: {
+    nombre: string;
+    cel: string;
+    prod: string;
+    monto: number;
+    dir: string;
+    dist: string;
+    obs: string;
+  }) => {
+    const num = clientes.length > 0 ? Math.max(...clientes.map((c) => c.num || 0)) + 1 : 1;
+    agregarCliente({
+      id: Date.now(),
+      num,
+      nombre: draft.nombre,
+      cel: draft.cel,
+      prod: draft.prod,
+      precio: draft.monto,
+      cobrar: draft.monto,
+      dir: draft.dir,
+      dist: draft.dist,
+      obs: draft.obs,
+      st: 'pendiente',
+      mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '', hora: '', nota: '',
+    });
+
+    registrarActividad(
+      'Pedido agregado a la ruta',
+      `${draft.nombre} — S/ ${draft.monto.toFixed(2)} (${draft.dist || 'sin distrito'})`,
+      'pedido',
+      'blue',
+      'ShoppingBag'
+    );
 
     showToast(
       'Pedido Registrado',
-      `Orden #${newOrder.id} registrada exitosamente para ${newOrder.cliente}`,
+      `${draft.nombre} agregado a la ruta como entrega #${num}`,
       'success'
     );
   };
 
-  const handleUpdateOrderStatus = (orderId: string, newStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id === orderId) {
-          return { ...o, estado: newStatus };
-        }
-        return o;
-      })
-    );
+  // Registrar pago: método del panel → st real + hora
+  const handleRegistrarPago = (orderId: string, metodoPanel: string) => {
+    const cliente = clientePorOrdenId(orderId);
+    if (!cliente) return;
+    const st = METODO_PANEL_A_ST[metodoPanel] || 'efectivo';
+    cambiarEstado(cliente.id, st);
 
-    // Append Activity Log
-    setActivities((prev) => [
-      {
-        id: `ACT-${Date.now()}`,
-        tipo: 'pedido',
-        titulo: `Pedido ${orderId} Actualizado`,
-        descripcion: `Estado cambiado a "${newStatus}"`,
-        tiempo: 'Hace un instante',
-        icono: 'CheckCircle2',
-        tipoColor: 'green',
-      },
-      ...prev,
-    ]);
+    registrarActividad(
+      'Pago registrado',
+      `${cliente.nombre} — S/ ${parseFloat(String(cliente.cobrar || 0)).toFixed(2)} vía ${ETIQUETAS_ESTADO[st] || st}`,
+      'pedido',
+      'green',
+      'CheckCircle2'
+    );
 
     showToast(
-      'Estado de Pedido Actualizado',
-      `Orden #${orderId} cambió a estado "${newStatus}"`,
-      'info'
+      'Pago Registrado',
+      `${cliente.nombre}: S/ ${parseFloat(String(cliente.cobrar || 0)).toFixed(2)} vía ${ETIQUETAS_ESTADO[st] || st}`,
+      'success'
     );
+  };
+
+  // Cambiar estado (resoluciones: fallida, rechazado, ausente, reabrir...)
+  const handleCambiarEstado = (orderId: string, st: string) => {
+    const cliente = clientePorOrdenId(orderId);
+    if (!cliente) return;
+    cambiarEstado(cliente.id, st);
+
+    const esReapertura = st === 'pendiente';
+    registrarActividad(
+      esReapertura ? 'Pedido reabierto' : 'Estado actualizado',
+      `${cliente.nombre} → ${ETIQUETAS_ESTADO[st] || st}`,
+      'pedido',
+      esReapertura ? 'blue' : 'amber',
+      esReapertura ? 'RotateCcw' : 'AlertTriangle'
+    );
+
+    showToast(
+      esReapertura ? 'Pedido Reabierto' : 'Estado Actualizado',
+      `${cliente.nombre}: ${ETIQUETAS_ESTADO[st] || st}`,
+      esReapertura ? 'info' : 'warning'
+    );
+  };
+
+  // Compatibilidad con vistas que usan OrderStatus genérico
+  const handleUpdateOrderStatus = (orderId: string, newStatus: OrderStatus) => {
+    const stMap: Record<OrderStatus, string> = {
+      pendiente: 'pendiente',
+      en_camino: 'pendiente',
+      entregado: 'efectivo',
+      cancelado: 'cancelado',
+    };
+    handleCambiarEstado(orderId, stMap[newStatus]);
   };
 
   const handleUpdatePaymentMethod = (orderId: string, method: string) => {
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id === orderId) {
-          return { ...o, metodoPago: method as any };
-        }
-        return o;
-      })
-    );
-    showToast('Método de Pago Actualizado', `Pedido ${orderId}: ${method}`, 'success');
+    handleRegistrarPago(orderId, method);
   };
 
   const handleDeleteOrder = (orderId: string) => {
-    setOrders((prev) => prev.filter((o) => o.id !== orderId));
-    showToast('Pedido Eliminado', `Orden ${orderId} removida del sistema`, 'warning');
+    const cliente = clientePorOrdenId(orderId);
+    if (!cliente) return;
+    eliminarCliente(cliente.id);
+    showToast('Pedido Eliminado', `${cliente.nombre} removido de la ruta`, 'warning');
   };
 
   const handleDuplicateOrder = (orderToDuplicate: Order) => {
-    const dupId = `PED-${Math.floor(4000 + Math.random() * 900)}`;
-    const duplicated: Order = {
-      ...orderToDuplicate,
-      id: dupId,
-      estado: 'pendiente',
-      hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
-    };
-    setOrders((prev) => [duplicated, ...prev]);
-    showToast('Pedido Duplicado', `Nuevo pedido generado: ${dupId}`, 'success');
+    const cliente = clientePorOrdenId(orderToDuplicate.id);
+    if (!cliente) return;
+    const num = clientes.length > 0 ? Math.max(...clientes.map((c) => c.num || 0)) + 1 : 1;
+    agregarCliente({
+      ...cliente,
+      id: Date.now(),
+      num,
+      st: 'pendiente',
+      hora: '',
+      fotoUrl: undefined,
+      nota: '',
+    });
+    showToast('Pedido Duplicado', `Nuevo pedido de ${cliente.nombre} como entrega #${num}`, 'success');
   };
 
-  // Driver Status Toggler
-  const handleToggleDriverStatus = (driverId: string) => {
-    let updatedDriverName = '';
-    let nextStatus = '';
-    setDrivers((prev) =>
-      prev.map((d) => {
-        if (d.id === driverId) {
-          updatedDriverName = d.nombre;
-          nextStatus = d.estado === 'disponible' ? 'inactivo' : 'disponible';
-          return { ...d, estado: nextStatus as any };
-        }
-        return d;
-      })
-    );
-
-    showToast(
-      'Estado de Repartidor Cambiado',
-      `${updatedDriverName} ahora está ${nextStatus}`,
-      'info'
-    );
+  // 📷 Foto de evidencia (real: Storage con fallback base64)
+  const handleGuardarFoto = async (orderId: string, blob: Blob, dataUrl: string) => {
+    const cliente = clientePorOrdenId(orderId);
+    if (!cliente) return;
+    try {
+      await guardarFotoEntrega(cliente.id, blob, dataUrl);
+      registrarActividad(
+        'Evidencia guardada',
+        `Foto de entrega de ${cliente.nombre}`,
+        'pedido',
+        'purple',
+        'Camera'
+      );
+      showToast('Evidencia Guardada', `Foto de entrega de ${cliente.nombre} guardada`, 'success');
+    } catch (e: any) {
+      showToast('Error al guardar foto', e?.message || 'Intenta de nuevo', 'error');
+    }
   };
 
-  // WhatsApp Sender Handler
+  // 📝 Nota del pedido (real: se guarda en el cliente)
+  const handleGuardarNota = (orderId: string, nota: string) => {
+    const cliente = clientePorOrdenId(orderId);
+    if (!cliente) return;
+    actualizarCliente(cliente.id, { nota });
+    showToast('Nota Guardada', `Nota de ${cliente.nombre} actualizada`, 'success');
+  };
+
+  // WhatsApp Sender Handler (real: abre wa.me + registra en el log)
   const handleOpenWhatsAppModal = (phone?: string, name?: string) => {
     setWhatsAppModalDefault({ phone, name });
     setWhatsAppModalOpen(true);
@@ -216,46 +332,45 @@ export default function App() {
     text: string,
     templateName: string
   ) => {
+    const digits = (phone || '').replace(/[^0-9]/g, '');
+    if (!digits) {
+      showToast('Falta el número', 'Ingresa un número de WhatsApp válido', 'warning');
+      return;
+    }
+
+    // Abrir WhatsApp real (wa.me)
+    window.open(linkWhatsApp(phone, text), '_blank');
+
     const newMsg: WhatsAppMessage = {
-      id: `WAM-${Math.floor(1000 + Math.random() * 9000)}`,
-      destinatarioNombre: destName,
+      id: `WAM-${Date.now()}`,
+      destinatarioNombre: destName || 'Cliente',
       destinatarioTelefono: phone,
       mensaje: text,
       plantilla: templateName,
-      estado: 'leido',
+      estado: 'enviado',
       hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
-
     setWhatsAppMessages((prev) => [newMsg, ...prev]);
 
-    // Append Activity
-    setActivities((prev) => [
-      {
-        id: `ACT-${Date.now()}`,
-        tipo: 'whatsapp',
-        titulo: 'Notificación WhatsApp Enviada',
-        descripcion: `Mensaje a ${destName} (${phone}) despachado con éxito`,
-        tiempo: 'Hace un instante',
-        icono: 'MessageSquare',
-        tipoColor: 'emerald',
-      },
-      ...prev,
-    ]);
+    registrarActividad(
+      'WhatsApp despachado',
+      `Mensaje a ${destName || 'Cliente'} (${phone}) enviado vía wa.me`,
+      'whatsapp',
+      'emerald',
+      'MessageSquare'
+    );
 
     showToast(
-      'Mensaje WhatsApp Despachado',
-      `Notificación enviada con éxito a ${destName} (${phone})`,
+      'WhatsApp Abierto',
+      `Mensaje preparado para ${destName || 'Cliente'} — confírmalo en WhatsApp`,
       'success'
     );
   };
 
   const handleMarkNotificationsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, leido: true })));
+    setNotificacionesLeidas(true);
     showToast('Notificaciones Leídas', 'Todas las notificaciones han sido marcadas', 'info');
   };
-
-  const activeOrdersCount = orders.filter((o) => o.estado === 'en_camino').length;
-  const activeDriversCount = drivers.filter((d) => d.estado !== 'inactivo').length;
 
   // 🔄 Mostrar loading mientras verifica auth
   if (authLoading) {
@@ -302,15 +417,15 @@ export default function App() {
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           isMobileOpen={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
-          activeOrdersCount={activeOrdersCount}
-          activeDriversCount={activeDriversCount}
+          activeOrdersCount={pendientesCount}
+          activeDriversCount={1}
         />
 
         {/* Content Area - Mobile first: full width, no left margin on mobile */}
         <main
-          className="flex-1 min-w-0 transition-all duration-300 p-2 sm:p-4 lg:p-6 lg:max-w-7xl lg:mx-auto ${
+          className={`flex-1 min-w-0 transition-all duration-300 p-2 sm:p-4 lg:p-6 lg:max-w-7xl lg:mx-auto ${
             isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
-          }"
+          }`}
         >
           {activeTab === 'dashboard' && (
             <DashboardView
@@ -318,9 +433,10 @@ export default function App() {
               drivers={drivers}
               activities={activities}
               whatsAppMessages={whatsAppMessages}
+              stats={stats}
+              loading={clientesLoading}
               onOpenWhatsAppModal={handleOpenWhatsAppModal}
               onOpenNewOrderModal={() => setNewOrderModalOpen(true)}
-              onUpdateOrderStatus={handleUpdateOrderStatus}
               onNavigateTab={setActiveTab}
             />
           )}
@@ -337,12 +453,15 @@ export default function App() {
             <OrdersView
               orders={orders}
               drivers={drivers}
+              loading={clientesLoading}
               onOpenNewOrderModal={() => setNewOrderModalOpen(true)}
               onOpenWhatsAppModal={handleOpenWhatsAppModal}
-              onUpdateOrderStatus={handleUpdateOrderStatus}
-              onUpdatePaymentMethod={handleUpdatePaymentMethod}
+              onRegistrarPago={handleRegistrarPago}
+              onCambiarEstado={handleCambiarEstado}
               onDeleteOrder={handleDeleteOrder}
               onDuplicateOrder={handleDuplicateOrder}
+              onGuardarFoto={handleGuardarFoto}
+              onGuardarNota={handleGuardarNota}
               onShowToast={showToast}
             />
           )}
@@ -356,17 +475,17 @@ export default function App() {
 
           {activeTab === 'repartidores' && (
             <DriversView
-              drivers={drivers}
-              onOpenWhatsAppModal={handleOpenWhatsAppModal}
-              onToggleDriverStatus={handleToggleDriverStatus}
+              profile={profile}
+              stats={stats}
+              onNavigateTab={setActiveTab}
             />
           )}
 
           {activeTab === 'mapa' && (
             <div className="space-y-4 pb-12">
               <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700 shadow-xl">
-                <h1 className="text-xl sm:text-2xl font-black text-white">Mapa Interactivo y Telemetría GPS</h1>
-                <p className="text-xs text-slate-400">Rastreo GPS diferencial de la flota de despachos en tiempo real</p>
+                <h1 className="text-xl sm:text-2xl font-black text-white">Mapa Interactivo</h1>
+                <p className="text-xs text-slate-400">Vista de tus entregas del día</p>
               </div>
               <LiveMap
                 drivers={drivers}
@@ -408,7 +527,6 @@ export default function App() {
       <NewOrderModal
         isOpen={newOrderModalOpen}
         onClose={() => setNewOrderModalOpen(false)}
-        drivers={drivers}
         onCreateOrder={handleCreateOrder}
       />
     </div>
