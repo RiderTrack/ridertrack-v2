@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   Route,
@@ -16,8 +16,12 @@ import {
   Music,
   PieChart,
   QrCode,
+  Radar,
+  Camera,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
+import { AvatarSvg } from '../data/avatars';
+import { AvatarPicker } from './AvatarPicker';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -28,6 +32,12 @@ interface SidebarProps {
   onCloseMobile: () => void;
   activeOrdersCount: number;
   activeDriversCount: number;
+  /** Nombre real del rider (perfil) */
+  riderName?: string;
+  /** Avatar ilustrado elegido (Fase 1.5) */
+  riderAvatar?: string;
+  onSeleccionarAvatar?: (avatarId: string) => Promise<void>;
+  onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
 interface MenuItem {
@@ -52,7 +62,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   activeOrdersCount,
   activeDriversCount,
+  riderName = 'Rider',
+  riderAvatar,
+  onSeleccionarAvatar,
+  onShowToast,
 }) => {
+  const [pickerAbierto, setPickerAbierto] = useState(false);
+
   // Secciones del menú
   const secciones: MenuSection[] = [
     {
@@ -65,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
-        { id: 'yape', label: 'Mi QR Yape/Plin', icon: QrCode },
+        { id: 'yape', label: 'Mi QR Yape', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
@@ -75,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       titulo: 'Operación',
       items: [
         { id: 'mapa', label: 'Mapa de Entregas', icon: MapPin },
+        { id: 'motorizados', label: 'GPS del Motorizado', icon: Radar },
         { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
       ],
     },
@@ -102,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-slate-900 dark:bg-slate-900 light:bg-slate-900 text-slate-300 select-none">
+    <div className="flex flex-col h-full bg-slate-900 text-slate-300 select-none">
       {/* Top Collapse toggle header for desktop */}
       <div className="hidden lg:flex items-center justify-between p-4 border-b border-slate-800">
         {!isCollapsed && (
@@ -187,28 +204,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
       </nav>
 
-      {/* Bottom Profile Section */}
+      {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
-        <div
-          onClick={() => handleTabClick('perfil')}
-          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 cursor-pointer transition-colors ${
-            isCollapsed ? 'justify-center' : ''
-          }`}
-        >
-          <div className="relative">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
-              alt="Alejandro Ruiz"
-              className="w-10 h-10 rounded-xl object-cover ring-2 ring-blue-500/40"
-            />
-            <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900 animate-pulse" />
+        <div className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 transition-colors`}>
+          <div className="relative group/avatar">
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="block rounded-2xl focus:outline-none"
+              title="Cambiar mi avatar"
+            >
+              <AvatarSvg id={riderAvatar} className="w-10 h-10" anillo="ring-2 ring-blue-500/40" />
+            </button>
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-600 border-2 border-slate-900 flex items-center justify-center hover:bg-blue-500 transition-colors"
+              title="Cambiar avatar"
+            >
+              <Camera className="w-2.5 h-2.5 text-white" />
+            </button>
+            <span className="absolute -top-0.5 -left-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900 animate-pulse" />
           </div>
 
           {!isCollapsed && (
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-sm font-bold text-white truncate">
-                Alejandro Ruiz
-              </span>
+            <div
+              className="flex flex-col min-w-0 flex-1 cursor-pointer"
+              onClick={() => handleTabClick('perfil')}
+            >
+              <span className="text-sm font-bold text-white truncate">{riderName}</span>
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span className="text-emerald-400 font-medium text-[11px]">En línea</span>
@@ -217,6 +239,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Selector de avatar estilo Netflix */}
+      <AvatarPicker
+        isOpen={pickerAbierto}
+        onClose={() => setPickerAbierto(false)}
+        avatarActual={riderAvatar}
+        onSeleccionar={async (id) => {
+          if (onSeleccionarAvatar) await onSeleccionarAvatar(id);
+        }}
+        onShowToast={onShowToast}
+      />
     </div>
   );
 
@@ -233,15 +266,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Mobile Overlay & Drawer */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-[1200] flex">
-          {/* FIX Fase 2.0: el drawer vive por ENCIMA de todo (antes
-              z-50: los mapas Leaflet/Google con z-index 400-1000
-              internos quedaban por encima y tapaban el menú) */}
+        <div className="lg:hidden fixed inset-0 z-50 flex">
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
             onClick={onCloseMobile}
           />
-          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-[1201]">
+          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-50">
             {sidebarContent}
           </div>
         </div>
