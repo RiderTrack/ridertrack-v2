@@ -140,6 +140,7 @@ export function clienteAOrden(c: Cliente, riderName?: string): Order {
     obs: c.obs || '',
     lat: typeof c.lat === 'number' ? c.lat : undefined,
     lng: typeof c.lng === 'number' ? c.lng : undefined,
+    latSrc: c.latSrc,
   };
 }
 
