@@ -57,6 +57,8 @@ export interface Cliente {
    *  no volver a geocodificar la misma dirección nunca más */
   lat?: number;
   lng?: number;
+  /** Origen de la coordenada: google | nominatim | aprox | manual (Fase 1.4) */
+  latSrc?: 'google' | 'nominatim' | 'aprox' | 'manual';
 }
 
 export interface RutaActiva {
@@ -416,6 +418,12 @@ export function subscribeToRutaActiva(
             nota: c.nota || '',
             fotoUrl: c.fotoUrl,
             respondioInicioRuta: c.respondioInicioRuta,
+            // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
+            // el cliente para no volver a geocodificar nunca
+            ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+              ? { lat: c.lat, lng: c.lng }
+              : {}),
+            ...(c.latSrc ? { latSrc: c.latSrc } : {}),
           }));
           console.log('🔄 Clientes del Modular cargados:', clientes.length);
           onUpdate(clientes);
@@ -540,9 +548,15 @@ export async function publicarClientesEnRutaActiva(
   if (!db) return;
   try {
     const rutaRef = doc(db, 'ruta_activa', UID_BOT_MODULAR);
+    // ⚠️ FIX FASE 1.4: antes este formateo DESCARTABA num/lat/lng,
+    // con lo cual la optimización de ruta se perdía al instante
+    // (el mapa quedaba en "0 de N ubicados"). Ahora las
+    // coordenadas viajan con el cliente. Los campos extra son
+    // aditivos: el Modular y el bot los ignoran sin problema.
     const clientesFormateados = clientes.map((c, idx) => ({
       idx: idx,
       id: c.id,
+      num: c.num || (idx + 1),
       nombre: c.nombre || 'Cliente',
       cel: _botCel(c.cel || ''),
       cobrar: parseFloat(String(c.cobrar || 0)),
@@ -554,6 +568,10 @@ export async function publicarClientesEnRutaActiva(
       nota: c.nota || '',
       obs: c.obs || '',
       hora: c.hora || '',
+      ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+        ? { lat: c.lat, lng: c.lng }
+        : {}),
+      ...(c.latSrc ? { latSrc: c.latSrc } : {}),
     }));
 
     await setDoc(rutaRef, {
@@ -574,6 +592,23 @@ export async function publicarClientesEnRutaActiva(
 // 🏦 CONFIGURACIÓN DE CUENTAS BANCARIAS
 // ═══════════════════════════════════════════════════════════
 
+/** Un punto de ruta guardado con autocompletado (Fase 1.4) */
+export interface DireccionRuta {
+  nombre: string;   // etiqueta legible: "Avenida Sucre 523, San Miguel"
+  lat: number;
+  lng: number;
+}
+
+/** Configuración de inicio/fin de ruta (Fase 1.4) */
+export interface ConfigRuta {
+  /** Dónde empieza la ruta (tu casa/almacén). Si no hay, se usa el GPS. */
+  inicio?: DireccionRuta | null;
+  /** Dónde termina la ruta. Si es null, termina en la última parada (o vuelve al inicio). */
+  fin?: DireccionRuta | null;
+  /** true = la ruta termina donde empezó (ciclo cerrado) */
+  volverAlInicio?: boolean;
+}
+
 export interface ConfigCuentas {
   yape?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   bcp?: { titular: string; cci: string; numero: string; };
@@ -581,6 +616,8 @@ export interface ConfigCuentas {
   interbank?: { titular: string; cci: string; numero: string; };
   plin?: { nombre: string; telefono: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
+  /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
+  ruta?: ConfigRuta;
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -590,6 +627,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
   plin: { nombre: 'Rudy Alen', telefono: '999999999' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
+  ruta: { inicio: null, fin: null, volverAlInicio: false },
 };
 
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
@@ -608,6 +646,7 @@ export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas
         interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data.interbank },
         plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data.plin },
         empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data.empresa },
+        ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data.ruta },
       };
     }
     return CONFIG_CUENTAS_DEFAULT;
