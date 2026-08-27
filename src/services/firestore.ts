@@ -18,6 +18,7 @@ import {
   limit,
   getDocs,
   getDoc,
+  getDocFromCache,
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
@@ -630,39 +631,89 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   ruta: { inicio: null, fin: null, volverAlInicio: false },
 };
 
+// ── Fase 2.1: utilidades a prueba de red muerta ─────────────
+// Un getDoc/setDoc sin límite de tiempo queda PENDIENTE PARA SIEMPRE
+// cuando la red está muerta (0 KB/s) — así se colgaba la pantalla
+// del QR. Estas envolturas ponen tope y degradan con elegancia.
+
+/** Carrera entre una promesa Firestore y un timeout */
+function conTimeout<T>(promesa: Promise<T>, ms: number, mensaje = 'sin-conexion'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(mensaje)), ms);
+    promesa.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
+}
+
+/** Fusiona un doc crudo de config_empresa con los defaults */
+function fusionarConfig(data: any): ConfigCuentas {
+  return {
+    ...CONFIG_CUENTAS_DEFAULT,
+    ...data,
+    yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data?.yape },
+    bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data?.bcp },
+    bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
+    interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
+    plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
+    empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
+    ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
+  };
+}
+
+/**
+ * Carga la config (Fase 2.1 — NUNCA se cuelga):
+ *   1. Caché local de Firestore (instantáneo, funciona SIN internet)
+ *   2. Servidor con tope de 9 s
+ *   3. Defaults — la pantalla siempre se muestra
+ */
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
   if (!db || !userId) return CONFIG_CUENTAS_DEFAULT;
+
+  const ref = doc(db, 'config_empresa', userId);
+
+  // 1) Caché local primero — instantáneo y offline
   try {
-    const ref = doc(db, 'config_empresa', userId);
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      const data = snap.data();
-      return {
-        ...CONFIG_CUENTAS_DEFAULT,
-        ...data,
-        yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data.yape },
-        bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data.bcp },
-        bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data.bbva },
-        interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data.interbank },
-        plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data.plin },
-        empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data.empresa },
-        ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data.ruta },
-      };
-    }
+    const snapCache = await getDocFromCache(ref);
+    if (snapCache.exists()) return fusionarConfig(snapCache.data());
+  } catch {
+    // No está en caché todavía (primera vez) — seguir al servidor
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    if (snap.exists()) return fusionarConfig(snap.data());
     return CONFIG_CUENTAS_DEFAULT;
   } catch (e: any) {
-    console.error('❌ Error cargando config de cuentas:', e);
+    console.warn('⚠️ Config sin conexión al servidor (usando defaults):', e?.message || e);
     return CONFIG_CUENTAS_DEFAULT;
   }
 }
 
+/**
+ * Guarda la config (Fase 2.1): con red muerta el setDoc queda
+ * pendiente indefinidamente → tope de 9 s. Firestore encola la
+ * escritura localmente (IndexedDB) y la sincroniza solo cuando
+ * vuelve la conexión, así que tras el tope el guardado SE CONSIDERA
+ * hecho (llegará al servidor al reconectar).
+ */
 export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<void> {
   if (!db || !userId) return;
   try {
     const ref = doc(db, 'config_empresa', userId);
-    await setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true });
+    await conTimeout(
+      setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
     console.log('🏦 Config de cuentas guardada');
   } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('🏦 Config guardada LOCALMENTE — se sincronizará al reconectar');
+      return; // optimista: Firestore la envía cuando haya red
+    }
     console.error('❌ Error guardando config de cuentas:', e);
     throw e;
   }
@@ -689,22 +740,31 @@ export interface YapeBotConfig {
  * Sincroniza la config de Yape (QR + datos) a ruta_activa/{uid}.yape
  * para que el bot pueda enviar el QR por WhatsApp.
  * Usa merge:true → NO toca clientes ni otros campos de la ruta.
+ * Fase 2.1: con tope de tiempo — offline queda encolada localmente.
  */
 export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<void> {
   if (!db || !userId) throw new Error('Firebase no disponible');
   try {
-    await setDoc(doc(db, 'ruta_activa', userId), {
-      yape: {
-        qrBase64: yape.qrBase64 || '',
-        qrUrl: yape.qrUrl || '',
-        numero: yape.numero || '',
-        titular: yape.titular || '',
-        cci: yape.cci || '',
-        bancos: yape.bancos || '',
-      },
-      actualizadaAt: new Date().toISOString(),
-    }, { merge: true });
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', userId), {
+        yape: {
+          qrBase64: yape.qrBase64 || '',
+          qrUrl: yape.qrUrl || '',
+          numero: yape.numero || '',
+          titular: yape.titular || '',
+          cci: yape.cci || '',
+          bancos: yape.bancos || '',
+        },
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
   } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('💜 Yape sincronizado LOCALMENTE — llegará al bot al reconectar');
+      return; // optimista: se envía cuando vuelva la red
+    }
     console.error('❌ Error sincronizando Yape al bot:', e);
     throw e;
   }
@@ -713,25 +773,42 @@ export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig):
 /**
  * Lee la config de Yape que el bot ve (ruta_activa/{uid}.yape).
  * Sirve para mostrar el estado de sincronización en la pantalla de QR.
+ * Fase 2.1: caché primero + servidor con tope — NUNCA se cuelga
+ * (antes, con red muerta, la pantallita de sync quedaba girando
+ * para siempre).
  */
 export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig | null> {
   if (!db || !userId) return null;
+
+  const ref = doc(db, 'ruta_activa', userId);
+  const extraer = (data: any): YapeBotConfig | null => {
+    if (!data?.yape) return null;
+    const y = data.yape;
+    return {
+      qrBase64: y.qrBase64 || '',
+      qrUrl: y.qrUrl || '',
+      numero: y.numero || '',
+      titular: y.titular || '',
+      cci: y.cci || '',
+      bancos: y.bancos || '',
+    };
+  };
+
+  // 1) Caché local (instantáneo, offline)
   try {
-    const snap = await getDoc(doc(db, 'ruta_activa', userId));
-    if (snap.exists() && snap.data().yape) {
-      const y = snap.data().yape;
-      return {
-        qrBase64: y.qrBase64 || '',
-        qrUrl: y.qrUrl || '',
-        numero: y.numero || '',
-        titular: y.titular || '',
-        cci: y.cci || '',
-        bancos: y.bancos || '',
-      };
-    }
-    return null;
+    const snapCache = await getDocFromCache(ref);
+    const yapeCache = extraer(snapCache.exists() ? snapCache.data() : null);
+    if (yapeCache) return yapeCache;
+  } catch {
+    // sin caché todavía
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    return extraer(snap.exists() ? snap.data() : null);
   } catch (e: any) {
-    console.error('❌ Error leyendo Yape del bot:', e);
+    console.warn('⚠️ Yape del bot no disponible (sin conexión):', e?.message || e);
     return null;
   }
 }

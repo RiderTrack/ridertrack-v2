@@ -309,7 +309,16 @@ async function fetchConTimeout(url: string, ms = TIMEOUT_FETCH_MS): Promise<Resp
 
 // ── Motor 1: Google Geocoding API ───────────────────────────
 
-async function geocodificarGoogle(consulta: string, apiKey: string): Promise<Coordenadas | null> {
+/** Resultado completo de Google Geocoding (Fase 2.1) */
+interface GoogleGeoCompleto {
+  lat: number;
+  lng: number;
+  direccion: string;   // formatted_address de Google
+  /** true = coincidencia DIFUSA (plus code, POI raro) — ver geocodificarTextoCompleto */
+  parcial: boolean;
+}
+
+async function geocodificarGoogleFull(consulta: string, apiKey: string): Promise<GoogleGeoCompleto | null> {
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?address=${encodeURIComponent(consulta)}` +
@@ -318,9 +327,15 @@ async function geocodificarGoogle(consulta: string, apiKey: string): Promise<Coo
     const res = await fetchConTimeout(url, 8000);
     const data = await res.json();
     if (data && data.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
-      const loc = data.results[0].geometry?.location;
+      const r = data.results[0];
+      const loc = r.geometry?.location;
       if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
-        return { lat: loc.lat, lng: loc.lng, src: 'google' };
+        return {
+          lat: loc.lat,
+          lng: loc.lng,
+          direccion: String(r.formatted_address || ''),
+          parcial: r.partial_match === true,
+        };
       }
     }
     if (data?.status && data.status !== 'ZERO_RESULTS' && data.status !== 'OK') {
@@ -330,6 +345,11 @@ async function geocodificarGoogle(consulta: string, apiKey: string): Promise<Coo
   } catch {
     return null;
   }
+}
+
+async function geocodificarGoogle(consulta: string, apiKey: string): Promise<Coordenadas | null> {
+  const r = await geocodificarGoogleFull(consulta, apiKey);
+  return r ? { lat: r.lat, lng: r.lng, src: 'google' } : null;
 }
 
 /**
@@ -872,6 +892,120 @@ export async function detalleLugarGoogle(
   } catch {
     return null;
   }
+}
+
+export interface TextoGeocodificado {
+  lat: number;
+  lng: number;
+  direccion: string;   // dirección formateada REAL de Google
+  distrito?: string;
+  /** true = coincidencia DIFUSA de Google (plus code / POI raro).
+   *  Ej: "casa señora nancyy" → "WWVP+V5W, C. B, Lima 15081".
+   *  El llamador decide si una difusa es aceptable. */
+  parcial: boolean;
+}
+
+/**
+ * Geocodifica un TEXTO libre con Google y devuelve la dirección
+ * formateada REAL (Fase 2.1 — para el Enter directo del campo de
+ * inicio/fin). Distingue coincidencias exactas de difusas:
+ *   "Canaval y Moreyra 239"  → exacta (street_address) ✅
+ *   "casa señora nancyy"     → difusa (plus code) ⚠️
+ */
+export async function geocodificarTextoCompleto(
+  texto: string,
+  dist?: string
+): Promise<TextoGeocodificado | null> {
+  const t = (texto || '').trim();
+  if (!t) return null;
+  const key = getGoogleApiKey();
+  if (!key) return null;
+
+  let mejor: GoogleGeoCompleto | null = null;
+
+  // g1 — consulta completa normalizada
+  const completa = normalizarConsulta(t, dist);
+  if (completa) {
+    const r1 = await geocodificarGoogleFull(completa, key);
+    if (r1) {
+      if (!r1.parcial) return { ...r1, distrito: dist };
+      mejor = r1; // difusa — probar la variante limpia antes de rendirse
+    }
+  }
+
+  // g2 — dirección limpia (solo si es distinta)
+  const limpia = limpiarDireccion(t);
+  if (limpia && limpia.toLowerCase() !== limpiarParte(t).toLowerCase()) {
+    const distL = (dist || '').trim();
+    const distNormalizado = distL.toLowerCase() === 'cercado de lima' ? 'Lima' : distL;
+    const prov = provinciaDe(dist || '');
+    const partes =
+      distNormalizado && !limpia.toLowerCase().includes(distNormalizado.toLowerCase())
+        ? [limpia, distNormalizado, prov, 'Perú']
+        : [limpia, prov, 'Perú'];
+    const consulta = partes.filter(Boolean).join(', ');
+    if (consulta) {
+      const r2 = await geocodificarGoogleFull(consulta, key);
+      if (r2) {
+        if (!r2.parcial) return { ...r2, distrito: dist };
+        if (!mejor) mejor = r2;
+      }
+    }
+  }
+
+  // Lo mejor que hay (difusa) o nada
+  return mejor ? { ...mejor, distrito: dist } : null;
+}
+
+/**
+ * Resuelve una sugerencia elegida a coordenadas exactas — A PRUEBA DE
+ * RED LENTA (Fase 2.1). El detalle de Google Places puede fallar por
+ * timeout cuando la conexión está casi muerta (0.6 KB/s): antes eso
+ * dejaba al usuario con "No se pudieron obtener las coordenadas" y
+ * sin nada guardado. Ahora hay cascada con reintentos:
+ *
+ *   1. Place Details con el token de sesión (lo normal, 1 sesión)
+ *   2. Reintento de Place Details sin token (por si fue un golpe
+ *      de red puntual)
+ *   3. Geocodificar el TEXTO de la sugerencia (Google Geocoding con
+ *      dirección formateada) — sin placeId también entra directo aquí
+ *
+ * En el paso 3, si el texto es CRUDO del usuario (sin placeId) y
+ * Google solo encuentra una coincidencia DIFUSA, se devuelve null
+ * (honesto) — nunca se guarda una coordenada basura.
+ */
+export async function resolverDireccionElegida(
+  sugerencia: DireccionSugerida,
+  tokenSesion?: string
+): Promise<DetalleLugar | null> {
+  // 1) Detalle normal con la sesión abierta
+  if (sugerencia.placeId) {
+    const d1 = await detalleLugarGoogle(sugerencia.placeId, tokenSesion);
+    if (d1) return d1;
+
+    // 2) Reintento sin token (sesión nueva) — por si la 1ª falló por red
+    const d2 = await detalleLugarGoogle(sugerencia.placeId);
+    if (d2) return d2;
+  }
+
+  // 3) Fallback: geocodificar el texto de la sugerencia
+  const texto = sugerencia.detalle
+    ? `${sugerencia.etiqueta}, ${sugerencia.detalle}`
+    : sugerencia.etiqueta;
+  const r = await geocodificarTextoCompleto(texto, sugerencia.distrito);
+  if (!r) return null;
+
+  // Texto crudo + coincidencia difusa → no confiable (ej: "casa
+  // señora nancyy" → plus code random). Las etiquetas de sugerencias
+  // sí se aceptan difusas (vienen del propio Google Places).
+  if (r.parcial && !sugerencia.placeId) return null;
+
+  return {
+    lat: r.lat,
+    lng: r.lng,
+    direccion: r.direccion || texto,
+    distrito: r.distrito || sugerencia.distrito,
+  };
 }
 
 /** Respuesta cruda de Nominatim search */
