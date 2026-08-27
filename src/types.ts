@@ -36,6 +36,8 @@ export interface Order {
   fotoUrl?: string;      // Foto de evidencia de entrega (Storage o base64)
   nota?: string;         // Nota del pedido (visible en Evidencias)
   obs?: string;          // Observación original del pedido
+  lat?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
+  lng?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
 }
 
 export interface Driver {

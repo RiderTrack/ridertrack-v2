@@ -430,7 +430,6 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <DashboardView
               orders={orders}
-              drivers={drivers}
               activities={activities}
               whatsAppMessages={whatsAppMessages}
               stats={stats}
@@ -488,8 +487,8 @@ export default function App() {
                 <p className="text-xs text-slate-400">Vista de tus entregas del día</p>
               </div>
               <LiveMap
-                drivers={drivers}
                 orders={orders}
+                riderName={profile?.nombre || user?.displayName || 'Rider'}
                 onOpenWhatsApp={(phone, name) => handleOpenWhatsAppModal(phone, name)}
               />
             </div>
