@@ -21,6 +21,8 @@ import {
 import {
   batchGeocodificar,
   obtenerPosicionActual,
+  recordarCoordenadasCliente,
+  coordenadasRecordadas,
   Coordenadas,
 } from '../services/geocoding';
 import {
@@ -28,8 +30,10 @@ import {
   distanciaRutaKm,
   LIMA_CENTRO,
   PuntoGeo,
+  OpcionesRuta,
 } from '../services/routeOptimizer';
 import { useAuth } from './useAuth';
+import type { ConfigRuta } from '../services/firestore';
 
 /** Resultado detallado de la optimización (para mostrar en UI) */
 export interface ResultadoOptimizarRuta {
@@ -38,11 +42,13 @@ export interface ResultadoOptimizarRuta {
   sinUbicacion: number;       // clientes sin dirección geocodificable
   geocodificadosAhora: number;// direcciones ubicadas en esta corrida
   desdeCache: number;         // direcciones que ya estaban en caché
+  aproximados: number;        // ubicados solo a nivel de distrito (aprox)
   distanciaAntesKm: number;
   distanciaDespuesKm: number;
   ahorroPct: number;          // % de km ahorrados
   tiempoEstimadoMin: number;
-  conGPS: boolean;            // si se usó tu posición real como inicio
+  origen: 'inicio' | 'gps' | 'lima';  // desde dónde se partió
+  conFin: boolean;            // si la ruta termina en una dirección fija
 }
 
 interface ClienteGeo extends PuntoGeo {
@@ -62,15 +68,30 @@ export function useClientes() {
 
   // 🔄 Combinar clientes de ambas fuentes
   const combinarClientes = useCallback(() => {
+    // Rehidratar coordenadas desde el caché local (Fase 1.4):
+    // si el Modular/bot reescribió ruta_activa sin lat/lng, las
+    // coordenadas vuelven al instante (offline, sin re-geocodificar).
+    const rehidratar = (lista: Cliente[]): Cliente[] =>
+      lista.map((c) => {
+        if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+          return c;
+        }
+        const recordadas = coordenadasRecordadas(c.id);
+        if (recordadas) {
+          return { ...c, lat: recordadas.lat, lng: recordadas.lng, latSrc: recordadas.src };
+        }
+        return c;
+      });
+
     // Si hay clientes en ruta_activa (ruta del día actual), usar esos
     if (clientesRutaRef.current.length > 0) {
-      setClientes(clientesRutaRef.current);
+      setClientes(rehidratar(clientesRutaRef.current));
       setLoading(false);
       return;
     }
     // Si no, usar clientes_registrados (todos los históricos del Modular)
     if (clientesRegistradosRef.current.length > 0) {
-      setClientes(clientesRegistradosRef.current);
+      setClientes(rehidratar(clientesRegistradosRef.current));
       setLoading(false);
       return;
     }
@@ -126,6 +147,12 @@ export function useClientes() {
     if (!user) return;
     actualizandoDesdeV2.current = true;
     setClientes(nuevosClientes);
+    // Recordar coordenadas por cliente (caché local anti-borrado)
+    for (const c of nuevosClientes) {
+      if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+        recordarCoordenadasCliente(c.id, { lat: c.lat, lng: c.lng, src: c.latSrc || 'nominatim' });
+      }
+    }
     // Publicar en ruta_activa PRIMERO (fuente de verdad del Modular)
     await publicarClientesEnRutaActiva(user.uid, nuevosClientes);
     // Guardar en V2 como respaldo
@@ -236,17 +263,20 @@ export function useClientes() {
     }
   }, [user]);
 
-  // 🚀 OPTIMIZAR RUTA (Fase 1.3 — distancia REAL)
-  // 1. Geocodifica las direcciones que faltan (con caché y rate
-  //    limit — nunca inventa coordenadas)
-  // 2. Guarda las coordenadas en Firestore (no se vuelve a
-  //    geocodificar la misma dirección jamás)
-  // 3. Ordena con vecino-más-cercano + 2-opt desde tu posición
-  //    GPS (o centro de Lima si no hay señal)
-  // 4. Los que no se pudieron ubicar van al final, agrupados
+  // 🚀 OPTIMIZAR RUTA (Fase 1.4 — distancia REAL con inicio/fin)
+  // 1. Geocodifica las direcciones que faltan (cascada v1→v4 con
+  //    caché y rate limit — nunca inventa coordenadas)
+  // 2. Guarda las coordenadas en Firestore + caché local por cliente
+  //    (no se vuelve a geocodificar la misma dirección jamás)
+  // 3. Ordena con vecino-más-cercano + 2-opt desde tu dirección de
+  //    inicio configurada (o GPS si no hay, o centro de Lima)
+  // 4. Si configuraste una dirección de fin, la ruta TERMINA ahí
+  //    (última parada fija). "Volver al inicio" = ciclo cerrado.
+  // 5. Los que no se pudieron ubicar van al final, agrupados
   //    por distrito (comportamiento honesto, sin mentir)
   const optimizarRuta = useCallback(async (
-    onProgress?: (mensaje: string) => void
+    onProgress?: (mensaje: string) => void,
+    rutaConfig?: ConfigRuta | null
   ): Promise<ResultadoOptimizarRuta | null> => {
     if (clientes.length === 0) return null;
     setSincronizando(true);
@@ -265,40 +295,65 @@ export function useClientes() {
         }
       }
 
-      // ── Paso 2: geocodificar los que faltan
+      // ── Paso 2: geocodificar los que faltan (cascada v1→v4)
       let geocodificadosAhora = 0;
       let desdeCache = 0;
+      let aproximados = 0;
       if (sinCoords.length > 0) {
         const items = sinCoords.map((c) => ({
           item: c,
           dir: c.dir || '',
           dist: c.dist || '',
         }));
-        const { resueltos, fallidos, desdeCache: nCache } = await batchGeocodificar<Cliente>(
+        const { resueltos, fallidos, desdeCache: nCache, aproximados: nAprox } = await batchGeocodificar<Cliente>(
           items,
           onProgress
         );
         desdeCache = nCache;
+        aproximados = nAprox;
         geocodificadosAhora = resueltos.size;
         resueltos.forEach((coords: Coordenadas, c: Cliente) => {
-          conCoords.push({ lat: coords.lat, lng: coords.lng, cliente: { ...c, lat: coords.lat, lng: coords.lng } });
+          conCoords.push({ lat: coords.lat, lng: coords.lng, cliente: { ...c, lat: coords.lat, lng: coords.lng, latSrc: coords.src } });
         });
         sinCoords = fallidos;
       }
 
-      // ── Paso 3: posición GPS actual como punto de partida
-      onProgress?.('Obteniendo tu posición GPS…');
-      const gps = await obtenerPosicionActual(5000);
-      const inicio = gps ?? LIMA_CENTRO;
+      // ── Paso 3: punto de partida — prioridad:
+      //    dirección de inicio configurada → GPS → centro de Lima
+      const inicioCfg = rutaConfig?.inicio;
+      let origen: 'inicio' | 'gps' | 'lima' = 'lima';
+      let inicio: PuntoGeo = LIMA_CENTRO;
+
+      if (inicioCfg && typeof inicioCfg.lat === 'number' && typeof inicioCfg.lng === 'number') {
+        inicio = { lat: inicioCfg.lat, lng: inicioCfg.lng };
+        origen = 'inicio';
+      } else {
+        onProgress?.('Obteniendo tu posición GPS…');
+        const gps = await obtenerPosicionActual(5000);
+        if (gps) {
+          inicio = gps;
+          origen = 'gps';
+        }
+      }
+
+      // Fin de ruta (opcional): la última parada queda FIJA ahí
+      const finCfg = rutaConfig?.fin;
+      const fin: PuntoGeo | null =
+        finCfg && typeof finCfg.lat === 'number' && typeof finCfg.lng === 'number'
+          ? { lat: finCfg.lat, lng: finCfg.lng }
+          : null;
+      const opciones: OpcionesRuta = {
+        fin,
+        cerrarCiclo: !fin && !!rutaConfig?.volverAlInicio,
+      };
 
       // ── Paso 4: distancia ANTES (orden actual) vs optimizada
       onProgress?.('Calculando la mejor ruta…');
-      const ordenActual = conCoords.map((cg) => cg.cliente);
-      const distanciaAntesKm = ordenActual.length > 0
-        ? distanciaRutaKm(conCoords, inicio)
+      const distanciaAntesKm = conCoords.length > 0
+        ? distanciaRutaKm(conCoords, inicio, opciones)
         : 0;
 
-      const optimizado = optimizarOrden<ClienteGeo>(conCoords, inicio);
+      const optimizado = optimizarOrden<ClienteGeo>(conCoords, inicio, opciones);
 
       // ── Paso 5: sin ubicación al final, agrupados por distrito
       const sinUbicacionOrdenados = [...sinCoords].sort((a, b) => {
@@ -328,11 +383,13 @@ export function useClientes() {
         sinUbicacion: sinCoords.length,
         geocodificadosAhora,
         desdeCache,
+        aproximados,
         distanciaAntesKm,
         distanciaDespuesKm: optimizado.distanciaKm,
         ahorroPct: ahorro,
         tiempoEstimadoMin: optimizado.tiempoMin,
-        conGPS: !!gps,
+        origen,
+        conFin: !!fin,
       };
     } finally {
       setSincronizando(false);
