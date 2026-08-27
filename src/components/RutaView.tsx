@@ -35,6 +35,7 @@ import { useConfig } from '../hooks/useConfig';
 import { FotoEntregaModal } from './FotoEntregaModal';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
+import { CronometroRuta } from './CronometroRuta';
 import { recordarCoordenadasCliente } from '../services/geocoding';
 import { Flag, MapPinned } from 'lucide-react';
 
@@ -508,6 +509,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <div className="text-sm font-black text-blue-400">{stats.cobrado.toFixed(0)}</div>
           </div>
         </div>
+
+        {/* ⏱ Cronómetro de ruta + aviso silencioso al bot (Fase 2.2) */}
+        <CronometroRuta
+          uid={user?.uid}
+          clientes={clientes}
+          riderNombre={profile?.nombre || user?.displayName || 'Rider'}
+          riderTelefono={config?.empresa?.telefono || ''}
+          empresa={config?.empresa?.nombre || 'MATE'}
+          onShowToast={onShowToast}
+        />
       </div>
 
       {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
@@ -971,6 +982,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           <div className="grid grid-cols-2 gap-1.5">
                             <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_yape'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📲</span> Enviar Yape
+                            </button>
+                            <button onClick={async () => { onShowToast?.('🔷 Plin', 'Enviando QR de Plin...', 'info'); await enviarAccionBot(c, 'enviar_plin'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95" title="El bot necesita el handler 'enviar_plin' en index.js (Termux)">
+                              <span className="text-lg">🔷</span> Enviar Plin
                             </button>
                             <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">🚀</span> Voy en camino

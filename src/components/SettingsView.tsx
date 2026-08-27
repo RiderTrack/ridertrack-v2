@@ -29,6 +29,12 @@ import {
 } from '../services/googleMaps';
 import { tamanoCache, limpiarCacheGeocodificacion } from '../services/geocoding';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from '../services/mapStyle';
+import {
+  AppNavegacion,
+  getAppNavegacion,
+  setAppNavegacion,
+} from '../services/navegacion';
+import { Compass } from 'lucide-react';
 
 interface SettingsViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -45,6 +51,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
   );
   const [cacheN, setCacheN] = useState(0);
   const [estiloMapa, setEstiloMapaState] = useState<EstiloMapa>(getEstiloMapa());
+
+  // ── Navegación GPS (Fase 2.2 — Google / Waze / Preguntar) ──
+  const [navAbierto, setNavAbierto] = useState(false);
+  const [appNav, setAppNavState] = useState<AppNavegacion>(getAppNavegacion());
+
+  const cambiarAppNavegacion = (app: AppNavegacion) => {
+    setAppNavegacion(app);
+    setAppNavState(app);
+    onShowToast?.(
+      '🧭 Navegación actualizada',
+      app === 'google' ? 'Los botones “Navegar” abrirán Google Maps (modo moto)'
+      : app === 'waze' ? 'Los botones “Navegar” abrirán Waze'
+      : 'Al tocar “Navegar” te preguntará con cuál app ir',
+      'success'
+    );
+  };
 
   const cambiarEstiloMapa = (e: EstiloMapa) => {
     setEstiloMapa(e);
@@ -231,6 +253,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-all ${mapasAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
+
+        {/* Navegación GPS (Fase 2.2 — elegir Google o Waze) */}
+        <button
+          onClick={() => setNavAbierto((v) => !v)}
+          className="text-left p-4 rounded-2xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 transition-all active:scale-95 group sm:col-span-2"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+              <Compass className="w-5 h-5 text-blue-400" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">Navegación GPS</div>
+              <div className="text-[11px] text-slate-400">
+                App preferida: {appNav === 'google' ? 'Google Maps' : appNav === 'waze' ? 'Waze' : 'Preguntar (ambas)'}
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-blue-400 transition-all ${navAbierto ? 'rotate-90' : ''}`} />
+          </div>
+        </button>
       </div>
 
       {/* Panel Mapas y Rutas */}
@@ -350,6 +391,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             el mapa de entregas con skin oscuro, el motito GPS, la búsqueda de direcciones estilo Circuit y la
             optimización <b className="text-slate-400">por calles reales</b>: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
             Google incluye US$200 de crédito mensual — para un rider ese uso queda dentro de lo gratis.
+          </p>
+        </div>
+      )}
+
+      {/* Panel Navegación GPS (Fase 2.2) */}
+      {navAbierto && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-800 border border-blue-500/30 space-y-4">
+          <div>
+            <h3 className="font-bold text-white text-sm">🧭 ¿Con qué app quieres navegar?</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Se aplica a TODOS los botones “Navegar” de la app: la ficha del cliente en el mapa,
+              el banner de siguiente parada y los pedidos. Se guarda en este celular.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {([
+              { id: 'preguntar', emoji: '❓', label: 'Preguntar', desc: 'al tocar Navegar, elige Google o Waze' },
+              { id: 'google', emoji: '🛵', label: 'Google Maps', desc: 'abre directo en modo moto' },
+              { id: 'waze', emoji: '🚗', label: 'Waze', desc: 'abre directo con alertas de tráfico' },
+            ] as Array<{ id: AppNavegacion; emoji: string; label: string; desc: string }>).map((op) => (
+              <button
+                key={op.id}
+                onClick={() => cambiarAppNavegacion(op.id)}
+                className={`p-3 rounded-xl border text-left transition-all active:scale-95 ${
+                  appNav === op.id
+                    ? 'bg-blue-500/20 border-blue-500 text-white'
+                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <div className="text-lg leading-none mb-1">{op.emoji}</div>
+                <div className="text-xs font-bold">{op.label}</div>
+                <div className="text-[10px] opacity-70 leading-tight mt-0.5">{op.desc}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            ℹ️ Al igual que Circuit, la navegación guiada por voz corre en la app de Google Maps o Waze
+            (ninguna app puede hacer navegación guiada por dentro). Al tocar “Navegar” se abre la app
+            elegida ya con el destino puesto — listo para partir.
           </p>
         </div>
       )}

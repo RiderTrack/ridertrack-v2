@@ -25,7 +25,6 @@ import {
   Crosshair,
   Loader2,
   MessageSquare,
-  Navigation,
   RefreshCw,
   Route as RouteIcon,
   Flag,
@@ -46,6 +45,7 @@ import {
   HtmlMarkerClass,
 } from '../services/googleMaps';
 import { obtenerRutaGoogle, firmaRuta } from '../services/googleDirections';
+import { NavegarButton } from './NavegarButton';
 
 interface GoogleLiveMapProps {
   orders: Order[];
@@ -848,14 +848,7 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
                 </button>
               )}
               {seleccionado.lat != null && seleccionado.lng != null && (
-                <a
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${seleccionado.lat},${seleccionado.lng}&travelmode=two_wheeler`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold transition-all active:scale-95"
-                >
-                  <Navigation className="w-3.5 h-3.5" /> Navegar
-                </a>
+                <NavegarButton lat={seleccionado.lat} lng={seleccionado.lng} />
               )}
               {seleccionado.clienteTelefono && (
                 <a
@@ -971,14 +964,7 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
           )}
 
           {siguienteParada?.lat != null && siguienteParada.lng != null && (
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${siguienteParada.lat},${siguienteParada.lng}&travelmode=two_wheeler`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md transition-all"
-            >
-              <Navigation className="w-3.5 h-3.5" /> Navegar
-            </a>
+            <NavegarButton lat={siguienteParada.lat} lng={siguienteParada.lng} size="md" />
           )}
         </div>
       </div>

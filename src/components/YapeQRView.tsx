@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-// 💜 YAPE QR VIEW - RiderTrack V2
-// Pantalla para que el rider configure su QR de Yape:
+// 💜🔷 QR VIEW (YAPE + PLIN) - RiderTrack V2 (Fase 2.2)
+// Pantalla para que el rider configure sus QR de cobro:
 //   1. Sus datos (número + titular) → config_empresa/{uid}
-//   2. La imagen del QR (subida desde la app Yape) → comprimida
-//   3. Sincronización con el bot → ruta_activa/{uid}.yape
-//      (el bot la lee en enviarYapeConImagen y manda el QR
-//      por WhatsApp con la plantilla yapeQR)
+//   2. La imagen del QR (subida desde la app Yape/Plin) → comprimida
+//   3. Sincronización con el bot → ruta_activa/{uid}.yape / .plin
+//      (el bot las lee y manda el QR por WhatsApp)
+//
+// Fase 2.2: ahora con PESTAÑAS — 💜 Yape y 🔷 Plin comparten la
+// misma pantalla; cada billetera guarda su propio QR y sus datos.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -16,7 +18,13 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
-import { sincronizarYapeAlBot, obtenerYapeDelBot } from '../services/firestore';
+import {
+  ConfigCuentas,
+  sincronizarYapeAlBot,
+  obtenerYapeDelBot,
+  sincronizarPlinAlBot,
+  obtenerPlinDelBot,
+} from '../services/firestore';
 
 interface YapeQRViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -35,11 +43,11 @@ function comprimirImagen(file: File): Promise<string> {
         const MAX_SIZE = 800;
         let { width, height } = img;
         if (width > MAX_SIZE || height > MAX_SIZE) {
-          if (width >= height) {
-            height = Math.round(height * (MAX_SIZE / width));
+          if (width > height) {
+            height = Math.round((height * MAX_SIZE) / width);
             width = MAX_SIZE;
           } else {
-            width = Math.round(width * (MAX_SIZE / height));
+            width = Math.round((width * MAX_SIZE) / height);
             height = MAX_SIZE;
           }
         }
@@ -48,14 +56,11 @@ function comprimirImagen(file: File): Promise<string> {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas no disponible')); return; }
-        ctx.fillStyle = '#FFFFFF'; // fondo blanco (los QR de Yape tienen fondo claro)
+        ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-
         let base64 = canvas.toDataURL('image/jpeg', 0.8);
-        if (base64.length > 900000) {
-          base64 = canvas.toDataURL('image/jpeg', 0.5);
-        }
+        if (base64.length > 900 * 1024) base64 = canvas.toDataURL('image/jpeg', 0.5);
         resolve(base64);
       };
       img.src = e.target?.result as string;
@@ -86,18 +91,103 @@ async function copiarTexto(texto: string): Promise<boolean> {
   }
 }
 
-export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
+// ═══════════════════════════════════════════════════════════
+// 🎨 Tema por billetera (clases completas para Tailwind JIT)
+// ═══════════════════════════════════════════════════════════
+
+type WalletId = 'yape' | 'plin';
+
+interface WalletTema {
+  id: WalletId;
+  nombre: string;
+  emoji: string;
+  /** Encabezado de la pantalla */
+  gradHeader: string;
+  iconBg: string;
+  iconColor: string;
+  /** Acentos */
+  accentText: string;
+  inputFocus: string;
+  inputOk: string;
+  qrBorder: string;
+  btnMain: string;
+  btnWa: string;
+  stepChip: string;
+  tipBox: string;
+  /** Textos */
+  titulo: string;
+  subtitulo: string;
+  accionBoton: string;   // "Enviar Yape" / "Enviar Plin"
+  ayudaPaso2: string;    // cómo conseguir el QR en la app
+  notaBot?: string;      // nota extra (solo Plin por ahora)
+}
+
+const TEMAS: Record<WalletId, WalletTema> = {
+  yape: {
+    id: 'yape',
+    nombre: 'Yape',
+    emoji: '💜',
+    gradHeader: 'bg-gradient-to-br from-purple-600/20 via-slate-800 to-slate-800 border border-purple-500/30 shadow-xl',
+    iconBg: 'bg-purple-500/20 border border-purple-500/40',
+    iconColor: 'text-purple-300',
+    accentText: 'text-purple-400',
+    inputFocus: 'focus:border-purple-500',
+    inputOk: 'border-emerald-600/50 focus:border-emerald-500',
+    qrBorder: 'border-purple-500/40',
+    btnMain: 'bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-600/30',
+    btnWa: 'bg-green-600/15 hover:bg-green-600/25 border border-green-600/30 text-green-400',
+    stepChip: 'bg-purple-500/20 text-purple-300',
+    tipBox: 'bg-purple-500/10 border border-purple-500/20',
+    titulo: 'Mi QR de Yape',
+    subtitulo: 'Configura tu QR una vez — el bot lo envía por WhatsApp en cada cobro',
+    accionBoton: '“Enviar Yape”',
+    ayudaPaso2: 'Entra a “Cobrar” y busca tu código QR',
+  },
+  plin: {
+    id: 'plin',
+    nombre: 'Plin',
+    emoji: '🔷',
+    gradHeader: 'bg-gradient-to-br from-cyan-600/20 via-slate-800 to-slate-800 border border-cyan-500/30 shadow-xl',
+    iconBg: 'bg-cyan-500/20 border border-cyan-500/40',
+    iconColor: 'text-cyan-300',
+    accentText: 'text-cyan-400',
+    inputFocus: 'focus:border-cyan-500',
+    inputOk: 'border-emerald-600/50 focus:border-emerald-500',
+    qrBorder: 'border-cyan-500/40',
+    btnMain: 'bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white shadow-lg shadow-cyan-600/30',
+    btnWa: 'bg-green-600/15 hover:bg-green-600/25 border border-green-600/30 text-green-400',
+    stepChip: 'bg-cyan-500/20 text-cyan-300',
+    tipBox: 'bg-cyan-500/10 border border-cyan-500/20',
+    titulo: 'Mi QR de Plin',
+    subtitulo: 'Sube el QR de tu Plin — el bot lo tendrá listo para enviarlo por WhatsApp',
+    accionBoton: '“Enviar Plin”',
+    ayudaPaso2: 'Busca “Recibir dinero” / “Cobrar” y tu código QR',
+    notaBot: '🔐 El bot (index.js en Termux) necesita el pequeño handler “enviar_plin” para mandar este QR solo — tus datos ya quedan listos en Firebase mientras tanto. También puedes compartirlo al toque con el botón verde.',
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
+// 🧩 PANEL DE UNA BILLETERA (Yape o Plin)
+// ═══════════════════════════════════════════════════════════
+
+interface WalletPanelProps {
+  wallet: WalletId;
+  onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+}
+
+const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
+  const T = TEMAS[wallet];
   const { user } = useAuth();
   const { config, loading, guardando, guardar } = useConfig();
 
-  // Datos Yape (config_empresa)
+  // Datos de la billetera (config_empresa)
   const [numero, setNumero] = useState('');
   const [titular, setTitular] = useState('');
   const [qrBase64, setQrBase64] = useState('');
 
-  // Estado de sincronización con el bot (ruta_activa.yape)
+  // Estado de sincronización con el bot (ruta_activa.{wallet})
   const [botSync, setBotSync] = useState<'cargando' | 'sincronizado' | 'desactualizado' | 'no_sincronizado'>('cargando');
-  const [botYape, setBotYape] = useState<{ qrBase64?: string; numero?: string; titular?: string } | null>(null);
+  const [botDatos, setBotDatos] = useState<{ qrBase64?: string; numero?: string; titular?: string } | null>(null);
 
   // UI
   const [subiendo, setSubiendo] = useState(false);
@@ -107,45 +197,53 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
   const [hayCambios, setHayCambios] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Leer de la config según la billetera activa
+  const cfgWallet = wallet === 'yape' ? config?.yape : config?.plin;
+
   // Cargar datos de config_empresa al montar / cambiar config
   useEffect(() => {
     if (!config) return;
-    setNumero(config.yape?.telefono || '');
-    setTitular(config.yape?.nombre || '');
-    setQrBase64(config.yape?.qrBase64 || '');
-  }, [config]);
+    setNumero(cfgWallet?.telefono || '');
+    setTitular(cfgWallet?.nombre || '');
+    setQrBase64((cfgWallet as any)?.qrBase64 || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, wallet]);
 
   // Ver estado de sincronización con el bot
   const verificarSyncBot = useCallback(async () => {
     if (!user) return;
     setBotSync('cargando');
-    const yapeBot = await obtenerYapeDelBot(user.uid);
-    setBotYape(yapeBot);
-    if (!yapeBot || (!yapeBot.qrBase64 && !yapeBot.numero)) {
+    const botCfg = wallet === 'yape'
+      ? await obtenerYapeDelBot(user.uid)
+      : await obtenerPlinDelBot(user.uid);
+    setBotDatos(botCfg);
+    if (!botCfg || (!botCfg.qrBase64 && !botCfg.numero)) {
       setBotSync('no_sincronizado');
     } else {
-      const igualQR = (yapeBot.qrBase64 || '') === (qrBase64 || '');
-      const igualDatos = (yapeBot.numero || '') === (numero || '') && (yapeBot.titular || '') === (titular || '');
+      const igualQR = (botCfg.qrBase64 || '') === (qrBase64 || '');
+      const igualDatos = (botCfg.numero || '') === (numero || '') && (botCfg.titular || '') === (titular || '');
       setBotSync(igualQR && igualDatos ? 'sincronizado' : 'desactualizado');
     }
-  }, [user, qrBase64, numero, titular]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, wallet, qrBase64, numero, titular]);
 
   useEffect(() => {
     if (!loading && user) {
       verificarSyncBot();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, user]);
+  }, [loading, user, wallet]);
 
   // Marcar cambios pendientes
   useEffect(() => {
     if (loading || !config) return;
     const cambio =
-      (config.yape?.telefono || '') !== numero ||
-      (config.yape?.nombre || '') !== titular ||
-      (config.yape?.qrBase64 || '') !== qrBase64;
+      (cfgWallet?.telefono || '') !== numero ||
+      (cfgWallet?.nombre || '') !== titular ||
+      ((cfgWallet as any)?.qrBase64 || '') !== qrBase64;
     setHayCambios(cambio);
-  }, [numero, titular, qrBase64, config, loading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numero, titular, qrBase64, config, loading, wallet]);
 
   // ── Subir QR ──
   const handleSubirQR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -160,7 +258,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
       const base64 = await comprimirImagen(file);
       setQrBase64(base64);
       const kb = Math.round(base64.length / 1024);
-      onShowToast?.('✅ QR cargado', `${kb} KB — toca "Guardar y sincronizar" para confirmar`, 'success');
+      onShowToast?.('✅ QR cargado', `${kb} KB — toca “Guardar y sincronizar” para confirmar`, 'success');
     } catch (err: any) {
       onShowToast?.('❌ Error', err.message || 'No se pudo procesar la imagen', 'error');
     } finally {
@@ -174,11 +272,11 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
     if (!user) return;
     const numLimpio = numero.replace(/\D/g, '');
     if (!numLimpio) {
-      onShowToast?.('⚠️ Falta el número', 'Escribe tu número de Yape (9 dígitos)', 'warning');
+      onShowToast?.('⚠️ Falta el número', `Escribe tu número asociado a ${T.nombre} (9 dígitos)`, 'warning');
       return;
     }
     if (numLimpio.length !== 9) {
-      onShowToast?.('⚠️ Número inválido', 'El número Yape debe tener 9 dígitos', 'warning');
+      onShowToast?.('⚠️ Número inválido', `El número de ${T.nombre} debe tener 9 dígitos`, 'warning');
       return;
     }
     if (!titular.trim()) {
@@ -188,25 +286,33 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
     setGuardandoTodo(true);
     try {
       // 1. Guardar en config_empresa/{uid} (fuente de verdad de v2)
-      await guardar({
-        ...config,
-        yape: {
+      const nuevaConfig: ConfigCuentas = { ...config };
+      if (wallet === 'yape') {
+        nuevaConfig.yape = {
           ...config.yape,
           nombre: titular.trim(),
           telefono: numLimpio,
           qrBase64: qrBase64,
           qrUrl: '',
-        },
-      });
-      // 2. Sincronizar a ruta_activa/{uid}.yape (lo que lee el bot)
-      await sincronizarYapeAlBot(user.uid, {
-        qrBase64: qrBase64,
-        qrUrl: '',
-        numero: numLimpio,
-        titular: titular.trim(),
-      });
+        };
+      } else {
+        nuevaConfig.plin = {
+          ...config.plin,
+          nombre: titular.trim(),
+          telefono: numLimpio,
+          qrBase64: qrBase64,
+          qrUrl: '',
+        };
+      }
+      await guardar(nuevaConfig);
+      // 2. Sincronizar a ruta_activa/{uid}.{wallet} (lo que lee el bot)
+      if (wallet === 'yape') {
+        await sincronizarYapeAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
+      } else {
+        await sincronizarPlinAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
+      }
       onShowToast?.(
-        '💜 Yape sincronizado',
+        `${T.emoji} ${T.nombre} sincronizado`,
         qrBase64 ? 'El bot ya puede enviar tu QR por WhatsApp' : 'Datos guardados (sin imagen de QR)',
         'success'
       );
@@ -224,13 +330,18 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
     if (!user) return;
     setSincronizando(true);
     try {
-      await sincronizarYapeAlBot(user.uid, {
+      const datos = {
         qrBase64: qrBase64,
         qrUrl: '',
         numero: numero.replace(/\D/g, ''),
         titular: titular.trim(),
-      });
-      onShowToast?.('🤖 Bot actualizado', 'El bot ya ve tu config de Yape actual', 'success');
+      };
+      if (wallet === 'yape') {
+        await sincronizarYapeAlBot(user.uid, datos);
+      } else {
+        await sincronizarPlinAlBot(user.uid, datos);
+      }
+      onShowToast?.('🤖 Bot actualizado', `El bot ya ve tu config de ${T.nombre} actual`, 'success');
       await verificarSyncBot();
     } catch (e: any) {
       onShowToast?.('❌ Error', e.message || 'No se pudo sincronizar', 'error');
@@ -242,19 +353,19 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
   // ── Eliminar QR ──
   const handleEliminarQR = () => {
     if (!qrBase64) return;
-    if (!confirm('¿Eliminar tu QR de Yape?\n\nEl bot volverá a enviar SOLO el mensaje de texto (sin imagen) cuando toques "Enviar Yape".')) return;
+    if (!confirm(`¿Eliminar tu QR de ${T.nombre}?\n\nEl bot volverá a enviar SOLO el mensaje de texto (sin imagen).`)) return;
     setQrBase64('');
     onShowToast?.('🗑️ QR eliminado', 'Guarda para que el bot deje de usar la imagen', 'info');
   };
 
   // ── Compartir por WhatsApp ──
   const handleCompartirWhatsApp = () => {
-    const texto = `📲 Pago por Yape\n\n📱 Número: *${numero || '—'}*\n👤 Titular: ${titular || '—'}`;
+    const texto = `📲 Pago por ${T.nombre}\n\n📱 Número: *${numero || '—'}*\n👤 Titular: ${titular || '—'}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
   const handleCopiarDatos = async () => {
-    const texto = `Yape: ${numero} — Titular: ${titular}`;
+    const texto = `${T.nombre}: ${numero} — Titular: ${titular}`;
     const ok = await copiarTexto(texto);
     if (ok) onShowToast?.('📋 Copiado', texto, 'success');
     else onShowToast?.('❌ No se pudo copiar', 'Cópielo manualmente: ' + texto, 'warning');
@@ -263,13 +374,12 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
   const kbQR = qrBase64 ? Math.round(qrBase64.length / 1024) : 0;
   const numLimpioLen = numero.replace(/\D/g, '').length;
 
-  // ── Loading (Fase 2.1: nunca infinito — con texto para que se
-  //    entienda qué pasa si la red está lenta) ──
+  // ── Loading (Fase 2.1: nunca infinito) ──
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-        <p className="text-xs text-slate-400">Cargando tu configuración de Yape…</p>
+        <Loader2 className={`w-8 h-8 animate-spin ${T.iconColor}`} />
+        <p className="text-xs text-slate-400">Cargando tu configuración de {T.nombre}…</p>
         <p className="text-[10px] text-slate-500">
           Si demora, tu conexión está lenta — la pantalla se abrirá sola en unos segundos
         </p>
@@ -278,20 +388,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
   }
 
   return (
-    <div className="space-y-4 pb-12">
-      {/* ═══ HEADER ═══ */}
-      <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-600/20 via-slate-800 to-slate-800 border border-purple-500/30 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center flex-shrink-0">
-            <QrCode className="w-6 h-6 text-purple-300" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-black text-white">Mi QR de Yape</h1>
-            <p className="text-xs text-slate-400">Configura tu QR una vez — el bot lo envía por WhatsApp en cada cobro</p>
-          </div>
-        </div>
-      </div>
-
+    <div className="space-y-4">
       {/* ═══ ESTADO GENERAL (3 indicadores) ═══ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className={`p-3.5 rounded-xl border flex items-center gap-3 ${numero && titular ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
@@ -299,7 +396,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
             ? <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
             : <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />}
           <div className="min-w-0">
-            <div className="text-[10px] uppercase font-bold text-slate-400">Datos Yape</div>
+            <div className="text-[10px] uppercase font-bold text-slate-400">Datos {T.nombre}</div>
             <div className={`text-xs font-bold truncate ${numero && titular ? 'text-emerald-400' : 'text-amber-400'}`}>
               {numero && titular ? 'Completos' : 'Faltan datos'}
             </div>
@@ -343,17 +440,18 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
         </div>
       </div>
 
+      {/* ═══ CUERPO: 2 columnas ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* ═══ COLUMNA IZQUIERDA: Datos + QR ═══ */}
         <div className="space-y-4">
-          {/* ── Datos Yape ── */}
+          {/* ── Datos ── */}
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center gap-2">
-              <Smartphone className="w-4 h-4 text-purple-400" />
-              <h3 className="text-sm font-bold text-white">Mis datos Yape</h3>
+              <Smartphone className={`w-4 h-4 ${T.accentText}`} />
+              <h3 className="text-sm font-bold text-white">Mis datos {T.nombre}</h3>
             </div>
             <div>
-              <label className="text-[10px] text-slate-400 uppercase font-bold">Número Yape (9 dígitos)</label>
+              <label className="text-[10px] text-slate-400 uppercase font-bold">Número {T.nombre} (9 dígitos)</label>
               <input
                 type="tel"
                 inputMode="numeric"
@@ -362,7 +460,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
                 placeholder="980811297"
                 maxLength={11}
                 className={`w-full bg-slate-900 text-white text-base font-mono rounded-lg px-3 py-2.5 border outline-none transition-colors ${
-                  numLimpioLen === 9 ? 'border-emerald-600/50 focus:border-emerald-500' : 'border-slate-700 focus:border-purple-500'
+                  numLimpioLen === 9 ? T.inputOk : `border-slate-700 ${T.inputFocus}`
                 }`}
               />
               {numero && numLimpioLen !== 9 && (
@@ -375,14 +473,14 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
                 type="text"
                 value={titular}
                 onChange={(e) => setTitular(e.target.value)}
-                placeholder="Nombre completo como aparece en Yape"
-                className="w-full bg-slate-900 text-white text-sm rounded-lg px-3 py-2.5 border border-slate-700 focus:border-purple-500 outline-none"
+                placeholder={`Nombre completo como aparece en ${T.nombre}`}
+                className={`w-full bg-slate-900 text-white text-sm rounded-lg px-3 py-2.5 border border-slate-700 ${T.inputFocus} outline-none`}
               />
             </div>
             <div className="flex gap-2">
               <button
                 onClick={handleCompartirWhatsApp}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-600/15 hover:bg-green-600/25 border border-green-600/30 text-green-400 rounded-lg text-xs font-bold transition-all active:scale-95"
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 ${T.btnWa} rounded-lg text-xs font-bold transition-all active:scale-95`}
               >
                 <Share2 className="w-3.5 h-3.5" /> Compartir por WhatsApp
               </button>
@@ -399,7 +497,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-purple-400" />
+                <QrCode className={`w-4 h-4 ${T.accentText}`} />
                 <h3 className="text-sm font-bold text-white">QR de cobro</h3>
               </div>
               {qrBase64 && (
@@ -412,8 +510,8 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
             {/* Preview */}
             <div className="relative">
               {qrBase64 ? (
-                <div className="relative rounded-xl overflow-hidden border-2 border-purple-500/40 bg-white">
-                  <img src={qrBase64} alt="QR Yape" className="w-full max-w-[260px] mx-auto block" />
+                <div className={`relative rounded-xl overflow-hidden border-2 ${T.qrBorder} bg-white`}>
+                  <img src={qrBase64} alt={`QR ${T.nombre}`} className="w-full max-w-[260px] mx-auto block" />
                   <button
                     onClick={() => setAmpliado(true)}
                     className="absolute top-2 right-2 p-2 bg-slate-900/80 hover:bg-slate-900 rounded-lg text-white transition-colors"
@@ -426,7 +524,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
                 <div className="rounded-xl border-2 border-dashed border-slate-600 bg-slate-900/50 p-8 text-center">
                   <QrCode className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                   <p className="text-xs text-slate-400 font-medium">Sin QR cargado</p>
-                  <p className="text-[10px] text-slate-500 mt-1">Sube el screenshot de tu QR desde la app Yape</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Sube el screenshot de tu QR desde la app {T.nombre}</p>
                 </div>
               )}
             </div>
@@ -436,7 +534,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={subiendo}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 ${wallet === 'yape' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-cyan-600 hover:bg-cyan-700'} text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50`}
               >
                 {subiendo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
                 {qrBase64 ? 'Cambiar QR' : 'Subir QR'}
@@ -463,9 +561,7 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
               onClick={handleGuardarYSincronizar}
               disabled={guardandoTodo || guardando}
               className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 ${
-                hayCambios
-                  ? 'bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-600/30'
-                  : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                hayCambios ? T.btnMain : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
               }`}
             >
               {guardandoTodo ? (<><Loader2 className="w-4 h-4 animate-spin" /> Guardando…</>) : (<><Save className="w-4 h-4" /> Guardar y sincronizar</>)}
@@ -481,14 +577,14 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           {/* ── Estado del bot ── */}
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-purple-400" />
+              <Bot className={`w-4 h-4 ${T.accentText}`} />
               <h3 className="text-sm font-bold text-white">Sincronización con RudyBot</h3>
             </div>
 
             <div className="bg-slate-900/60 rounded-xl p-3 space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-400">QR que ve el bot:</span>
-                {botYape?.qrBase64 ? (
+                {botDatos?.qrBase64 ? (
                   <span className="text-emerald-400 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Imagen cargada</span>
                 ) : (
                   <span className="text-rose-400 font-bold flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> Sin imagen</span>
@@ -496,8 +592,8 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-400">Datos que ve el bot:</span>
-                {botYape?.numero ? (
-                  <span className="text-emerald-400 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {botYape.numero}</span>
+                {botDatos?.numero ? (
+                  <span className="text-emerald-400 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {botDatos.numero}</span>
                 ) : (
                   <span className="text-rose-400 font-bold flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> Sin datos</span>
                 )}
@@ -506,10 +602,16 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
 
             <p className="text-[11px] text-slate-400 leading-relaxed">
               El bot lee tu QR desde <span className="text-slate-300 font-mono">ruta_activa</span> en Firebase.
-              Con el QR cargado, cuando toques <span className="text-purple-300 font-bold">"Enviar Yape"</span> en un cliente,
+              Con el QR cargado, cuando toques <span className={`${T.accentText} font-bold`}>{T.accionBoton}</span> en un cliente,
               el bot le mandará <span className="text-slate-300">la imagen del QR + el mensaje de cobro</span>.
               Sin QR, el bot manda solo el mensaje de texto.
             </p>
+
+            {T.notaBot && (
+              <div className={`${T.tipBox} rounded-lg p-2.5`}>
+                <p className="text-[10px] text-slate-300/90 leading-relaxed">{T.notaBot}</p>
+              </div>
+            )}
 
             <div className="flex gap-2">
               <button
@@ -533,35 +635,35 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           {/* ── Cómo conseguir tu QR ── */}
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-purple-400" />
+              <Info className={`w-4 h-4 ${T.accentText}`} />
               <h3 className="text-sm font-bold text-white">¿Cómo consigo mi QR?</h3>
             </div>
             <ol className="space-y-2 text-[11px] text-slate-400">
               <li className="flex gap-2">
-                <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
-                Abre la app de <span className="text-slate-300 font-bold">Yape</span> en tu celular
+                <span className={`w-4 h-4 rounded-full ${T.stepChip} text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5`}>1</span>
+                Abre la app de <span className="text-slate-300 font-bold">{T.nombre}</span> en tu celular
               </li>
               <li className="flex gap-2">
-                <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
-                Entra a <span className="text-slate-300 font-bold">"Cobrar"</span> y busca tu código QR
+                <span className={`w-4 h-4 rounded-full ${T.stepChip} text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5`}>2</span>
+                {T.ayudaPaso2}
               </li>
               <li className="flex gap-2">
-                <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                <span className={`w-4 h-4 rounded-full ${T.stepChip} text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5`}>3</span>
                 Toma un <span className="text-slate-300 font-bold">screenshot</span> del QR (que se vea completo y nítido)
               </li>
               <li className="flex gap-2">
-                <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">4</span>
-                Vuelve aquí y toca <span className="text-slate-300 font-bold">"Subir QR"</span>
+                <span className={`w-4 h-4 rounded-full ${T.stepChip} text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5`}>4</span>
+                Vuelve aquí y toca <span className="text-slate-300 font-bold">“Subir QR”</span>
               </li>
               <li className="flex gap-2">
-                <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">5</span>
-                Toca <span className="text-slate-300 font-bold">"Guardar y sincronizar"</span> — listo ✨
+                <span className={`w-4 h-4 rounded-full ${T.stepChip} text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5`}>5</span>
+                Toca <span className="text-slate-300 font-bold">“Guardar y sincronizar”</span> — listo ✨
               </li>
             </ol>
-            <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5">
-              <p className="text-[10px] text-purple-200/80 leading-relaxed">
+            <div className={`${T.tipBox} rounded-lg p-2.5`}>
+              <p className="text-[10px] text-slate-300/80 leading-relaxed">
                 💡 El QR se guarda en Firebase una sola vez y queda sincronizado con el bot.
-                Solo necesitas cambiarlo si cambias de número Yape.
+                Solo necesitas cambiarlo si cambias de número {T.nombre}.
               </p>
             </div>
           </div>
@@ -582,16 +684,69 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
               <X className="w-5 h-5" />
             </button>
             <div className="bg-white rounded-2xl p-4">
-              <img src={qrBase64} alt="QR Yape ampliado" className="w-full block rounded-lg" />
+              <img src={qrBase64} alt={`QR ${T.nombre} ampliado`} className="w-full block rounded-lg" />
               <div className="text-center mt-3 pb-1">
-                <p className="text-sm font-black text-slate-900">{titular || 'Yape'}</p>
-                <p className="text-xl font-black text-purple-700 font-mono tracking-wider">{numero}</p>
-                <p className="text-[10px] text-slate-500 mt-1">Escanea con tu app de Yape para pagar</p>
+                <p className="text-sm font-black text-slate-900">{titular || T.nombre}</p>
+                <p className={`text-xl font-black font-mono tracking-wider ${wallet === 'yape' ? 'text-purple-700' : 'text-cyan-700'}`}>{numero}</p>
+                <p className="text-[10px] text-slate-500 mt-1">Escanea con tu app de {T.nombre} para pagar</p>
               </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// 📱 VISTA PRINCIPAL: pestañas Yape / Plin + header
+// ═══════════════════════════════════════════════════════════
+
+export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
+  const [wallet, setWallet] = useState<WalletId>('yape');
+  const T = TEMAS[wallet];
+
+  return (
+    <div className="space-y-4 pb-12">
+      {/* ═══ HEADER con pestañas ═══ */}
+      <div className={`p-5 rounded-2xl ${T.gradHeader}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-11 h-11 rounded-xl ${T.iconBg} flex items-center justify-center flex-shrink-0`}>
+            <QrCode className={`w-6 h-6 ${T.iconColor}`} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl font-black text-white">Mis QR de cobro</h1>
+            <p className="text-xs text-slate-400">Yape y Plin — configúralos una vez y el bot los envía por WhatsApp</p>
+          </div>
+        </div>
+
+        {/* Pestañas de billetera */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setWallet('yape')}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+              wallet === 'yape'
+                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
+                : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+            }`}
+          >
+            💜 Yape
+          </button>
+          <button
+            onClick={() => setWallet('plin')}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+              wallet === 'plin'
+                ? 'bg-cyan-600 border-cyan-500 text-white shadow-lg shadow-cyan-600/30'
+                : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+            }`}
+          >
+            🔷 Plin
+          </button>
+        </div>
+      </div>
+
+      {/* Panel de la billetera activa */}
+      <WalletPanel key={wallet} wallet={wallet} onShowToast={onShowToast} />
     </div>
   );
 };

@@ -21,7 +21,6 @@ import {
   Crosshair,
   Loader2,
   MessageSquare,
-  Navigation,
   RefreshCw,
   Route as RouteIcon,
   Flag,
@@ -32,6 +31,8 @@ import { distanciaRutaKm, LIMA_CENTRO } from '../services/routeOptimizer';
 import { linkWhatsApp, ETIQUETAS_ESTADO } from '../utils/realData';
 import { useConfig } from '../hooks/useConfig';
 import { getEstiloMapa, tilesDeEstilo, EstiloMapa } from '../services/mapStyle';
+import { getAppNavegacion, urlNavegacionGoogle, urlNavegacionWaze } from '../services/navegacion';
+import { NavegarButton } from './NavegarButton';
 
 interface LeafletLiveMapProps {
   orders: Order[];
@@ -254,10 +255,18 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         o.clienteTelefono,
         `Hola ${o.cliente} 👋 Te escribo desde ${riderName ? esc(riderName) : 'RiderTrack'} por tu entrega de hoy.`
       );
-      const navUrl =
-        o.lat != null && o.lng != null
-          ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lng}&travelmode=two_wheeler`
-          : '';
+      // Fase 2.2: links de navegación según la app preferida del rider
+      let navLinks = '';
+      if (o.lat != null && o.lng != null) {
+        const prefNav = getAppNavegacion();
+        const btnGoogle =
+          `<a href="${urlNavegacionGoogle(o.lat, o.lng)}" target="_blank" rel="noopener" style="text-decoration:none;background:#2563eb;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">🛵 Google</a>`;
+        const btnWaze =
+          `<a href="${urlNavegacionWaze(o.lat, o.lng)}" target="_blank" rel="noopener" style="text-decoration:none;background:#06b6d4;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">🚗 Waze</a>`;
+        if (prefNav === 'google') navLinks = btnGoogle;
+        else if (prefNav === 'waze') navLinks = btnWaze;
+        else navLinks = btnGoogle + btnWaze; // "preguntar": ambas apps
+      }
 
       const popupHtml =
         `<div style="min-width:190px">` +
@@ -275,9 +284,7 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         (o.clienteTelefono
           ? `<a href="${waUrl}" target="_blank" rel="noopener" style="text-decoration:none;background:#059669;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">💬 WhatsApp</a>`
           : '') +
-        (navUrl
-          ? `<a href="${navUrl}" target="_blank" rel="noopener" style="text-decoration:none;background:#2563eb;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">🛵 Navegar</a>`
-          : '') +
+        (navLinks ? navLinks : '') +
         `</div>` +
         `</div>`;
 
@@ -644,14 +651,7 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
           )}
 
           {siguienteParada?.lat != null && siguienteParada.lng != null && (
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${siguienteParada.lat},${siguienteParada.lng}&travelmode=two_wheeler`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md transition-all"
-            >
-              <Navigation className="w-3.5 h-3.5" /> Navegar
-            </a>
+            <NavegarButton lat={siguienteParada.lat} lng={siguienteParada.lng} size="md" />
           )}
         </div>
       </div>
