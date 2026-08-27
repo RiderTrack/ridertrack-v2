@@ -53,6 +53,10 @@ export interface Cliente {
   nota: string;
   fotoUrl?: string;
   respondioInicioRuta?: boolean;
+  /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
+   *  no volver a geocodificar la misma dirección nunca más */
+  lat?: number;
+  lng?: number;
 }
 
 export interface RutaActiva {
