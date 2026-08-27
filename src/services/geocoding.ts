@@ -1,27 +1,26 @@
 // ═══════════════════════════════════════════════════════════
-// 🌐 SERVICIO GEOCODIFICACIÓN - RiderTrack V2 (Fase 1.4)
+// 🌐 SERVICIO GEOCODIFICACIÓN - RiderTrack V2 (Fase 2.0)
 // Convierte direcciones ("Av. Larco 123, Miraflores") en
 // coordenadas reales (lat/lng).
 //
-// Motores:
-//   1. Google Geocoding API — si el usuario configuró una key
-//      (Configuración → Mapas y Rutas). Más preciso en Perú.
-//   2. Nominatim (OpenStreetMap) — gratis, sin key. CON cola
-//      de 1 petición por segundo (límite oficial de Nominatim).
+// Motores (Fase 2.0 — Google Maps Platform):
+//   1. Google Geocoding + Places — PREDETERMINADO (la clave API
+//      del proyecto RiderTrack ya viene de fábrica). Es el motor
+//      que usa Circuit: encuentra números de puerta exactos en
+//      Lima. El autocompletado es Places Autocomplete (New) con
+//      sesiones: escribes "av sucre" y salen los distritos.
+//   2. Nominatim (OpenStreetMap) — respaldo gratis sin key, CON
+//      cola de 1 petición por segundo (límite oficial).
 //
-// CASCADA DE CONSULTAS (Fase 1.4 — probada con direcciones
-// reales de Lima): una misma dirección se intenta con hasta 4
-// variantes hasta que una devuelva resultado:
+// CASCADA DE CONSULTAS (heredada de la Fase 1.4 — probada con
+// direcciones reales de Lima): una misma dirección se intenta
+// con hasta 4 variantes hasta que una devuelva resultado:
 //   v1) "{dir}, {dist}, Lima, Perú"            (tal cual)
 //   v2) dir limpiada (sin "urbanización/dpto/piso/int/Nº/ref/",
 //       "jr." → "jr ", distrito no duplicado, Callao para
 //       distritos del Callao, CERCADO DE LIMA → Lima)
-//   v3) v2 sin prefijo de tipo (Av./Jr/Calle/Pasaje) — OSM
-//       muchas veces registra "Calle X" cuando el usuario
-//       escribió "Av. X" y viceversa
+//   v3) v2 sin prefijo de tipo (Av./Jr/Calle/Pasaje)
 //   v4) centro del DISTRITO → coordenada aproximada (src:'aprox')
-//       — mejor que nada: ordena por zona real y el rider puede
-//       precisarla a mano con "Ubicar" (autocompletado)
 //
 // ⚠️ REGLA DE ORO (lección del Modular): NUNCA inventar
 // coordenadas. Si todo falla, null y la UI lo dice honesto.
@@ -33,6 +32,11 @@
 //   • rt_coords_v1   — por ID de cliente: sobrevive a que el
 //     Modular/bot reescriba la ruta sin coordenadas.
 // ═══════════════════════════════════════════════════════════
+
+import { getGoogleApiKey } from './googleMaps';
+
+// Re-exports para compatibilidad (SettingsView y otros los usan)
+export { getGoogleApiKey, setGoogleApiKey, motorActivo } from './googleMaps';
 
 export interface Coordenadas {
   lat: number;
@@ -51,7 +55,6 @@ interface EntradaCache {
 
 const CACHE_KEY = 'rt_geocache_v1';
 const COORDS_CLIENTES_KEY = 'rt_coords_v1';
-const GOOGLE_KEY_STORAGE = 'rt_google_maps_key';
 const CACHE_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 días
 const CACHE_MAX_ENTRADAS = 800;
 
@@ -78,32 +81,7 @@ const DISTRITOS_CALLAO = [
   'la punta', 'ventanilla', 'mi peru',
 ];
 
-// ── API Key de Google (opcional, guardada en el dispositivo) ─
-
-export function getGoogleApiKey(): string {
-  try {
-    return localStorage.getItem(GOOGLE_KEY_STORAGE) || '';
-  } catch {
-    return '';
-  }
-}
-
-export function setGoogleApiKey(key: string): void {
-  try {
-    const limpia = key.trim();
-    if (limpia) {
-      localStorage.setItem(GOOGLE_KEY_STORAGE, limpia);
-    } else {
-      localStorage.removeItem(GOOGLE_KEY_STORAGE);
-    }
-  } catch {
-    // localStorage no disponible — seguir sin Google
-  }
-}
-
-export function motorActivo(): 'google' | 'nominatim' {
-  return getGoogleApiKey() ? 'google' : 'nominatim';
-}
+// ── API Key de Google (ver googleMaps.ts: viene de fábrica) ─
 
 // ── Caché persistente por dirección ─────────────────────────
 
@@ -345,10 +323,49 @@ async function geocodificarGoogle(consulta: string, apiKey: string): Promise<Coo
         return { lat: loc.lat, lng: loc.lng, src: 'google' };
       }
     }
+    if (data?.status && data.status !== 'ZERO_RESULTS' && data.status !== 'OK') {
+      console.warn('[GoogleGeocode]', data.status, data?.error_message || '');
+    }
     return null; // ZERO_RESULTS, REQUEST_DENIED, etc.
   } catch {
     return null;
   }
+}
+
+/**
+ * Geocodifica con Google probando 2 variantes (Fase 2.0):
+ *   g1) consulta completa "{dir}, {dist}, Lima, Perú"
+ *   g2) dirección limpiada (sin "urbanización/dpto/piso…")
+ * Google entiende mejor los calificadores peruanos que OSM,
+ * pero la variante limpia rescata direcciones raras.
+ */
+async function geocodificarGoogleCascada(
+  dir: string,
+  dist: string | undefined,
+  apiKey: string
+): Promise<Coordenadas | null> {
+  // g1 — consulta completa normalizada
+  const completa = normalizarConsulta(dir, dist);
+  if (completa) {
+    const r1 = await geocodificarGoogle(completa, apiKey);
+    if (r1) return r1;
+  }
+  // g2 — dirección limpia (solo si es distinta)
+  const limpia = limpiarDireccion(dir);
+  if (limpia && limpia.toLowerCase() !== limpiarParte(dir).toLowerCase()) {
+    const distL = (dist || '').trim();
+    const distNormalizado = distL.toLowerCase() === 'cercado de lima' ? 'Lima' : distL;
+    const prov = provinciaDe(dist || '');
+    const partes =
+      distNormalizado && !limpia.toLowerCase().includes(distNormalizado.toLowerCase())
+        ? [limpia, distNormalizado, prov, 'Perú']
+        : [limpia, prov, 'Perú'];
+    const consulta = partes.filter(Boolean).join(', ');
+    if (consulta) {
+      return geocodificarGoogle(consulta, apiKey);
+    }
+  }
+  return null;
 }
 
 // ── Motor 2: Nominatim (OpenStreetMap, gratis) ──────────────
@@ -541,19 +558,11 @@ export async function geocodificarDireccion(dir: string, dist?: string): Promise
     return { lat: hit.lat, lng: hit.lng, src: hit.src };
   }
 
-  // 2. Google (si hay key) — con la consulta completa
+  // 2. Google (clave de fábrica o personalizada) — cascada g1/g2
   let coords: Coordenadas | null = null;
   const key = getGoogleApiKey();
   if (key) {
-    coords = await geocodificarGoogle(consulta, key);
-    if (coords && dist) {
-      // Si Google no encuentra la dirección exacta, probar sin
-      // calificadores también en Google
-      const limpia = limpiarDireccion(dir);
-      if (limpia && limpia.toLowerCase() !== limpiarParte(dir).toLowerCase()) {
-        // ya encontró algo — suficiente
-      }
-    }
+    coords = await geocodificarGoogleCascada(dir, dist, key);
   }
 
   // 3. Nominatim en cascada
@@ -692,6 +701,177 @@ export interface DireccionSugerida {
   distrito?: string;     // distrito detectado, si se pudo extraer
   lat: number;
   lng: number;
+  /** placeId de Google (sugerencias de Places): las coords se
+   *  obtienen al ELEGIR, con detalleLugarGoogle (así el
+   *  autocompletado+detalle se factura como UNA sesión) */
+  placeId?: string;
+  /** ¿De qué motor salió esta sugerencia? */
+  origen?: 'google' | 'nominatim';
+}
+
+// ── Google Places Autocomplete (New) ──────────────────────
+
+const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
+const PLACES_DETALLE_URL = 'https://places.googleapis.com/v1/places';
+
+/** Centro y radio de sesgo para Lima Metropolitana + Callao
+ *  (la API exige radio ≤ 50,000 m) */
+const SESGO_LIMA = { lat: -12.046374, lng: -77.042793, radio: 50000 };
+
+/** Genera un token de sesión — agrupa autocomplete+detalle en
+ *  una sola sesión para facturación (Places API New) */
+function nuevoTokenSesion(): string {
+  try {
+    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
+      return (crypto as any).randomUUID();
+    }
+  } catch {
+    // sin crypto.randomUUID
+  }
+  return `rt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Crea una sesión nueva de autocompletado (agrupa búsquedas) */
+export function iniciarSesionAutocomplete(): string {
+  return nuevoTokenSesion();
+}
+
+/** fetch POST/GET con timeout para Places API */
+async function placesFetch(url: string, opciones: RequestInit, ms = 8000): Promise<Response | null> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opciones, signal: controller.signal });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Autocompletado con Google Places (New) — el mismo motor que
+ * usa Circuit: escribes "av sucre" y salen los distritos.
+ * Las sugerencias NO traen coordenadas: se piden al elegir una
+ * con detalleLugarGoogle (mismo token de sesión).
+ */
+export async function buscarDireccionesGoogle(
+  texto: string,
+  limite = 6,
+  tokenSesion?: string
+): Promise<DireccionSugerida[]> {
+  const key = getGoogleApiKey();
+  if (!key) return [];
+
+  const res = await placesFetch(PLACES_AUTOCOMPLETE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+    },
+    body: JSON.stringify({
+      input: texto,
+      languageCode: 'es',
+      regionCode: 'PE',
+      locationBias: {
+        circle: {
+          center: { latitude: SESGO_LIMA.lat, longitude: SESGO_LIMA.lng },
+          radius: SESGO_LIMA.radio,
+        },
+      },
+      ...(tokenSesion ? { sessionToken: tokenSesion } : {}),
+    }),
+  });
+  if (!res || !res.ok) return [];
+
+  try {
+    const data = await res.json();
+    const sugerencias: DireccionSugerida[] = [];
+
+    for (const s of data?.suggestions || []) {
+      const p = s?.placePrediction;
+      if (!p?.placeId || !p?.text?.text) continue;
+      const principal = String(p.structuredFormat?.mainText?.text || p.text.text);
+      const secundario = String(p.structuredFormat?.secondaryText?.text || '');
+      // El distrito suele ser la 1ª parte del texto secundario
+      const distrito = secundario ? secundario.split(',')[0].trim() : undefined;
+      sugerencias.push({
+        etiqueta: principal,
+        detalle: secundario || 'Lima',
+        distrito:
+          distrito && !/^(peru|perú|lima|callao|lima metropolitana)$/i.test(distrito)
+            ? distrito
+            : undefined,
+        lat: 0,
+        lng: 0,
+        placeId: p.placeId,
+        origen: 'google',
+      });
+      if (sugerencias.length >= limite) break;
+    }
+    return sugerencias;
+  } catch {
+    return [];
+  }
+}
+
+export interface DetalleLugar {
+  lat: number;
+  lng: number;
+  direccion: string; // "Av. Sucre 523, San Miguel 15088, Peru"
+  distrito?: string;
+}
+
+/**
+ * Detalle de un lugar elegido del autocompletado (Places New):
+ * coordenadas exactas + dirección formateada + distrito.
+ * Usa el MISMO token de sesión del autocompletado.
+ */
+export async function detalleLugarGoogle(
+  placeId: string,
+  tokenSesion?: string
+): Promise<DetalleLugar | null> {
+  const key = getGoogleApiKey();
+  if (!key || !placeId) return null;
+
+  const url = `${PLACES_DETALLE_URL}/${encodeURIComponent(placeId)}?languageCode=es`;
+  const res = await placesFetch(url, {
+    method: 'GET',
+    headers: {
+      'X-Goog-Api-Key': key,
+      'X-Goog-FieldMask': 'location,formattedAddress,addressComponents',
+      ...(tokenSesion ? { 'X-Goog-SessionToken': tokenSesion } : {}),
+    },
+  });
+  if (!res || !res.ok) return null;
+
+  try {
+    const data = await res.json();
+    const loc = data?.location;
+    if (
+      loc && typeof loc.latitude === 'number' && typeof loc.longitude === 'number' &&
+      !isNaN(loc.latitude) && !isNaN(loc.longitude)
+    ) {
+      // distrito: componente con type "locality" (en Lima es el distrito)
+      let distrito: string | undefined;
+      for (const comp of data?.addressComponents || []) {
+        const tipos: string[] = comp?.types || [];
+        if (tipos.includes('locality') || tipos.includes('administrative_area_level_3')) {
+          distrito = String(comp.longText || comp.shortText || '');
+          break;
+        }
+      }
+      return {
+        lat: loc.latitude,
+        lng: loc.longitude,
+        direccion: String(data?.formattedAddress || ''),
+        distrito,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Respuesta cruda de Nominatim search */
@@ -742,10 +922,20 @@ function aSugerencia(d: NominatimResult): DireccionSugerida | null {
  */
 export async function buscarDirecciones(
   texto: string,
-  limite = 6
+  limite = 6,
+  tokenSesion?: string
 ): Promise<DireccionSugerida[]> {
   const t = (texto || '').trim();
   if (t.length < 3) return [];
+
+  // ── Motor 1: Google Places Autocomplete (Fase 2.0) ──────
+  // El mismo motor que usa Circuit — precisión total en Lima.
+  const key = getGoogleApiKey();
+  if (key) {
+    const deGoogle = await buscarDireccionesGoogle(t, limite, tokenSesion);
+    if (deGoogle.length > 0) return deGoogle;
+    // Si Google no devolvió nada, caemos a Nominatim abajo
+  }
 
   const mencionaCallao = DISTRITOS_CALLAO.some((d) => t.toLowerCase().includes(d));
   const prov = mencionaCallao ? 'Callao' : 'Lima';
