@@ -68,26 +68,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'yape', label: 'Mi QR Yape', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
-        {
-          id: 'repartidores',
-          label: 'Repartidores',
-          icon: Bike,
-          badge: `${activeDriversCount}`,
-          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        },
+        { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
       ],
     },
     {
       titulo: 'Operación',
       items: [
-        { id: 'mapa', label: 'Mapa en tiempo real', icon: MapPin },
-        {
-          id: 'whatsapp',
-          label: 'WhatsApp API',
-          icon: MessageSquare,
-          badge: 'PRO',
-          badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-        },
+        { id: 'mapa', label: 'Mapa de Entregas', icon: MapPin },
+        { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
       ],
     },
     {

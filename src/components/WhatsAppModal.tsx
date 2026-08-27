@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Send,
   MessageSquare,
   CheckCircle2,
-  Sparkles,
   Smartphone,
 } from 'lucide-react';
 import { WHATSAPP_TEMPLATES } from '../data/mockData';
@@ -20,36 +19,59 @@ interface WhatsAppModalProps {
 export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   isOpen,
   onClose,
-  defaultPhone = '+51 998 123 456',
-  defaultName = 'Gastón Acurio',
+  defaultPhone,
+  defaultName,
   onSendMessage,
 }) => {
-  const [phone, setPhone] = useState(defaultPhone);
-  const [recipientName, setRecipientName] = useState(defaultName);
+  const [phone, setPhone] = useState('');
+  const [recipientName, setRecipientName] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState(WHATSAPP_TEMPLATES[0].id);
-  const [customMessage, setCustomMessage] = useState(
-    '🛵 Tu repartidor Carlos Mendoza está en camino con tu pedido #PED-4092. ¡Tiempo estimado de entrega 18 min!'
-  );
+  const [customMessage, setCustomMessage] = useState('');
   const [isSentSuccess, setIsSentSuccess] = useState(false);
+  const [error, setError] = useState('');
 
-  const currentTpl = WHATSAPP_TEMPLATES.find((t) => t.id === selectedTemplate) || WHATSAPP_TEMPLATES[0];
+  // 🔄 Sincronizar destinatario real cada vez que se abre el modal
+  useEffect(() => {
+    if (isOpen) {
+      setPhone(defaultPhone || '');
+      setRecipientName(defaultName || '');
+      setError('');
+      setIsSentSuccess(false);
+      // Precargar primera plantilla con el nombre del cliente
+      const tpl = WHATSAPP_TEMPLATES[0];
+      setSelectedTemplate(tpl.id);
+      setCustomMessage(
+        tpl.contenido.replace(/\{\{cliente\}\}/g, defaultName || 'cliente')
+      );
+    }
+  }, [isOpen, defaultPhone, defaultName]);
 
   const handleApplyTemplate = (tpl: typeof WHATSAPP_TEMPLATES[0]) => {
     setSelectedTemplate(tpl.id);
     let msg = tpl.contenido;
-    msg = msg.replace('{{cliente}}', recipientName || 'Cliente');
-    msg = msg.replace('{{pedido_id}}', '#PED-4092');
-    msg = msg.replace('{{monto}}', '145.50');
-    msg = msg.replace('{{tiempo_est}}', '18');
-    msg = msg.replace('{{repartidor_nombre}}', 'Carlos Mendoza');
-    msg = msg.replace('{{direccion}}', 'Av. Larco 742');
-    msg = msg.replace('{{link_tracking}}', 'https://ridertrack.app/track/PED-4092');
+    msg = msg.replace(/\{\{cliente\}\}/g, recipientName || 'cliente');
     setCustomMessage(msg);
   };
 
+  const currentTplNombre = () =>
+    WHATSAPP_TEMPLATES.find((t) => t.id === selectedTemplate)?.nombre || 'Personalizado';
+
   const handleSend = () => {
-    if (!phone || !customMessage) return;
-    onSendMessage(recipientName, phone, customMessage, currentTpl.nombre);
+    const digits = (phone || '').replace(/[^0-9]/g, '');
+    if (!digits) {
+      setError('Ingresa un número de WhatsApp (9 dígitos)');
+      return;
+    }
+    if (digits.length !== 9 && digits.length !== 11) {
+      setError('El número debe tener 9 dígitos (ej: 987654321)');
+      return;
+    }
+    if (!customMessage.trim()) {
+      setError('Escribe el mensaje a enviar');
+      return;
+    }
+    setError('');
+    onSendMessage(recipientName, phone, customMessage, currentTplNombre());
     setIsSentSuccess(true);
     setTimeout(() => {
       setIsSentSuccess(false);
@@ -61,8 +83,8 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Notificación WhatsApp API"
-      subtitle="Infraestructura WhatsApp Business API Oficial v2.44"
+      title="Enviar WhatsApp"
+      subtitle="Se abre WhatsApp con el mensaje listo para confirmar el envío"
       maxWidth="lg"
       footer={
         <>
@@ -76,7 +98,7 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             onClick={handleSend}
             isLoading={isSentSuccess}
           >
-            {isSentSuccess ? '¡Enviado Con Éxito!' : 'Despachar WhatsApp'}
+            {isSentSuccess ? '¡Abierto en WhatsApp!' : 'Enviar por WhatsApp'}
           </Button>
         </>
       }
@@ -88,22 +110,22 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             label="Nombre Destinatario"
             value={recipientName}
             onChange={(e) => setRecipientName(e.target.value)}
-            placeholder="Ej: Gastón Acurio"
+            placeholder="Ej: María Flores"
           />
           <Input
-            label="Teléfono WhatsApp (+51)"
+            label="Teléfono (9 dígitos)"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="+51 987 654 321"
+            placeholder="987654321"
           />
         </div>
 
         {/* Preset Templates */}
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-            <span>Plantillas Verificadas Meta</span>
+            <span>Plantillas Rápidas</span>
             <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-              <Sparkles className="w-3 h-3" /> WhatsApp Official
+              <MessageSquare className="w-3 h-3" /> wa.me
             </span>
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -114,7 +136,7 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
                 className={`p-2.5 text-left rounded-xl border text-xs font-medium transition-all ${
                   selectedTemplate === tpl.id
                     ? 'bg-blue-600/20 border-blue-500 text-white'
-                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                    : 'bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600'
                 }`}
               >
                 <span className="block font-bold truncate">{tpl.nombre}</span>
@@ -134,16 +156,23 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             value={customMessage}
             onChange={(e) => setCustomMessage(e.target.value)}
             className="w-full p-3 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500 resize-none"
+            placeholder="Escribe tu mensaje..."
           />
         </div>
+
+        {error && (
+          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl p-2.5">
+            ⚠️ {error}
+          </p>
+        )}
 
         {/* WhatsApp Preview Card */}
         <div className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 text-xs">
           <div className="flex items-center gap-1.5 text-emerald-400 font-semibold mb-1">
-            <Smartphone className="w-3.5 h-3.5" /> Vista Previa en Celular
+            <Smartphone className="w-3.5 h-3.5" /> Vista Previa
           </div>
           <p className="text-slate-300 bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-800/50 leading-relaxed font-sans">
-            {customMessage}
+            {customMessage || 'Tu mensaje aparecerá aquí...'}
           </p>
         </div>
       </div>

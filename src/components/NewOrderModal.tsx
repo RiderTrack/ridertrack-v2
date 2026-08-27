@@ -1,54 +1,78 @@
-import React, { useState } from 'react';
-import { Package, Plus } from 'lucide-react';
-import { Order, Driver } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Package, Plus, User, Phone, MapPin, Home, DollarSign, ShoppingBag, FileText } from 'lucide-react';
 import { Modal, Button, Input } from './ui';
+import { DISTRITOS_LIMA } from '../utils/realData';
+
+export interface NewOrderDraft {
+  nombre: string;
+  cel: string;
+  prod: string;
+  monto: number;
+  dir: string;
+  dist: string;
+  obs: string;
+}
 
 interface NewOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  drivers: Driver[];
-  onCreateOrder: (newOrder: Order) => void;
+  onCreateOrder: (draft: NewOrderDraft) => void;
 }
 
 export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   isOpen,
   onClose,
-  drivers,
   onCreateOrder,
 }) => {
-  const [cliente, setCliente] = useState('');
-  const [telefono, setTelefono] = useState('+51 ');
-  const [distrito, setDistrito] = useState('Miraflores');
+  const [nombre, setNombre] = useState('');
+  const [cel, setCel] = useState('');
+  const [distrito, setDistrito] = useState('');
   const [direccion, setDireccion] = useState('');
-  const [monto, setMonto] = useState('75.00');
-  const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Yape/Plin' | 'Tarjeta' | 'Transferencia'>('Yape/Plin');
-  const [selectedDriverId, setSelectedDriverId] = useState('');
-  const [productoTexto, setProductoTexto] = useState('Burger Combo Doble, Papas, Gaseosa 500ml');
+  const [monto, setMonto] = useState('');
+  const [productoTexto, setProductoTexto] = useState('');
+  const [obs, setObs] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cliente || !direccion) return;
+  // Limpiar formulario al abrir
+  useEffect(() => {
+    if (isOpen) {
+      setNombre('');
+      setCel('');
+      setDistrito('');
+      setDireccion('');
+      setMonto('');
+      setProductoTexto('');
+      setObs('');
+      setError('');
+    }
+  }, [isOpen]);
 
-    const chosenDriver = drivers.find((d) => d.id === selectedDriverId);
-    const newId = `PED-${Math.floor(4000 + Math.random() * 900)}`;
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
 
-    const newOrder: Order = {
-      id: newId,
-      cliente,
-      clienteTelefono: telefono || '+51 987 654 321',
-      distrito,
-      direccion,
-      estado: chosenDriver ? 'en_camino' : 'pendiente',
-      repartidorId: chosenDriver?.id,
-      repartidorNombre: chosenDriver?.nombre,
-      repartidorFoto: chosenDriver?.foto,
-      hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      monto: parseFloat(monto) || 60,
-      metodoPago,
-      productos: productoTexto.split(',').map((p) => p.trim()),
-    };
+    if (!nombre.trim()) {
+      setError('Ingresa el nombre del cliente');
+      return;
+    }
+    if (!direccion.trim()) {
+      setError('Ingresa la dirección de entrega');
+      return;
+    }
+    const celLimpio = cel.replace(/[^0-9]/g, '');
+    if (celLimpio && celLimpio.length !== 9) {
+      setError('El teléfono debe tener 9 dígitos (ej: 987654321)');
+      return;
+    }
 
-    onCreateOrder(newOrder);
+    onCreateOrder({
+      nombre: nombre.trim(),
+      cel: celLimpio,
+      prod: productoTexto.trim(),
+      monto: parseFloat(monto) || 0,
+      dir: direccion.trim(),
+      dist: distrito.trim(),
+      obs: obs.trim(),
+    });
     onClose();
   };
 
@@ -56,8 +80,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Crear Nuevo Pedido"
-      subtitle="Ingreso directo al sistema de despacho operativo"
+      title="Agregar Pedido a la Ruta"
+      subtitle="Se guarda en tu ruta activa de Firestore — el bot lo ve al instante"
       maxWidth="lg"
       footer={
         <>
@@ -68,9 +92,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
             variant="primary"
             size="sm"
             icon={<Plus className="w-4 h-4" />}
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
           >
-            Registrar & Despachar
+            Agregar a la Ruta
           </Button>
         </>
       }
@@ -79,100 +103,97 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         {/* Cliente & Teléfono */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
-            label="Cliente *"
+            label="Nombre del Cliente *"
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Ej: María Flores"
+            icon={<User className="w-4 h-4" />}
             required
-            value={cliente}
-            onChange={(e) => setCliente(e.target.value)}
-            placeholder="Nombre del cliente"
           />
           <Input
-            label="Teléfono WhatsApp"
-            value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
-            placeholder="+51 987 654 321"
+            label="Teléfono (9 dígitos)"
+            value={cel}
+            onChange={(e) => setCel(e.target.value)}
+            placeholder="987654321"
+            icon={<Phone className="w-4 h-4" />}
           />
         </div>
 
         {/* Distrito & Dirección */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Distrito</label>
-            <select
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-blue-400" /> Distrito
+            </label>
+            <input
+              list="distritos-lima"
               value={distrito}
               onChange={(e) => setDistrito(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="Miraflores">Miraflores</option>
-              <option value="San Isidro">San Isidro</option>
-              <option value="Surco">Surco</option>
-              <option value="San Borja">San Borja</option>
-              <option value="San Miguel">San Miguel</option>
-              <option value="Barranco">Barranco</option>
-              <option value="La Molina">La Molina</option>
-              <option value="Lince">Lince</option>
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <Input
-              label="Dirección Completa *"
-              required
-              value={direccion}
-              onChange={(e) => setDireccion(e.target.value)}
-              placeholder="Ej. Av. Larco 450, Dpto 802"
+              placeholder="Ej: Miraflores"
+              className="w-full px-3 py-2.5 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500"
             />
+            <datalist id="distritos-lima">
+              {DISTRITOS_LIMA.map((d) => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
           </div>
+          <Input
+            label="Dirección de Entrega *"
+            value={direccion}
+            onChange={(e) => setDireccion(e.target.value)}
+            placeholder="Ej: Av. Larco 742, dpto 301"
+            icon={<Home className="w-4 h-4" />}
+            required
+          />
         </div>
 
-        {/* Monto & Pago */}
+        {/* Monto & Productos */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
-            label="Monto Total (S/)"
-            type="number"
-            step="0.5"
+            label="Monto a Cobrar (S/)"
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
+            placeholder="75.00"
+            type="number"
+            step="0.10"
+            min="0"
+            icon={<DollarSign className="w-4 h-4" />}
           />
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Método de Pago</label>
-            <select
-              value={metodoPago}
-              onChange={(e) => setMetodoPago(e.target.value as any)}
-              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="Yape/Plin">Yape / Plin</option>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Tarjeta">Tarjeta de Crédito/Débito</option>
-              <option value="Transferencia">Transferencia Bancaria</option>
-            </select>
-          </div>
+          <Input
+            label="Productos (separados por comas)"
+            value={productoTexto}
+            onChange={(e) => setProductoTexto(e.target.value)}
+            placeholder="Combo Doble, Papas, Gaseosa"
+            icon={<ShoppingBag className="w-4 h-4" />}
+          />
         </div>
 
-        {/* Asignar Repartidor */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1">
-            Asignar Repartidor
+        {/* Observación */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-amber-400" /> Observación (opcional)
           </label>
-          <select
-            value={selectedDriverId}
-            onChange={(e) => setSelectedDriverId(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500"
-          >
-            <option value="">-- Asignación Automática / Pendiente --</option>
-            {drivers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nombre} ({d.vehiculo} - {d.distritoActual}) - {d.estado}
-              </option>
-            ))}
-          </select>
+          <textarea
+            rows={2}
+            value={obs}
+            onChange={(e) => setObs(e.target.value)}
+            placeholder="Ej: dejar en recepción, llamar al llegar..."
+            className="w-full px-3 py-2.5 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-blue-500 resize-none"
+          />
         </div>
 
-        {/* Productos */}
-        <Input
-          label="Detalle de Productos (separados por coma)"
-          value={productoTexto}
-          onChange={(e) => setProductoTexto(e.target.value)}
-          placeholder="Ej: Burger Doble, Papas, Gaseosa"
-        />
+        {error && (
+          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl p-2.5">
+            ⚠️ {error}
+          </p>
+        )}
+
+        <p className="text-[10px] text-slate-400">
+          El pedido se agrega con estado <span className="text-amber-400 font-bold">Pendiente</span> al
+          final de tu ruta. Podrás cobrarlo, marcarlo como fallido o enviarle WhatsApp desde el
+          Centro de Pedidos.
+        </p>
       </form>
     </Modal>
   );
