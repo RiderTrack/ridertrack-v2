@@ -405,6 +405,8 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onShowToast={showToast}
+        profile={profile}
+        onOpenProfile={() => setActiveTab('perfil')}
       />
 
       {/* Main App Layout */}
