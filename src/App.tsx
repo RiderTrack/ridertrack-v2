@@ -23,6 +23,7 @@ import { useAuth } from './hooks/useAuth';
 import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
+import { SeguimientoView } from './components/SeguimientoView';
 import { YapeQRView } from './components/YapeQRView';
 // Fase 2.5: vistas nuevas — historial, broadcast y backups
 import { HistorialView } from './components/HistorialView';
@@ -514,6 +515,10 @@ export default function App() {
 
           {activeTab === 'ruta' && (
             <RutaView onShowToast={showToast} />
+          )}
+
+          {activeTab === 'seguimiento' && (
+            <SeguimientoView onShowToast={showToast} />
           )}
 
           {activeTab === 'yape' && (
