@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* ═══ VARIANTE "light:" OFICIAL (Fase 2.4) ═══
+   Tailwind v4 no trae variante light: de fábrica (solo dark: por
+   medio del SO). Los componentes 2.2 (GoogleLiveMap, LeafletLiveMap)
+   ya usaban clases light:* que estaban MUERTAS (no compilaban).
+   Esta línea las activa de verdad: light:bg-white ahora funciona
+   cuando el <html> tiene la clase .light — mismo mecanismo que el
+   toggle de tema de la app. */
+@custom-variant light (&:where(.light, .light *));
+
 /* ═══════════════════════════════════════════════════════════════
    🎨 TEMA CLARO / OSCURO COMPLETO — Fase 1.5
    ═══════════════════════════════════════════════════════════════
@@ -34,6 +43,16 @@
   --color-slate-200: #243349;   /* texto fuerte */
   --color-slate-100: #152238;   /* texto principal */
   --color-slate-50: #0d1728;    /* texto máximo */
+
+  /* ── Tonos PROFUNDOS de acento (Fase 2.4): los gradientes "premium"
+     usaban via-blue-950 (azul marino) que NO se invertía → en modo
+     claro quedaba una banda oscura fea en el centro del hero y los
+     textos perdían contraste (bug reportado con screenshot). Ahora
+     se vuelven azules suaves: el gradiente queda blanco→celeste. ── */
+  --color-blue-950: #dbeafe;
+  --color-blue-900: #bfdbfe;
+  --color-indigo-950: #e0e7ff;
+  --color-indigo-900: #c7d2fe;
 
   /* ── Acentos 300/400: se oscurecen para leerse en fondo claro ── */
   --color-emerald-400: #059669;
