@@ -81,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
-        { id: 'yape', label: 'Mi QR Yape', icon: QrCode },
+        { id: 'yape', label: 'Mis QR', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },

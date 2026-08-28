@@ -16,6 +16,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
 import { ConfigCuentas } from '../services/firestore';
+import { compartirQRWhatsApp } from '../utils/shareQR';
 
 export interface WalletBotConfig {
   qrBase64?: string;
@@ -273,8 +274,13 @@ export const WalletQRPanel: React.FC<PanelProps> = ({ tema, onSync, onFetch, onS
     onShowToast?.('🗑️ QR eliminado', 'Guarda para que el bot deje de usar la imagen', 'info');
   };
 
-  const handleCompartirWhatsApp = () => {
-    window.open(`https://wa.me/?text=${encodeURIComponent(tema.whatsappTexto(numero, titular))}`, '_blank');
+  // Fase 1.6: comparte la IMAGEN del QR + texto por WhatsApp (antes solo texto)
+  const handleCompartirWhatsApp = async () => {
+    await compartirQRWhatsApp({
+      dataUrl: qrBase64 || '',
+      texto: tema.whatsappTexto(numero, titular),
+      onShowToast,
+    });
   };
 
   const handleCopiarDatos = async () => {
