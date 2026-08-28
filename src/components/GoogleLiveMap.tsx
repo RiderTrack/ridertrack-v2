@@ -907,7 +907,10 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
                 {seleccionado.hora && <span>· {seleccionado.hora}</span>}
               </div>
             </div>
-            <div className="flex gap-2 mt-2">
+            {/* (Fase 2.12) flex-wrap: en pantallas angostas WhatsApp |
+                Navegar | Directo se reparten en 2 filas en vez de
+                desbordarse la ficha */}
+            <div className="flex flex-wrap gap-2 mt-2">
               {seleccionado.clienteTelefono && onOpenWhatsApp && (
                 <button
                   onClick={() =>

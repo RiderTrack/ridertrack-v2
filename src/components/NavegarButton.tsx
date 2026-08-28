@@ -7,6 +7,15 @@
 //
 // Se usa en la ficha del cliente del mapa, en el banner de
 // "siguiente parada" y donde haga falta llevar al cliente.
+//
+// (Fase 2.12) FIX mini-selector CORTADO: antes el menú se alineaba
+// SIEMPRE con right-0 + bottom-full (pensado para un botón en la
+// esquina inferior derecha). Pero en la FICHA del cliente el botón
+// Navegar vive a la IZQUIERDA (WhatsApp | Navegar | Directo) → el
+// menú de 176px salía disparado fuera de pantalla: se veía "comido"
+// por el borde izquierdo (left = -57px en un celular de 360px).
+// Ahora el menú mide el espacio disponible al abrirse y se voltea
+// solo hacia donde SÍ cabe: izquierda/derecha y arriba/abajo.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -38,6 +47,28 @@ export const NavegarButton: React.FC<NavegarButtonProps> = ({
   const [app, setApp] = useState<AppNavegacion>(getAppNavegacion());
   const [abierto, setAbierto] = useState(false);
   const contRef = useRef<HTMLDivElement>(null);
+  // (Fase 2.12) Alineación inteligente del mini-selector: hacia
+  // qué lado desplegar para NO salirse de la pantalla.
+  const [lado, setLado] = useState<'izq' | 'der'>('der');
+  const [vertical, setVertical] = useState<'arriba' | 'abajo'>('arriba');
+
+  // Medir al abrir: ¿hacia dónde hay espacio para el menú?
+  useEffect(() => {
+    if (!abierto || !contRef.current) return;
+    const r = contRef.current.getBoundingClientRect();
+    const ANCHO_MENU = 190; // w-44 (176px) + aire
+    const ALTO_MENU = 140;  // alto real del menú + aire
+    // Horizontal: por defecto el borde DERECHO del menú coincide con
+    // el del botón (right-0, se extiende a la izquierda). Si el botón
+    // está pegado a la izquierda (como en la ficha), se voltea para
+    // extenderse a la derecha desde su borde izquierdo (left-0).
+    const cabeHaciaIzquierda = r.right >= ANCHO_MENU;
+    const cabeHaciaDerecha = r.left + ANCHO_MENU <= window.innerWidth - 8;
+    setLado(cabeHaciaIzquierda ? 'der' : cabeHaciaDerecha ? 'izq' : 'der');
+    // Vertical: por defecto se abre hacia ARRIBA (bottom-full). Si el
+    // botón está muy arriba de la pantalla, se abre hacia abajo.
+    setVertical(r.top >= ALTO_MENU ? 'arriba' : 'abajo');
+  }, [abierto]);
 
   // Reaccionar al cambio de preferencia desde Configuración
   useEffect(() => {
@@ -100,7 +131,11 @@ export const NavegarButton: React.FC<NavegarButtonProps> = ({
       </button>
 
       {abierto && (
-        <div className="absolute bottom-full mb-2 right-0 z-30 w-44 rounded-xl bg-slate-900/98 backdrop-blur-md border border-slate-700 shadow-2xl overflow-hidden">
+        <div
+          className={`absolute ${vertical === 'arriba' ? 'bottom-full mb-2' : 'top-full mt-2'} ${
+            lado === 'der' ? 'right-0' : 'left-0'
+          } z-30 w-44 max-w-[calc(100vw-1rem)] rounded-xl bg-slate-900/98 backdrop-blur-md border border-slate-700 shadow-2xl overflow-hidden`}
+        >
           <p className="px-3 pt-2.5 pb-1 text-[9px] uppercase font-bold text-slate-500">
             Navegar con…
           </p>

@@ -302,7 +302,7 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         `<div><b>Monto:</b> S/ ${(o.monto || 0).toFixed(2)}</div>` +
         (o.hora ? `<div><b>Hora:</b> ${esc(o.hora)}</div>` : '') +
         `</div>` +
-        `<div style="display:flex;gap:6px;margin-top:8px">` +
+        `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">` +
         (o.clienteTelefono
           ? `<a href="${waUrl}" target="_blank" rel="noopener" style="text-decoration:none;background:#059669;color:#fff;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700">💬 WhatsApp</a>`
           : '') +
