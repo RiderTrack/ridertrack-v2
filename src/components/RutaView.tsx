@@ -49,7 +49,7 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
 
   const [search, setSearch] = useState('');
@@ -421,6 +421,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     onShowToast?.('📲 Mensaje listo', `Pide a ${cliente.nombre} su dirección o 📍 ubicación`, 'info');
   };
 
+  // ✅ Fase 2.6 (como la v1 "Registro en la Web"): checks para ir
+  // marcando cliente por cliente mientras revisas la página de la
+  // empresa. Persiste en el cliente (webReg) → sobrevive al sync
+  // con el Modular y a reinicios de la app.
+  const toggleVerificado = (c: Cliente) => {
+    actualizarCliente(c.id, { webReg: !c.webReg });
+  };
+  const marcarTodosVerificados = (valor: boolean) => {
+    marcarVerificacion(new Set(clientesFiltrados.map((c) => c.id)), valor);
+  };
+
   // 📋 Copiar el listado de verificación (Fase 2.5): texto plano con
   // cliente / S/ / método / hora para pegarlo y cruzarlo con la
   // página de la empresa
@@ -439,11 +450,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const lineas: string[] = [
       `📋 VERIFICACIÓN DE RUTA — ${new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
       `${clientesFiltrados.length} clientes · Cobrado S/ ${stats.cobrado.toFixed(2)} · Por cobrar S/ ${stats.porCobrar.toFixed(2)}`,
+      `${clientesFiltrados.filter((c) => c.webReg).length}/${clientesFiltrados.length} revisados en la página de la empresa`,
       '',
     ];
     clientesFiltrados.forEach((c) => {
       const hora = c.hora ? ` (${c.hora})` : '';
-      lineas.push(`${c.num || '·'}. ${c.nombre || 'Cliente'} — S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} — ${stTexto(c.st)}${hora}`);
+      const check = c.webReg ? '✅' : '⬜';
+      lineas.push(`${check} ${c.num || '·'}. ${c.nombre || 'Cliente'} — S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} — ${stTexto(c.st)}${hora}`);
     });
     const texto = lineas.join('\n');
     try {
@@ -873,8 +886,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         </div>
 
         {/* 📋 Panel de verificación (Fase 2.5) — mini-listado para
-            contrastar con la página de la empresa; se filtra igual que la lista */}
-        {listadoVerifAbierto && (
+            contrastar con la página de la empresa; se filtra igual que la lista.
+            ✅ Fase 2.6: checks por cliente (como el "Registro en la Web"
+            de la v1) — toca la fila y queda marcado en verde. */}
+        {listadoVerifAbierto && (() => {
+          const nVerif = clientesFiltrados.filter((c) => c.webReg).length;
+          const pct = clientesFiltrados.length > 0 ? Math.round((nVerif / clientesFiltrados.length) * 100) : 0;
+          return (
           <div className="rounded-xl bg-slate-800 border border-blue-500/30 overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-3 py-2 bg-blue-500/10 border-b border-blue-500/20">
               <div className="flex items-center gap-2 min-w-0">
@@ -882,13 +900,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 <div className="min-w-0">
                   <div className="text-[11px] font-bold text-white">Verificación con la empresa</div>
                   <div className="text-[9px] text-slate-400 truncate">
-                    {clientesFiltrados.length} cliente{clientesFiltrados.length !== 1 ? 's' : ''} · S/ {stats.cobrado.toFixed(2)} cobrado
+                    {nVerif}/{clientesFiltrados.length} revisados · S/ {stats.cobrado.toFixed(2)} cobrado
                   </div>
                 </div>
               </div>
               <button
                 onClick={copiarListadoVerificacion}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-95 border ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-95 border shrink-0 ${
                   listadoCopiado
                     ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                     : 'bg-blue-600 hover:bg-blue-500 border-blue-500 text-white'
@@ -898,24 +916,55 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 {listadoCopiado ? 'Copiado' : 'Copiar'}
               </button>
             </div>
-            <div className="max-h-56 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40">
+
+            {/* Barra de progreso de revisión */}
+            {clientesFiltrados.length > 0 && (
+              <div className="px-3 pt-2">
+                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Lista con checks — fila entera tocable, verde al marcar */}
+            <div className="max-h-56 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40 py-1">
               {clientesFiltrados.length === 0 ? (
                 <p className="text-[11px] text-slate-400 text-center py-4">Nada con estos filtros</p>
               ) : (
                 clientesFiltrados.map((c) => {
                   const entregado = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st);
                   const fallido = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st);
+                  const verif = c.webReg === true;
                   return (
-                    <div key={String(c.id)} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <div
+                      key={String(c.id)}
+                      onClick={() => toggleVerificado(c)}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 cursor-pointer transition-colors ${
+                        verif ? 'bg-emerald-500/10' : 'hover:bg-slate-700/30'
+                      }`}
+                    >
                       <div className="min-w-0 flex-1 flex items-center gap-2">
+                        {/* Check (como v1: ⬜ → ✅) */}
+                        <span
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                            verif
+                              ? 'bg-emerald-500 border-emerald-500 text-white'
+                              : 'border-slate-600 text-transparent'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" strokeWidth={3} />
+                        </span>
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entregado ? 'bg-emerald-500' : fallido ? 'bg-red-500' : 'bg-amber-500'}`} />
-                        <span className="text-[11px] font-bold text-white truncate">
+                        <span className={`text-[11px] font-bold truncate ${verif ? 'text-emerald-400' : 'text-white'}`}>
                           {c.num ? `${c.num}. ` : ''}{c.nombre || 'Cliente'}
                         </span>
                         {c.hora && <span className="text-[9px] text-slate-500 shrink-0">{c.hora}</span>}
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-[11px] font-black text-slate-200">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</span>
+                        <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</span>
                         <span className={`ml-1.5 text-[9px] font-bold ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
                           {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
                         </span>
@@ -925,8 +974,27 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 })
               )}
             </div>
+
+            {/* Marcar / limpiar (como v1) */}
+            {clientesFiltrados.length > 0 && (
+              <div className="flex gap-1.5 px-2.5 py-2 border-t border-slate-700/50">
+                <button
+                  onClick={() => marcarTodosVerificados(true)}
+                  className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all active:scale-95"
+                >
+                  <Check className="w-3 h-3" /> Marcar todos
+                </button>
+                <button
+                  onClick={() => marcarTodosVerificados(false)}
+                  className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-red-500/10 border border-red-500/25 text-red-400 hover:bg-red-500/20 transition-all active:scale-95"
+                >
+                  <X className="w-3 h-3" /> Limpiar
+                </button>
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {/* Filtros por distrito y producto */}
         {clientes.length > 0 && (
@@ -1025,6 +1093,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-bold text-white truncate">{c.nombre || 'Cliente'}</span>
+                      {/* ✅ Fase 2.6: ya pasó a la página de la empresa (verificado) */}
+                      {c.webReg && (
+                        <span
+                          className="px-1 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[8px] font-bold shrink-0 leading-none"
+                          title="Ya pasó a la página de la empresa"
+                        >
+                          ✓ web
+                        </span>
+                      )}
                       {/* ⚠️ Fase 2.5: badge de dirección incompleta (manzana / sin número) */}
                       {tipoDireccion(c.dir, c.obs) !== 'ok' && (
                         <span
