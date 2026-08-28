@@ -81,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
-        { id: 'yape', label: 'Mis QR', icon: QrCode },
+        { id: 'yape', label: 'Mi QR Yape/Plin', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
@@ -264,14 +264,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {sidebarContent}
       </aside>
 
-      {/* Mobile Overlay & Drawer */}
+      {/* Mobile Overlay & Drawer — z-[1200]: por encima de los controles
+          del mapa (Leaflet/Google), fix Fase 2.2 "la leyenda tapa la hamburguesa" */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-[1200] flex">
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
             onClick={onCloseMobile}
           />
-          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-50">
+          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-[1201]">
             {sidebarContent}
           </div>
         </div>

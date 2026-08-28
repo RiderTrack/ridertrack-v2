@@ -19,17 +19,22 @@ import {
   MapPin,
   KeyRound,
   Trash2,
-  Navigation,
 } from 'lucide-react';
 import { ConfigCuentasModal } from './ConfigCuentasModal';
 import {
   getGoogleApiKey,
   setGoogleApiKey,
-  tamanoCache,
-  limpiarCacheGeocodificacion,
-} from '../services/geocoding';
+  clavePersonalizada,
+  DEFAULT_GOOGLE_MAPS_API_KEY,
+} from '../services/googleMaps';
+import { tamanoCache, limpiarCacheGeocodificacion } from '../services/geocoding';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from '../services/mapStyle';
-import { getAppNavegacion, setAppNavegacion, AppNavegacion, nombreAppNavegacion } from '../services/navPrefs';
+import {
+  AppNavegacion,
+  getAppNavegacion,
+  setAppNavegacion,
+} from '../services/navegacion';
+import { Compass } from 'lucide-react';
 
 interface SettingsViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -46,7 +51,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
   );
   const [cacheN, setCacheN] = useState(0);
   const [estiloMapa, setEstiloMapaState] = useState<EstiloMapa>(getEstiloMapa());
-  const [navApp, setNavApp] = useState<AppNavegacion>(getAppNavegacion());
+
+  // ── Navegación GPS (Fase 2.2 — Google / Waze / Preguntar) ──
+  const [navAbierto, setNavAbierto] = useState(false);
+  const [appNav, setAppNavState] = useState<AppNavegacion>(getAppNavegacion());
+
+  const cambiarAppNavegacion = (app: AppNavegacion) => {
+    setAppNavegacion(app);
+    setAppNavState(app);
+    onShowToast?.(
+      '🧭 Navegación actualizada',
+      app === 'google' ? 'Los botones “Navegar” abrirán Google Maps (modo moto)'
+      : app === 'waze' ? 'Los botones “Navegar” abrirán Waze'
+      : 'Al tocar “Navegar” te preguntará con cuál app ir',
+      'success'
+    );
+  };
 
   const cambiarEstiloMapa = (e: EstiloMapa) => {
     setEstiloMapa(e);
@@ -54,16 +74,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
     onShowToast?.(
       '🎨 Estilo de mapa cambiado',
       e === 'oscuro' ? 'Mapa oscuro (bonito, combina con la app)' : e === 'claro' ? 'Mapa claro' : 'Mapa estándar OpenStreetMap',
-      'success'
-    );
-  };
-
-  const cambiarNavApp = (app: AppNavegacion) => {
-    setAppNavegacion(app);
-    setNavApp(app);
-    onShowToast?.(
-      `🧭 Navegación con ${nombreAppNavegacion(app)}`,
-      'Todos los botones "Navegar" de la app abrirán esa app',
       'success'
     );
   };
@@ -77,17 +87,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
 
   const guardarApiKey = () => {
     setGoogleApiKey(apiKeyInput);
-    const nuevoMotor = apiKeyInput.trim() ? 'google' : 'nominatim';
-    setMotor(nuevoMotor);
-    if (apiKeyInput.trim()) {
-      onShowToast?.(
-        '🗺️ Google Geocoding activado',
-        'Las direcciones se ubicarán con Google (más precisión). Funciona en la próxima optimización de ruta.',
-        'success'
-      );
-    } else {
-      onShowToast?.('🌐 Google desactivado', 'Se vuelve al motor gratis Nominatim (OpenStreetMap)', 'info');
-    }
+    // Con la clave de fábrica o una propia, el motor es Google
+    setMotor(apiKeyInput.trim() ? 'google' : 'google');
+    onShowToast?.(
+      '🗺️ Google Maps activo',
+      apiKeyInput.trim()
+        ? 'Mapa, búsqueda de direcciones y optimización por calles reales con Google. Funciona en la próxima optimización.'
+        : 'Se restauró la clave de fábrica del proyecto RiderTrack.',
+      'success'
+    );
+  };
+
+  const restaurarClaveFabrica = () => {
+    setApiKeyInput(DEFAULT_GOOGLE_MAPS_API_KEY);
+    setGoogleApiKey(''); // borra la personalizada → vuelve la de fábrica
+    setMotor('google');
+    onShowToast?.(
+      '🔄 Clave de fábrica restaurada',
+      'Se volvió a la clave del proyecto RiderTrack en Google Cloud.',
+      'info'
+    );
   };
 
   const limpiarCache = () => {
@@ -234,6 +253,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-all ${mapasAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
+
+        {/* Navegación GPS (Fase 2.2 — elegir Google o Waze) */}
+        <button
+          onClick={() => setNavAbierto((v) => !v)}
+          className="text-left p-4 rounded-2xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 transition-all active:scale-95 group sm:col-span-2"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+              <Compass className="w-5 h-5 text-blue-400" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">Navegación GPS</div>
+              <div className="text-[11px] text-slate-400">
+                App preferida: {appNav === 'google' ? 'Google Maps' : appNav === 'waze' ? 'Waze' : 'Preguntar (ambas)'}
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-blue-400 transition-all ${navAbierto ? 'rotate-90' : ''}`} />
+          </div>
+        </button>
       </div>
 
       {/* Panel Mapas y Rutas */}
@@ -242,9 +280,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           {/* Motor activo */}
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="font-bold text-white text-sm">Motor de ubicación de direcciones</h3>
+              <h3 className="font-bold text-white text-sm">Google Maps Platform</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Convierte “Av. Larco 123, Miraflores” en coordenadas para optimizar tu ruta y dibujarla en el mapa.
+                Mapa de entregas, búsqueda de direcciones (como Circuit) y optimización de ruta por
+                calles reales — todo con Google. Activo con la clave de fábrica del proyecto RiderTrack.
               </p>
             </div>
             <span
@@ -268,7 +307,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               {([
                 { id: 'oscuro', label: 'Oscuro', desc: 'bonito, combina con la app', emoji: '🌙' },
                 { id: 'claro', label: 'Claro', desc: 'día, alto contraste', emoji: '☀️' },
-                { id: 'estandar', label: 'Estándar', desc: 'OpenStreetMap clásico', emoji: '🗺️' },
+                { id: 'estandar', label: 'Estándar', desc: 'limpio, sin locales', emoji: '🗺️' },
               ] as Array<{ id: EstiloMapa; label: string; desc: string; emoji: string }>).map((op) => (
                 <button
                   key={op.id}
@@ -286,40 +325,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               ))}
             </div>
             <p className="text-[11px] text-slate-500">
-              Los 3 usan mapas gratuitos sin API key (el oscuro y el claro son de CARTO sobre
-              datos de OpenStreetMap). También puedes cambiarlo al toque desde el botón 🎨 del mapa.
-            </p>
-          </div>
-
-          {/* App de navegación preferida — Fase 1.5 */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Navigation className="w-3.5 h-3.5 text-blue-400" />
-              App de navegación (botón “Navegar”)
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { id: 'google', label: 'Google Maps', desc: 'modo moto, calcetín de tráfico', emoji: '🗺️' },
-                { id: 'waze', label: 'Waze', desc: 'alertas de ruta en vivo', emoji: '🚨' },
-              ] as Array<{ id: AppNavegacion; label: string; desc: string; emoji: string }>).map((op) => (
-                <button
-                  key={op.id}
-                  onClick={() => cambiarNavApp(op.id)}
-                  className={`p-2.5 rounded-xl border text-center transition-all active:scale-95 ${
-                    navApp === op.id
-                      ? 'bg-blue-500/20 border-blue-500 text-white'
-                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
-                  }`}
-                >
-                  <div className="text-lg leading-none mb-1">{op.emoji}</div>
-                  <div className="text-[11px] font-bold">{op.label}</div>
-                  <div className="text-[9px] opacity-70 leading-tight mt-0.5">{op.desc}</div>
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Elige con qué app abrir la navegación a cada parada. Google usa modo moto
-              (two_wheeler); Waze arranca la navegación directo. Puedes cambiarlo cuando quieras.
+              El mapa usa GOOGLE MAPS con estos 3 estilos (la clave del proyecto ya está configurada).
+              Si Google no carga (sin internet), la app cae sola a mapas gratis sin key. También puedes
+              cambiarlo al toque desde el botón 🎨 del mapa.
             </p>
           </div>
 
@@ -327,13 +335,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              Google Maps API Key (opcional)
+              Google Maps API Key {clavePersonalizada() ? '(personalizada)' : '(de fábrica — ya configurada)'}
             </label>
             <div className="flex gap-2">
               <input
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="AIza… (vacío = Nominatim gratis)"
+                placeholder="AIza… (la de fábrica ya funciona)"
                 className="flex-1 bg-slate-900 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-700 focus:border-indigo-500 outline-none font-mono"
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -345,14 +353,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               >
                 <Save className="w-3.5 h-3.5" /> Guardar
               </button>
+              {clavePersonalizada() && (
+                <button
+                  onClick={restaurarClaveFabrica}
+                  className="flex items-center gap-1 px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
+                  title="Volver a la clave del proyecto RiderTrack"
+                >
+                  🔄 Fábrica
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Con key: Google ubica direcciones peruanas con mayor precisión (Geocoding API — se habilita en{' '}
-              <a href="https://console.cloud.google.com/apis/library/geocodingapi" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">
-                Google Cloud
-              </a>
-              , tiene capa gratuita mensual y requiere tarjeta). Sin key: Nominatim/OpenStreetMap gratis — ya funciona, solo un poco menos preciso.
-              La key se guarda únicamente en este dispositivo.
+              La clave de fábrica (proyecto <b className="text-slate-400">RiderTrack</b> en Google Cloud) ya viene
+              configurada y habilitada para Maps, Geocoding, Places y Directions. Solo cambia esta clave si quieres
+              usar otra cuenta de Google Cloud. Si la borras, vuelve la de fábrica.
             </p>
           </div>
 
@@ -373,8 +387,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           </div>
 
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            ℹ️ El mapa de entregas usa OpenStreetMap (gratis, sin key). La optimización de ruta ordena tus paradas
-            por distancia real con tu GPS: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
+            ℹ️ Todo el sistema de mapas usa <b className="text-slate-400">Google Maps Platform</b> (clave de fábrica):
+            el mapa de entregas con skin oscuro, el motito GPS, la búsqueda de direcciones estilo Circuit y la
+            optimización <b className="text-slate-400">por calles reales</b>: <b className="text-slate-400">Mi Ruta → botón “Ruta”</b>.
+            Google incluye US$200 de crédito mensual — para un rider ese uso queda dentro de lo gratis.
+          </p>
+        </div>
+      )}
+
+      {/* Panel Navegación GPS (Fase 2.2) */}
+      {navAbierto && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-800 border border-blue-500/30 space-y-4">
+          <div>
+            <h3 className="font-bold text-white text-sm">🧭 ¿Con qué app quieres navegar?</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Se aplica a TODOS los botones “Navegar” de la app: la ficha del cliente en el mapa,
+              el banner de siguiente parada y los pedidos. Se guarda en este celular.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {([
+              { id: 'preguntar', emoji: '❓', label: 'Preguntar', desc: 'al tocar Navegar, elige Google o Waze' },
+              { id: 'google', emoji: '🛵', label: 'Google Maps', desc: 'abre directo en modo moto' },
+              { id: 'waze', emoji: '🚗', label: 'Waze', desc: 'abre directo con alertas de tráfico' },
+            ] as Array<{ id: AppNavegacion; emoji: string; label: string; desc: string }>).map((op) => (
+              <button
+                key={op.id}
+                onClick={() => cambiarAppNavegacion(op.id)}
+                className={`p-3 rounded-xl border text-left transition-all active:scale-95 ${
+                  appNav === op.id
+                    ? 'bg-blue-500/20 border-blue-500 text-white'
+                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <div className="text-lg leading-none mb-1">{op.emoji}</div>
+                <div className="text-xs font-bold">{op.label}</div>
+                <div className="text-[10px] opacity-70 leading-tight mt-0.5">{op.desc}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            ℹ️ Al igual que Circuit, la navegación guiada por voz corre en la app de Google Maps o Waze
+            (ninguna app puede hacer navegación guiada por dentro). Al tocar “Navegar” se abre la app
+            elegida ya con el destino puesto — listo para partir.
           </p>
         </div>
       )}

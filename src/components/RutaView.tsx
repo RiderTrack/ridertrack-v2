@@ -35,6 +35,7 @@ import { useConfig } from '../hooks/useConfig';
 import { FotoEntregaModal } from './FotoEntregaModal';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
+import { CronometroRuta } from './CronometroRuta';
 import { recordarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import { Flag, MapPinned } from 'lucide-react';
@@ -374,15 +375,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
   };
 
-  // 💚 Enviar QR de Plin DIRECTO (Fase 1.6)
-  // Comparte la imagen del QR + mensaje por WhatsApp desde el celular.
-  // No depende del bot (que aún no tiene el comando Plin) — es el
-  // respaldo para cuando Yape se cae o el bot no está corriendo.
+  // 💚 Enviar QR de Plin DIRECTO (Fase 2.3)
+  // Comparte la imagen del QR Plin + mensaje desde tu propio WhatsApp —
+  // NO depende del bot (el handler 'enviar_plin' de RudyBot sigue pendiente).
+  // Es el respaldo por si se cae Yape: el QR y los datos salen de
+  // "Mi QR Yape/Plin" (config_empresa).
   const enviarPlinDirecto = async (cliente: Cliente) => {
     const plin = config.plin;
     const numero = (plin?.telefono || '').replace(/\D/g, '');
     if (!numero || !plin?.nombre) {
-      onShowToast?.('💚 Plin sin configurar', 'Configura tu número y QR en "Mis QR" → pestaña 💚 Plin', 'warning');
+      onShowToast?.('💚 Plin sin configurar', 'Configura tu número y QR en "Mi QR Yape/Plin" → pestaña 💚 Plin', 'warning');
       return;
     }
     const monto = parseFloat(String(cliente.cobrar || 0)) || 0;
@@ -467,20 +469,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 const tieneInicio = !!(config?.ruta?.inicio);
                 const tieneFin = !!(config?.ruta?.fin);
                 const origenTxt = tieneInicio
-                  ? `2. Se ordenarán por distancia real desde tu INICIO configurado${tieneFin ? ' y terminando en tu FIN' : ''}`
-                  : '2. Se ordenarán por distancia real desde tu posición GPS (configura un Inicio en "🚩 Inicio y fin de ruta" para partir siempre del mismo lugar)';
-                if (!confirm(`🚀 ¿Optimizar ruta por distancia real?\n\n1. Se ubicarán las direcciones que falten (la 1ª vez tarda; usa varias estrategias y si no halla la calle exacta, pone el centro del distrito marcado "aprox.")\n${origenTxt}\n3. Se reasignarán los números de orden (1, 2, 3...)\n\nLas paradas "aprox." puedes precisarlas luego con el botón 📍 Ubicar de cada cliente.`)) return;
+                  ? `2. Google Maps las ordenará por CALLES REALES desde tu INICIO configurado${tieneFin ? ' y terminando en tu FIN' : ''}`
+                  : '2. Google Maps las ordenará por CALLES REALES desde tu posición GPS (configura un Inicio en "🚩 Inicio y fin de ruta" para partir siempre del mismo lugar)';
+                if (!confirm(`🚀 ¿Optimizar ruta con Google Maps?\n\n1. Se ubicarán las direcciones que falten (con Google Geocoding — la 1ª vez tarda un poco; si no halla la calle exacta, pone el centro del distrito marcado "aprox.")\n${origenTxt}\n3. Se reasignarán los números de orden (1, 2, 3...) con km y minutos REALES de manejo\n\nLas paradas "aprox." puedes precisarlas luego con el botón 📍 Ubicar de cada cliente.`)) return;
                 setOptimizando(true);
                 setOptimizandoMsg('Preparando…');
                 try {
                   const res = await optimizarRuta((msg) => setOptimizandoMsg(msg), config?.ruta ?? null);
                   if (!res) return;
                   const partes: string[] = [];
-                  partes.push(`${res.conUbicacion} paradas ordenadas`);
+                  partes.push(
+                    res.motor === 'google'
+                      ? `${res.conUbicacion} paradas ordenadas por calles reales (Google)`
+                      : `${res.conUbicacion} paradas ordenadas (distancia estimada)`
+                  );
                   if (res.geocodificadosAhora > 0) partes.push(`${res.geocodificadosAhora} ubicadas ahora`);
                   if (res.desdeCache > 0) partes.push(`${res.desdeCache} de caché`);
                   if (res.aproximados > 0) partes.push(`${res.aproximados} aprox. (distrito)`);
-                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min`);
+                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min${res.motor === 'google' ? ' reales' : ''}`);
                   if (res.ahorroPct > 0) partes.push(`${res.ahorroPct}% menos que el orden anterior`);
                   if (res.sinUbicacion > 0) partes.push(`⚠️ ${res.sinUbicacion} sin ubicar (van al final)`);
                   partes.push(
@@ -489,7 +495,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     'Sin GPS ni inicio: partiste del centro de Lima'
                   );
                   onShowToast?.(
-                    '🚀 Ruta optimizada',
+                    res.motor === 'google' ? '🚀 Ruta optimizada con Google Maps' : '🚀 Ruta optimizada',
                     partes.join(' · '),
                     res.sinUbicacion > 0 ? 'warning' : 'success'
                   );
@@ -535,6 +541,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <div className="text-sm font-black text-blue-400">{stats.cobrado.toFixed(0)}</div>
           </div>
         </div>
+
+        {/* ⏱ Cronómetro de ruta + aviso silencioso al bot (Fase 2.2) */}
+        <CronometroRuta
+          uid={user?.uid}
+          clientes={clientes}
+          riderNombre={profile?.nombre || user?.displayName || 'Rider'}
+          riderTelefono={config?.empresa?.telefono || ''}
+          empresa={config?.empresa?.nombre || 'MATE'}
+          onShowToast={onShowToast}
+        />
       </div>
 
       {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
@@ -999,7 +1015,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_yape'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📲</span> Enviar Yape
                             </button>
-                            <button onClick={() => { setBotModalId(null); enviarPlinDirecto(c); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={() => { setBotModalId(null); enviarPlinDirecto(c); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95" title="Se envía directo desde tu WhatsApp con la imagen del QR (no necesita el bot)">
                               <span className="text-lg">💚</span> Enviar Plin
                             </button>
                             <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95">

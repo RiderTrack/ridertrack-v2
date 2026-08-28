@@ -33,11 +33,10 @@ import {
 import { Order, NavigationTab } from '../types';
 import { Coordenadas, vigilarPosicion } from '../services/geocoding';
 import { getEstiloMapa, tilesDeEstilo, EstiloMapa } from '../services/mapStyle';
-import { linkNavegacion } from '../services/navPrefs';
+import { urlNavegacion } from '../services/navegacion';
 import { AvatarSvg } from '../data/avatars';
 import { useAuth } from '../hooks/useAuth';
-import { CronometroCard } from './CronometroRuta';
-import { sincronizarCronometroAlBot, publicarPosicionRider } from '../services/firestore';
+import { publicarPosicionRider } from '../services/firestore';
 
 interface MotorizadosViewProps {
   orders: Order[];
@@ -286,14 +285,6 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
     });
   }, [miPosicion, user, velocidad, rumbo]);
 
-  // ── Cronómetro: sincronización al bot ─────────────────────
-  const syncCrono = (e: {
-    fase: 'idle' | 'corriendo' | 'pausado';
-    iniciadoAt: string | null;
-    acumuladoSeg: number;
-    avisoSilencioso: boolean;
-  }) => (user ? sincronizarCronometroAlBot(user.uid, e) : Promise.resolve());
-
   // ── Acciones ──────────────────────────────────────────────
   const centrarEnMi = () => {
     if (miPosicion && mapRef.current) {
@@ -431,7 +422,7 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
               {/* Botón navegar a la siguiente parada (respeta Google/Waze) */}
               {siguienteParada?.lat != null && siguienteParada.lng != null && (
                 <a
-                  href={linkNavegacion({ lat: siguienteParada.lat, lng: siguienteParada.lng })}
+                  href={urlNavegacion(siguienteParada.lat, siguienteParada.lng)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="absolute bottom-3 right-3 z-[500] flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg transition-all active:scale-95"
@@ -501,8 +492,8 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
             </button>
           </div>
 
-          {/* Cronómetro + aviso silencioso */}
-          <CronometroCard onSync={syncCrono} />
+          {/* Nota: el cronómetro de ruta vive en Mi Ruta (Fase 2.2) —
+              CronometroRuta con aviso silencioso al bot y voz. */}
         </div>
       </div>
     </div>
