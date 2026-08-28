@@ -20,8 +20,9 @@
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, Bot, Loader2, TimerReset } from 'lucide-react';
+import { Play, Pause, Square, Bot, Loader2, TimerReset, UtensilsCrossed } from 'lucide-react';
 import { Cliente, iniciarRutaConBot, finalizarRutaActivaBot } from '../services/firestore';
+import { useRefrigerio } from '../utils/refrigerio';
 
 interface CronometroRutaProps {
   uid?: string | null;
@@ -63,6 +64,10 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
   const [publicando, setPublicando] = useState(false);
   const intervaloRef = useRef<number | null>(null);
 
+  // 🍽️ Refrigerio (Fase 2.7): pausa el reloj de ruta con countdown —
+  // se sincroniza con SeguimientoView vía el store compartido.
+  const refri = useRefrigerio(uid);
+
   // Restaurar estado del cronómetro al montar / cambiar de cuenta
   useEffect(() => {
     if (!uid) return;
@@ -79,17 +84,21 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
     }
   }, [uid]);
 
-  // Guardar cada cambio de estado
-  useEffect(() => {
-    if (!uid) return;
+  // 💾 Persistencia: SOLO desde acciones (Fase 2.7 fix carrera).
+  // Antes un useEffect persistía en cada render y, con el estado
+  // aún sin restaurar (idle), BORRABA el localStorage del cronómetro
+  // en plena carrera de montaje. Ahora cada acción guarda explícitamente.
+  const aplicarCrono = (st: CronoState) => {
+    setCrono(st);
     try {
-      if (!crono.activo && crono.acumulado === 0) {
+      if (!uid) return;
+      if (!st.activo && st.acumulado === 0) {
         localStorage.removeItem(CRONO_KEY(uid));
       } else {
-        localStorage.setItem(CRONO_KEY(uid), JSON.stringify(crono));
+        localStorage.setItem(CRONO_KEY(uid), JSON.stringify(st));
       }
     } catch {}
-  }, [crono, uid]);
+  };
 
   // Tick del reloj
   useEffect(() => {
@@ -104,14 +113,29 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
     setTranscurrido(crono.acumulado);
   }, [crono.activo, crono.inicio, crono.acumulado]);
 
+  // 🍽️ El refrigerio pausa/reanuda este cronómetro DESDE CUALQUIER
+  // vista (el store escribe rt_crono_{uid} y avisa con este evento).
+  useEffect(() => {
+    if (!uid) return;
+    const recargar = () => {
+      try {
+        const raw = localStorage.getItem(CRONO_KEY(uid));
+        if (raw) {
+          setCrono(JSON.parse(raw) as CronoState);
+        }
+      } catch {}
+    };
+    window.addEventListener('rt-crono-cambio', recargar);
+    return () => window.removeEventListener('rt-crono-cambio', recargar);
+  }, [uid]);
+
   // 🏁 Reset cuando la ruta se FINALIZA desde "Mi Ruta"
   // (v1: resetCronometro() al cerrar la ruta). El hook useClientes
   // emite 'rt-ruta-finalizada' tras guardar el historial.
   useEffect(() => {
     const alFinalizar = () => {
-      setCrono({ activo: false, inicio: null, acumulado: 0 });
+      aplicarCrono({ activo: false, inicio: null, acumulado: 0 });
       setTranscurrido(0);
-      try { if (uid) localStorage.removeItem(CRONO_KEY(uid)); } catch {}
     };
     window.addEventListener('rt-ruta-finalizada', alFinalizar);
     return () => window.removeEventListener('rt-ruta-finalizada', alFinalizar);
@@ -121,7 +145,7 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
   const handleToggle = async () => {
     if (!crono.activo) {
       const esInicioRuta = crono.acumulado === 0; // sin tiempo acumulado = arranque de ruta
-      setCrono({ activo: true, inicio: Date.now(), acumulado: crono.acumulado });
+      aplicarCrono({ activo: true, inicio: Date.now(), acumulado: crono.acumulado });
 
       if (esInicioRuta) {
         // ── AVISO SILENCIOSO: publicar la ruta para que el bot
@@ -177,13 +201,32 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
       }
     } else {
       // ── ⏸ PAUSAR ──
-      setCrono({
+      aplicarCrono({
         activo: false,
         inicio: null,
         acumulado: crono.acumulado + (Date.now() - (crono.inicio || Date.now())),
       });
       onShowToast?.('⏸️ Pausado', 'Toca ▶ para continuar — la ruta sigue activa para el bot', 'info');
     }
+  };
+
+  // ── 🍽️ REFRIGERIO: pausa el reloj y cuenta regresiva ──
+  const iniciarRefrigerio = () => {
+    refri.iniciarAhora();
+    onShowToast?.(
+      '🍽️ Refrigerio iniciado',
+      'El reloj de ruta está en pausa — al terminar sigue solo',
+      'info'
+    );
+  };
+
+  const terminarRefrigerio = () => {
+    const seg = refri.terminarAhora();
+    onShowToast?.(
+      '✅ Refrigerio terminado',
+      seg > 0 ? `Tomaste ${Math.round(seg / 60)} min — la ruta sigue corriendo` : 'La ruta sigue corriendo',
+      'success'
+    );
   };
 
   // ── ⏹ TERMINAR RUTA ──
@@ -199,7 +242,7 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
     ) {
       return;
     }
-    setCrono({ activo: false, inicio: null, acumulado: 0 });
+    aplicarCrono({ activo: false, inicio: null, acumulado: 0 });
     setTranscurrido(0);
     setPublicando(true);
     try {
@@ -216,23 +259,43 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
 
   return (
     <div className={`rounded-xl border p-2.5 sm:p-3 flex flex-wrap items-center gap-2 transition-colors ${
-      crono.activo
+      refri.activo
+        ? 'bg-orange-500/10 border-orange-500/40'
+        : crono.activo
         ? 'bg-emerald-500/10 border-emerald-500/40'
         : enrutado
         ? 'bg-amber-500/10 border-amber-500/30'
         : 'bg-slate-900 border-slate-700/60'
     }`}>
-      {/* Display del reloj */}
+      {/* Display del reloj (o countdown del refrigerio) */}
       <div className="flex items-center gap-2 min-w-0">
-        <TimerReset className={`w-4 h-4 flex-shrink-0 ${crono.activo ? 'text-emerald-400' : 'text-slate-400'}`} />
+        {refri.activo ? (
+          <UtensilsCrossed className="w-4 h-4 flex-shrink-0 text-orange-400 animate-pulse" />
+        ) : (
+          <TimerReset className={`w-4 h-4 flex-shrink-0 ${crono.activo ? 'text-emerald-400' : 'text-slate-400'}`} />
+        )}
         <div className="min-w-0">
-          <div className={`text-lg font-black leading-none font-mono tabular-nums ${
-            crono.activo ? 'text-emerald-400' : enrutado ? 'text-amber-400' : 'text-slate-300'
-          }`}>
-            {formatear(transcurrido)}
+          <div
+            className={`text-lg font-black leading-none font-mono tabular-nums ${
+              refri.activo
+                ? 'text-orange-400'
+                : crono.activo
+                ? 'text-emerald-400'
+                : enrutado
+                ? 'text-amber-400'
+                : 'text-slate-300'
+            }`}
+          >
+            {refri.activo ? formatearRefri(refri.segundosRestantes) : formatear(transcurrido)}
           </div>
           <div className="text-[9px] uppercase font-bold text-slate-500 tracking-wide">
-            {crono.activo ? 'Ruta en curso' : enrutado ? 'Pausado' : 'Tiempo de ruta'}
+            {refri.activo
+              ? '🍽️ Refrigerio — ruta en pausa'
+              : crono.activo
+              ? 'Ruta en curso'
+              : enrutado
+              ? 'Pausado'
+              : 'Tiempo de ruta'}
           </div>
         </div>
       </div>
@@ -250,25 +313,52 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
       {/* Botones */}
       <div className="flex items-center gap-1.5 ml-auto">
         {publicando && <Loader2 className="w-4 h-4 animate-spin text-blue-400" />}
-        <button
-          onClick={handleToggle}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white transition-all active:scale-95 ${
-            crono.activo
-              ? 'bg-amber-600 hover:bg-amber-500'
-              : 'bg-emerald-600 hover:bg-emerald-500'
-          }`}
-        >
-          {crono.activo
-            ? (<><Pause className="w-3.5 h-3.5" /> Pausar</>)
-            : (<><Play className="w-3.5 h-3.5" /> {enrutado ? 'Continuar' : 'Iniciar ruta'}</>)}
-        </button>
-        {enrutado && (
-          <button
-            onClick={handleTerminar}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white text-[11px] font-bold transition-all active:scale-95"
-          >
-            <Square className="w-3.5 h-3.5" /> Terminar
-          </button>
+        {refri.activo ? (
+          /* 🍽️ Refrigerio en curso: SOLO terminar refrigerio */
+          <>
+            <span className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-300 text-[10px] font-bold">
+              {refri.refri.duracionMin} min programados
+            </span>
+            <button
+              onClick={terminarRefrigerio}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-all active:scale-95"
+            >
+              <Square className="w-3.5 h-3.5" /> Terminar refrigerio
+            </button>
+          </>
+        ) : (
+          <>
+            {enrutado && (
+              /* 🍽️ Iniciar refrigerio */
+              <button
+                onClick={iniciarRefrigerio}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-bold transition-all active:scale-95"
+                title="Pausar la ruta para tu refrigerio"
+              >
+                <UtensilsCrossed className="w-3.5 h-3.5" /> Refrigerio
+              </button>
+            )}
+            <button
+              onClick={handleToggle}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white transition-all active:scale-95 ${
+                crono.activo
+                  ? 'bg-amber-600 hover:bg-amber-500'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+            >
+              {crono.activo
+                ? (<><Pause className="w-3.5 h-3.5" /> Pausar</>)
+                : (<><Play className="w-3.5 h-3.5" /> {enrutado ? 'Continuar' : 'Iniciar ruta'}</>)}
+            </button>
+            {enrutado && (
+              <button
+                onClick={handleTerminar}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white text-[11px] font-bold transition-all active:scale-95"
+              >
+                <Square className="w-3.5 h-3.5" /> Terminar
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -284,4 +374,13 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
 
 function totalClientesTxt(n: number): string {
   return `${n} ${n === 1 ? 'cliente' : 'clientes'}`;
+}
+
+/** Countdown del refrigerio: MM:SS */
+function formatearRefri(seg: number): string {
+  const s = Math.max(0, Math.floor(seg));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(m)}:${p(r)}`;
 }

@@ -407,6 +407,21 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     window.open(`https://wa.me/${telCompleto}`, '_blank');
   };
 
+  // 📞 Llamar al cliente (Fase 2.7 — como Circuit): botón rápido
+  // que abre el marcador del celular con el número listo.
+  const llamarCliente = (cliente: Cliente) => {
+    const tel = _botCel(cliente.cel || '');
+    if (!tel) {
+      onShowToast?.('Sin celular', `${cliente.nombre || 'El cliente'} no tiene celular válido`, 'warning');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = `tel:+${tel}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   // 📲 Pedir ubicación exacta por WhatsApp DIRECTO (Fase 2.5 — estilo v1
   // enviarMsgDirIA): para clientes con dirección por manzana o sin número.
   // Abre wa.me con el mensaje listo — no depende del bot.
@@ -1289,6 +1304,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           >
                             <MessageSquare className="w-3 h-3" />
                             WA
+                          </button>
+                          <button
+                            onClick={() => llamarCliente(c)}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
+                            title={`Llamar a ${c.nombre || 'el cliente'}`}
+                          >
+                            <Phone className="w-3 h-3" />
+                            Llamar
                           </button>
                           <button
                             onClick={() => setControlModalId(controlModalId === c.id ? null : c.id)}

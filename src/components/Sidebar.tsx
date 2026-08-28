@@ -21,6 +21,7 @@ import {
   History,
   Megaphone,
   Cloud,
+  Navigation,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -83,6 +84,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: Route,
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
+        {
+          id: 'seguimiento',
+          label: 'Seguimiento de ruta',
+          icon: Navigation,
+          badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
+          badgeColor: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
         },
         { id: 'yape', label: 'Mi QR Yape/Plin', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },

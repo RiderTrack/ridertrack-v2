@@ -167,6 +167,10 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
   // ── Ver todas (cuando no hay fecha seleccionada) ──
   const [verTodas, setVerTodas] = useState(false);
 
+  // ── Modal de cambiar fecha (Fase 2.7: calendario nativo
+  //    en vez del cuadro de texto) ──
+  const [fechaModal, setFechaModal] = useState<{ ruta: RegistroHistorial; valor: string } | null>(null);
+
   const cargar = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -306,21 +310,24 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
     }
   };
 
-  // ── Cambiar fecha de una ruta (como el "📅 Fecha" de la v1) ──
-  const cambiarFecha = async (r: RegistroHistorial) => {
-    const nueva = prompt(
-      '📅 Nueva fecha de esta ruta (AAAA-MM-DD):\n\nÚtil si cerraste la ruta después de medianoche.',
-      r.fecha
-    );
-    if (!nueva) return;
-    const limpia = nueva.trim();
+  // ── Cambiar fecha de una ruta (Fase 2.7: abre un CALENDARIO,
+  //    ya no el cuadro de texto — el input date abre el picker
+  //    nativo del celular: rápido y sin errores de tipeo) ──
+  const cambiarFecha = (r: RegistroHistorial) => {
+    setFechaModal({ ruta: r, valor: r.fecha || '' });
+  };
+
+  const guardarFechaModal = async () => {
+    if (!fechaModal) return;
+    const limpia = (fechaModal.valor || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(limpia)) {
-      onShowToast?.('Fecha inválida', 'Usa el formato AAAA-MM-DD (ej: 2026-08-28)', 'error');
+      onShowToast?.('Elige una fecha', 'Toca el calendario y escoge el día de la ruta', 'warning');
       return;
     }
     try {
-      await cambiarFechaHistorial(r.id, limpia);
+      await cambiarFechaHistorial(fechaModal.ruta.id, limpia);
       onShowToast?.('📅 Fecha actualizada', `La ruta ahora pertenece al ${limpia}`, 'success');
+      setFechaModal(null);
       setFechaSel(null);
       await cargar();
     } catch (e: any) {
@@ -941,6 +948,95 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
             <p className="text-[9px] text-slate-500 text-center">
               En WhatsApp elige el chat (grupo de la empresa, jefe…). El texto va listo para enviar.
             </p>
+          </div>
+        </div>
+      )}
+      {/* Modal de Cambiar fecha (Fase 2.7 — calendario nativo) */}
+      {fechaModal && (
+        <div
+          className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setFechaModal(null); }}
+        >
+          <div className="w-full sm:max-w-sm bg-slate-800 border border-slate-600 rounded-t-2xl sm:rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center shrink-0">
+                  <CalendarClock className="w-4 h-4 text-violet-400" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-black text-white leading-tight">📅 Cambiar fecha de la ruta</h3>
+                  <p className="text-[10px] text-slate-400 truncate capitalize">
+                    Hoy está: {fechaBonita(fechaModal.ruta.fecha)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFechaModal(null)}
+                className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-300 transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-snug">
+              Útil si cerraste la ruta después de medianoche: la mueves al día que realmente hiciste las entregas.
+            </p>
+
+            {/* Calendario nativo */}
+            <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
+              <label className="text-[9px] uppercase font-bold text-slate-500 mb-1.5 block">
+                Escoge el nuevo día
+              </label>
+              <input
+                type="date"
+                value={fechaModal.valor}
+                max="2100-12-31"
+                onChange={(e) => setFechaModal((prev) => (prev ? { ...prev, valor: e.target.value } : null))}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-3 text-sm font-bold text-white focus:outline-none focus:border-violet-500 [color-scheme:dark]"
+              />
+            </div>
+
+            {/* Atajos */}
+            <div className="flex gap-2">
+              {[
+                { label: 'Hoy', dias: 0 },
+                { label: 'Ayer', dias: -1 },
+                { label: 'Anteayer', dias: -2 },
+              ].map((atajo) => {
+                const d = new Date();
+                d.setDate(d.getDate() + atajo.dias);
+                const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                return (
+                  <button
+                    key={atajo.label}
+                    onClick={() => setFechaModal((prev) => (prev ? { ...prev, valor: iso } : null))}
+                    className={`flex-1 py-2 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                      fechaModal.valor === iso
+                        ? 'bg-violet-600 border-violet-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {atajo.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setFechaModal(null)}
+                className="flex-1 py-3 rounded-xl text-xs font-bold bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-all active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={guardarFechaModal}
+                disabled={!fechaModal.valor || fechaModal.valor === fechaModal.ruta.fecha}
+                className="flex-1 py-3 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Guardar fecha
+              </button>
+            </div>
           </div>
         </div>
       )}
