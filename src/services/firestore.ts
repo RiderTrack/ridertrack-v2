@@ -91,11 +91,38 @@ export interface RegistroHistorial {
   cobradoTotal: number;
   /** Desglose de S/ por método (efectivo, yape-rudy, empresa...) */
   porMetodo?: Record<string, number>;
-  /** S/ pagados por empresa (st=empresa, pos, transferencia...) */
+  /** S/ pagados por empresa (st=empresa, pos, transferencia... + mEmp de mixto) */
   totalEmpresa?: number;
-  /** S/ que quedan para el rider (efectivo, yape-rudy...) */
+  /** S/ que quedan para el rider (efectivo, yape-rudy... + mEf de mixto) */
   totalRider?: number;
   clientes?: any[];
+  /** Fase 2.6: ruta importada del historial de la versión 1 */
+  origen?: 'v1';
+  /** id original del registro v1 (timestamp ms) — para no importar 2 veces */
+  v1Id?: number;
+  /** km recorridos (solo rutas v1 — la v1 lo guardaba al cerrar) */
+  km?: number;
+  /** duración de la ruta en ms (solo rutas v1) */
+  tiempoRuta?: number;
+}
+
+/** Entrada del historial de la v1 (D.hist en el Rider Modular v1) */
+export interface RutaV1 {
+  id?: number;
+  fechaId?: string;   // YYYY-MM-DD
+  fecha?: string;     // "23 may. 2026"
+  fechaL?: string;    // "sábado, 23 de mayo de 2026"
+  total?: number;
+  ent?: number;
+  fal?: number;
+  pen?: number;
+  tT?: number;        // total LO TUYO (S/)
+  tE?: number;        // total EMPRESA (S/)
+  km?: number;
+  tiempoRuta?: number;
+  /** desglose v1: ef, yr, ye, mT, po, tr, yp, pl, js, em */
+  dg?: Record<string, number>;
+  cl?: any[];
 }
 
 /** Backup en la nube (Fase 2.5) — snapshot completo de la ruta */
@@ -282,27 +309,48 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
     const fallidos = clientes.filter(c =>
       ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
     ).length;
-    const cobrado = clientes
-      .filter(c => ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st))
-      .reduce((sum, c) => sum + parseFloat(String(c.cobrar || 0)), 0);
 
     // 2. Guardar resumen en historial_rutas
     // (Fase 2.5: ID único por cierre con timestamp — antes era
     //  `${uid}_${fecha}` con merge y dos cierres el mismo día se
     //  fusionaban. Se agregan desgloses por método y rider/empresa.)
+    // (Fase 2.6: mixto se divide como en la v1 — mEf para ti, mEmp
+    //  para la empresa — y yape-efectivo descuenta el vuelto. El
+    //  snapshot de clientes ahora guarda mEf/mYp/mEmp/mVt para el
+    //  Excel y el detalle.)
     const fechaHoy = new Date().toISOString().split('T')[0];
 
-    // Desglose por método de pago (como el cierre de la v1)
+    // Desglose por método de pago (reglas del cierre de la v1)
     const porMetodo: Record<string, number> = {};
     const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
     const ST_EMPRESA = ['empresa', 'pos', 'transferencia', 'pago-link', 'jose-smith'];
     let totalEmpresa = 0;
+    let totalRider = 0;
     for (const c of clientes) {
       if (!ST_ENTREGADOS.includes(c.st)) continue;
-      const monto = parseFloat(String(c.cobrar || 0));
-      porMetodo[c.st] = (porMetodo[c.st] || 0) + monto;
-      if (ST_EMPRESA.includes(c.st)) totalEmpresa += monto;
+      const cobrar = parseFloat(String(c.cobrar || 0));
+      if (c.st === 'mixto') {
+        // Como la v1: la parte en efectivo es tuya, la parte
+        // digital la paga la empresa (tE += mEmp)
+        const mEf = parseFloat(String(c.mEf || 0));
+        const mEmp = parseFloat(String(c.mEmp || 0));
+        porMetodo['mixto'] = (porMetodo['mixto'] || 0) + mEf;
+        totalRider += mEf;
+        totalEmpresa += mEmp;
+      } else if (c.st === 'yape-efectivo') {
+        // Como la v1: efectivo + yape − vuelto entregado
+        const m = Math.max(0, parseFloat(String(c.mEf || 0)) + parseFloat(String(c.mYp || 0)) - parseFloat(String(c.mVt || 0)));
+        porMetodo['yape-efectivo'] = (porMetodo['yape-efectivo'] || 0) + m;
+        totalRider += m;
+      } else if (ST_EMPRESA.includes(c.st)) {
+        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
+        totalEmpresa += cobrar;
+      } else {
+        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
+        totalRider += cobrar;
+      }
     }
+    const cobrado = totalRider + totalEmpresa;
 
     await setDoc(doc(db, 'historial_rutas', `${userId}_${Date.now()}`), {
       uid: userId,
@@ -316,17 +364,23 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       cobradoTotal: cobrado,
       porMetodo,
       totalEmpresa,
-      totalRider: Math.max(0, cobrado - totalEmpresa),
+      totalRider,
       clientes: clientes.map(c => ({
         id: c.id,
         nombre: c.nombre,
         cel: c.cel,
         prod: c.prod,
         cobrar: parseFloat(String(c.cobrar || 0)),
+        mEf: parseFloat(String(c.mEf || 0)),
+        mYp: parseFloat(String(c.mYp || 0)),
+        mEmp: parseFloat(String(c.mEmp || 0)),
+        mVt: parseFloat(String(c.mVt || 0)),
         dir: c.dir,
         dist: c.dist,
         st: c.st || 'pendiente',
         hora: c.hora || '',
+        obs: c.obs || '',
+        nota: c.nota || '',
       })),
     });
 
@@ -1350,15 +1404,17 @@ export async function publicarPosicionRider(userId: string, pos: PosicionRider):
 // ═══════════════════════════════════════════════════════════
 
 /**
- * Lee el historial de rutas del usuario (las últimas 90 rutas).
+ * Lee el historial de rutas del usuario (las últimas rutas).
  * Ordena localmente por finalizadaAt/fecha desc para soportar
  * docs viejos y nuevos sin depender de índices compuestos.
+ * (2.6: max 300 por defecto — el calendario necesita todas las
+ * fechas con ruta, incluidas las importadas de la v1.)
  */
-export async function leerHistorial(userId: string, max = 90): Promise<RegistroHistorial[]> {
+export async function leerHistorial(userId: string, max = 300): Promise<RegistroHistorial[]> {
   if (!db || !userId) return [];
   try {
     const ref = collection(db, 'historial_rutas');
-    const q = query(ref, limit(300));
+    const q = query(ref, limit(400));
     const snap = await getDocs(q);
     const registros: RegistroHistorial[] = [];
     snap.forEach((d) => {
@@ -1380,6 +1436,10 @@ export async function leerHistorial(userId: string, max = 90): Promise<RegistroH
         totalEmpresa: data.totalEmpresa,
         totalRider: data.totalRider,
         clientes: data.clientes || [],
+        origen: data.origen,
+        v1Id: data.v1Id,
+        km: data.km,
+        tiempoRuta: data.tiempoRuta,
       });
     });
     registros.sort((a, b) => {
@@ -1404,6 +1464,199 @@ export async function eliminarRutaHistorial(userId: string, registroId: string):
     console.error('❌ Error eliminando ruta del historial:', e);
     throw e;
   }
+}
+
+/** Cambia la fecha de una ruta del historial (útil si cerraste después de medianoche) */
+export async function cambiarFechaHistorial(registroId: string, nuevaFecha: string): Promise<void> {
+  if (!db) throw new Error('Sin conexión');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha)) throw new Error('Fecha inválida (usa AAAA-MM-DD)');
+  try {
+    await updateDoc(doc(db, 'historial_rutas', registroId), { fecha: nuevaFecha });
+    console.log('📅 Fecha de ruta actualizada:', registroId, '→', nuevaFecha);
+  } catch (e) {
+    console.error('❌ Error cambiando fecha del historial:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📥 IMPORTAR HISTORIAL DE LA V1 (Fase 2.6)
+// La v1 (Rider Modular) guardaba TODO su historial (D.hist) en
+// el MISMO Firebase y con el MISMO usuario:
+//   · usuarios/{uid}.hist              → auto-sync (sv(), autoSync:true)
+//   · usuarios/{uid}/backups/{doc}.hist → backups manual + cierre de ruta
+// Este módulo lee la fuente más completa, convierte cada ruta al
+// formato de historial_rutas (docs `v1_{id}`) y NO repite las que
+// ya se importaron (campo v1Id).
+// ═══════════════════════════════════════════════════════════
+
+/** Equivalencia desglose v1 (dg) → estados v2 (porMetodo) */
+const MAPA_DG_V1: Record<string, string> = {
+  ef: 'efectivo',
+  yr: 'yape-rudy',
+  ye: 'yape-efectivo',
+  mT: 'mixto',
+  po: 'pos',
+  tr: 'transferencia',
+  yp: 'yape-plin',
+  pl: 'pago-link',
+  js: 'jose-smith',
+  em: 'empresa',
+};
+
+/**
+ * Busca el historial v1 más completo en la nube:
+ * doc vivo usuarios/{uid}.hist + los backups de usuarios/{uid}/backups.
+ * Gana la fuente con MÁS rutas (el hist v1 era acumulativo).
+ */
+export async function leerHistorialV1(userId: string): Promise<{ entradas: RutaV1[]; fuente: string }> {
+  if (!db || !userId) return { entradas: [], fuente: '' };
+  let mejor: RutaV1[] = [];
+  let fuente = '';
+
+  // 1) Doc vivo (auto-sync de la v1)
+  try {
+    const snap = await getDoc(doc(db, 'usuarios', userId));
+    if (snap.exists()) {
+      const hist = (snap.data() as any)?.hist;
+      if (Array.isArray(hist) && hist.length > mejor.length) {
+        mejor = hist as RutaV1[];
+        fuente = 'sincronización automática';
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ No se pudo leer usuarios/{uid}.hist:', (e as Error).message);
+  }
+
+  // 2) Backups de la v1 (cada uno trae el hist completo hasta su fecha)
+  try {
+    const snap = await getDocs(query(collection(db, 'usuarios', userId, 'backups'), limit(40)));
+    snap.forEach((d) => {
+      const hist = (d.data() as any)?.hist;
+      if (Array.isArray(hist) && hist.length > mejor.length) {
+        mejor = hist as RutaV1[];
+        fuente = `backup ${d.id}`;
+      }
+    });
+  } catch (e) {
+    console.warn('⚠️ No se pudieron leer los backups v1:', (e as Error).message);
+  }
+
+  return { entradas: mejor, fuente };
+}
+
+/** Convierte una ruta del historial v1 al formato de historial_rutas (v2) */
+function convertirRutaV1(h: RutaV1, userId: string): Record<string, any> | null {
+  const cl = Array.isArray(h.cl) ? h.cl : [];
+  const id = Number(h.id) || 0;
+  const fecha = h.fechaId || (id ? new Date(id).toISOString().slice(0, 10) : '');
+  if (!id || !fecha) return null; // sin id/fecha no se puede deduplicar ni ubicar
+
+  // Desglose: dg v1 → porMetodo v2 (si no hay dg, se calcula de cl)
+  const porMetodo: Record<string, number> = {};
+  if (h.dg && Object.keys(h.dg).length > 0) {
+    for (const [k, v] of Object.entries(h.dg)) {
+      const st = MAPA_DG_V1[k];
+      if (st && Number(v) > 0) porMetodo[st] = (porMetodo[st] || 0) + Number(v);
+    }
+  } else {
+    const ST_ENT = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+    for (const c of cl) {
+      const k = c?.st;
+      if (!k || !ST_ENT.includes(k)) continue;
+      if (k === 'mixto') {
+        porMetodo['mixto'] = (porMetodo['mixto'] || 0) + parseFloat(String(c.mEf || 0));
+      } else {
+        porMetodo[k] = (porMetodo[k] || 0) + parseFloat(String(c.cobrar || 0));
+      }
+    }
+  }
+
+  const totalRider = Number(h.tT) || 0;
+  const totalEmpresa = Number(h.tE) || 0;
+
+  return {
+    uid: userId,
+    origen: 'v1',
+    v1Id: id,
+    fecha,
+    finalizadaAt: id ? new Date(id).toISOString() : '',
+    totalClientes: Number(h.total) || cl.length,
+    entregados: Number(h.ent) || 0,
+    fallidos: Number(h.fal) || 0,
+    pendientes: Number(h.pen) || 0,
+    cobradoTotal: totalRider + totalEmpresa,
+    porMetodo,
+    totalEmpresa,
+    totalRider,
+    km: h.km || undefined,
+    tiempoRuta: h.tiempoRuta || undefined,
+    clientes: cl.map((c: any) => ({
+      id: c.id,
+      num: c.num,
+      nombre: c.nombre || 'Cliente',
+      cel: c.cel || '',
+      prod: c.prod || '',
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      mEf: parseFloat(String(c.mEf || 0)),
+      mYp: parseFloat(String(c.mYp || 0)),
+      mEmp: parseFloat(String(c.mEmp || 0)),
+      mVt: parseFloat(String(c.mVt || 0)),
+      dir: c.dir || '',
+      dist: c.dist || '',
+      st: c.st || 'pendiente',
+      hora: c.hora || '',
+      obs: c.obs || '',
+      nota: c.nota || '',
+      motivo: c.motivo || '',
+    })),
+  };
+}
+
+/**
+ * IMPORTA el historial de la v1 a historial_rutas (docs `v1_{id}`).
+ * No repite las que ya están (campo v1Id). Devuelve cuántas importó.
+ */
+export async function importarHistorialV1(userId: string): Promise<{ importadas: number; totalV1: number; fuente: string }> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const { entradas, fuente } = await leerHistorialV1(userId);
+  if (entradas.length === 0) return { importadas: 0, totalV1: 0, fuente };
+
+  // Qué v1Id ya están importadas
+  const yaImportadas = new Set<number>();
+  try {
+    const snap = await getDocs(query(collection(db, 'historial_rutas'), limit(400)));
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      if (data?.origen === 'v1' && typeof data.v1Id === 'number') yaImportadas.add(data.v1Id);
+    });
+  } catch (e) {
+    console.warn('⚠️ No se pudo leer historial_rutas para deduplicar:', (e as Error).message);
+  }
+
+  // Convertir solo las nuevas
+  const nuevas: Record<string, any>[] = [];
+  for (const h of entradas) {
+    if (yaImportadas.has(Number(h.id))) continue;
+    const datos = convertirRutaV1(h, userId);
+    if (datos) nuevas.push(datos);
+  }
+
+  // Escribir por lotes (batch máx 500 → usamos 400 por margen)
+  let escritas = 0;
+  for (let i = 0; i < nuevas.length; i += 400) {
+    const lote = nuevas.slice(i, i + 400);
+    const batch = writeBatch(db);
+    for (const datos of lote) {
+      batch.set(doc(db, 'historial_rutas', `v1_${datos.v1Id}`), datos);
+    }
+    await batch.commit();
+    escritas += lote.length;
+  }
+
+  console.log(`📥 Historial v1 importado: ${escritas} rutas nuevas de ${entradas.length} (fuente: ${fuente})`);
+  return { importadas: escritas, totalV1: entradas.length, fuente };
 }
 
 // ═══════════════════════════════════════════════════════════
