@@ -190,6 +190,17 @@ export function useClientes() {
     guardar(nuevos);
   }, [clientes, guardar]);
 
+  // ✅ Registro web (Fase 2.6 — como la v1): marcar/desmarcar VARIOS
+  // clientes a la vez ("Marcar todos" / "Limpiar" del panel de
+  // Verificación). Un solo guardar → un solo write a Firestore.
+  const marcarVerificacion = useCallback(
+    (ids: Set<string | number>, valor: boolean) => {
+      const nuevos = clientes.map((c) => (ids.has(c.id) ? { ...c, webReg: valor } : c));
+      guardar(nuevos);
+    },
+    [clientes, guardar]
+  );
+
   // Eliminar un cliente
   const eliminarCliente = useCallback((id: string | number) => {
     const nuevos = clientes.filter(c => c.id !== id);
@@ -563,6 +574,7 @@ export function useClientes() {
     guardar,
     agregarCliente,
     actualizarCliente,
+    marcarVerificacion,
     eliminarCliente,
     cambiarEstado,
     importarDesdeExcel,
