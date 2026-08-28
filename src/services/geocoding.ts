@@ -492,6 +492,15 @@ export async function obtenerPosicionActual(timeoutMs = 6000): Promise<Coordenad
 /**
  * Vigila la posición GPS en tiempo real (para el mapa en vivo).
  * Devuelve una función para dejar de vigilar.
+ *
+ * Fase 2.8 — GPS RESISTENTE: el Android WebView congela/mata el
+ * watch de geolocalización al apagar la pantalla o cambiar de app,
+ * y el motito del rider "desaparecía" a mitad de ruta. Ahora:
+ *   • Los watches (nativo y web) se RE-ARMAN solos ante error
+ *     transitorio (TIMEOUT / POSITION_UNAVAILABLE) con espera.
+ *   • Un WATCHDOG re-arma todo silenciosamente si pasan >35 s
+ *     sin ninguna posición (watch muerto en segundo plano).
+ *   • Solo se reporta error real (PERMISSION_DENIED) al caller.
  */
 export function vigilarPosicion(
   onPosicion: (c: Coordenadas) => void,
@@ -499,55 +508,108 @@ export function vigilarPosicion(
 ): () => void {
   let cancelado = false;
   let limpiarNativo: (() => void) | null = null;
+  let webWatchId: number | null = null;
+  let ultimaPosicionAt = Date.now();
+  let erroresSeguidosWeb = 0;
+
+  const marcarPosicion = (lat: number, lng: number) => {
+    ultimaPosicionAt = Date.now();
+    onPosicion({ lat, lng, src: 'manual' });
+  };
 
   // 1. Plugin nativo (APK) — mejor precisión y manejo de permisos
-  import('@capacitor/core')
-    .then(async ({ Capacitor }) => {
-      if (cancelado || !Capacitor.isNativePlatform()) return;
-      try {
-        const { Geolocation } = await import('@capacitor/geolocation');
-        const id = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
-          (pos, err) => {
-            if (cancelado) return;
-            if (pos?.coords && !isNaN(pos.coords.latitude)) {
-              onPosicion({ lat: pos.coords.latitude, lng: pos.coords.longitude, src: 'manual' });
-            } else if (err) {
-              onError?.(String(err?.message || err));
+  const armarNativo = () => {
+    if (cancelado) return;
+    import('@capacitor/core')
+      .then(async ({ Capacitor }) => {
+        if (cancelado || !Capacitor.isNativePlatform()) return;
+        try {
+          const { Geolocation } = await import('@capacitor/geolocation');
+          const id = await Geolocation.watchPosition(
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+            (pos, err) => {
+              if (cancelado) return;
+              if (pos?.coords && !isNaN(pos.coords.latitude)) {
+                marcarPosicion(pos.coords.latitude, pos.coords.longitude);
+              } else if (err) {
+                // Re-armar tras una pausa (el watch nativo a veces muere)
+                limpiarNativo?.();
+                limpiarNativo = null;
+                if (!cancelado) setTimeout(armarNativo, 5000);
+              }
             }
+          );
+          if (cancelado) {
+            Geolocation.clearWatch({ id }).catch(() => undefined);
+            return;
           }
-        );
-        limpiarNativo = () => {
-          Geolocation.clearWatch({ id }).catch(() => undefined);
-        };
-      } catch (e) {
-        onError?.(String(e));
-      }
-    })
-    .catch(() => undefined);
+          limpiarNativo = () => {
+            Geolocation.clearWatch({ id }).catch(() => undefined);
+          };
+        } catch {
+          // permiso denegado u otro fallo del plugin: queda el watch web
+        }
+      })
+      .catch(() => undefined);
+  };
+  armarNativo();
 
-  // 2. Navegador / WebView — siempre activo como respaldo
-  let watchId: number | null = null;
-  if (navigator.geolocation) {
-    watchId = navigator.geolocation.watchPosition(
+  // 2. Navegador / WebView — siempre activo como respaldo, con
+  //    re-arme automático ante errores transitorios
+  const armarWeb = () => {
+    if (cancelado || !navigator.geolocation) return;
+    if (webWatchId !== null) navigator.geolocation.clearWatch(webWatchId);
+    webWatchId = navigator.geolocation.watchPosition(
       (pos) => {
         if (cancelado) return;
+        erroresSeguidosWeb = 0;
         const { latitude, longitude } = pos.coords;
         if (!isNaN(latitude) && !isNaN(longitude)) {
-          onPosicion({ lat: latitude, lng: longitude, src: 'manual' });
+          marcarPosicion(latitude, longitude);
         }
       },
       (err) => {
-        if (!cancelado) onError?.(err.message || 'GPS no disponible');
+        if (cancelado) return;
+        // 1 = PERMISSION_DENIED → fallo real, se reporta
+        if (err.code === 1) {
+          onError?.(err.message || 'Permiso de ubicación denegado');
+          return;
+        }
+        // TIMEOUT / POSITION_UNAVAILABLE → re-armar en 4 s
+        erroresSeguidosWeb++;
+        if (webWatchId !== null && navigator.geolocation) {
+          navigator.geolocation.clearWatch(webWatchId);
+          webWatchId = null;
+        }
+        if (!cancelado) setTimeout(armarWeb, 4000);
+        if (erroresSeguidosWeb === 3) {
+          onError?.(err.message || 'GPS no disponible');
+        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-  }
+  };
+  armarWeb();
+
+  // 3. WATCHDOG: si pasan >35 s sin posiciones (watch muerto tras
+  //    pantalla apagada / segundo plano), re-arma ambos en silencio
+  const watchdog = setInterval(() => {
+    if (cancelado) return;
+    if (Date.now() - ultimaPosicionAt > 35000) {
+      ultimaPosicionAt = Date.now(); // no re-armar en ráfaga
+      limpiarNativo?.();
+      limpiarNativo = null;
+      armarNativo();
+      armarWeb();
+    }
+  }, 10000);
 
   return () => {
     cancelado = true;
-    if (watchId !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(watchId);
+    clearInterval(watchdog);
+    if (webWatchId !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(webWatchId);
+      webWatchId = null;
     }
     limpiarNativo?.();
   };
