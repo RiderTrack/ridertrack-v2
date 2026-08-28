@@ -146,6 +146,15 @@
 }
 .rt-pulso { animation: rtPulso 2s ease-out infinite; }
 
+/* Ocultar scrollbar (pestañas de categorías del avatar picker) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
