@@ -77,6 +77,43 @@ export interface RutaActiva {
   pendientes?: number;
 }
 
+/** Registro del historial de rutas (Fase 2.5) — un doc por cierre de ruta */
+export interface RegistroHistorial {
+  id: string;
+  uid: string;
+  fecha: string;            // YYYY-MM-DD
+  iniciadaAt?: string;
+  finalizadaAt?: string;
+  totalClientes: number;
+  entregados: number;
+  fallidos: number;
+  pendientes: number;
+  cobradoTotal: number;
+  /** Desglose de S/ por método (efectivo, yape-rudy, empresa...) */
+  porMetodo?: Record<string, number>;
+  /** S/ pagados por empresa (st=empresa, pos, transferencia...) */
+  totalEmpresa?: number;
+  /** S/ que quedan para el rider (efectivo, yape-rudy...) */
+  totalRider?: number;
+  clientes?: any[];
+}
+
+/** Backup en la nube (Fase 2.5) — snapshot completo de la ruta */
+export interface BackupNube {
+  id: string;
+  uid: string;
+  creadoAt: string;
+  fecha: string;            // YYYY-MM-DD
+  hora: string;             // HH:MM
+  totalClientes: number;
+  entregados: number;
+  pendientes: number;
+  fallidos: number;
+  cobradoTotal: number;
+  clientes: Cliente[];
+  auto?: boolean;           // creado automáticamente
+}
+
 // ═══════════════════════════════════════════════════════════
 // 💾 GUARDAR/CARGAR CLIENTES
 // ═══════════════════════════════════════════════════════════
@@ -250,8 +287,24 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       .reduce((sum, c) => sum + parseFloat(String(c.cobrar || 0)), 0);
 
     // 2. Guardar resumen en historial_rutas
+    // (Fase 2.5: ID único por cierre con timestamp — antes era
+    //  `${uid}_${fecha}` con merge y dos cierres el mismo día se
+    //  fusionaban. Se agregan desgloses por método y rider/empresa.)
     const fechaHoy = new Date().toISOString().split('T')[0];
-    await setDoc(doc(db, 'historial_rutas', `${userId}_${fechaHoy}`), {
+
+    // Desglose por método de pago (como el cierre de la v1)
+    const porMetodo: Record<string, number> = {};
+    const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+    const ST_EMPRESA = ['empresa', 'pos', 'transferencia', 'pago-link', 'jose-smith'];
+    let totalEmpresa = 0;
+    for (const c of clientes) {
+      if (!ST_ENTREGADOS.includes(c.st)) continue;
+      const monto = parseFloat(String(c.cobrar || 0));
+      porMetodo[c.st] = (porMetodo[c.st] || 0) + monto;
+      if (ST_EMPRESA.includes(c.st)) totalEmpresa += monto;
+    }
+
+    await setDoc(doc(db, 'historial_rutas', `${userId}_${Date.now()}`), {
       uid: userId,
       fecha: fechaHoy,
       iniciadaAt: new Date().toISOString(),
@@ -261,6 +314,9 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       fallidos: fallidos,
       pendientes: total - entregados - fallidos,
       cobradoTotal: cobrado,
+      porMetodo,
+      totalEmpresa,
+      totalRider: Math.max(0, cobrado - totalEmpresa),
       clientes: clientes.map(c => ({
         id: c.id,
         nombre: c.nombre,
@@ -272,7 +328,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
         st: c.st || 'pendiente',
         hora: c.hora || '',
       })),
-    }, { merge: true });
+    });
 
     // 3. Marcar ruta_activa como finalizada (pero MANTENER los clientes)
     await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
@@ -1284,4 +1340,174 @@ export async function publicarPosicionRider(userId: string, pos: PosicionRider):
     // Silencioso: la posición es best-effort (se reintenta en el próximo tick)
     console.warn('⚠️ No se pudo publicar posición GPS:', e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📖 HISTORIAL DE RUTAS (Fase 2.5)
+// Colección: historial_rutas — un doc por cada ruta finalizada.
+// Compatibilidad: los docs viejos ({uid}_{fecha}, sin finalizadaAt
+// en algunos casos) también se listan — se ordenan por fecha desc.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Lee el historial de rutas del usuario (las últimas 90 rutas).
+ * Ordena localmente por finalizadaAt/fecha desc para soportar
+ * docs viejos y nuevos sin depender de índices compuestos.
+ */
+export async function leerHistorial(userId: string, max = 90): Promise<RegistroHistorial[]> {
+  if (!db || !userId) return [];
+  try {
+    const ref = collection(db, 'historial_rutas');
+    const q = query(ref, limit(300));
+    const snap = await getDocs(q);
+    const registros: RegistroHistorial[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      // Solo docs de este usuario (ID empieza con su uid o campo uid igual)
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      registros.push({
+        id: d.id,
+        uid: data.uid || userId,
+        fecha: data.fecha || d.id.replace(`${userId}_`, '').slice(0, 10),
+        iniciadaAt: data.iniciadaAt,
+        finalizadaAt: data.finalizadaAt,
+        totalClientes: data.totalClientes || 0,
+        entregados: data.entregados || 0,
+        fallidos: data.fallidos || 0,
+        pendientes: data.pendientes || 0,
+        cobradoTotal: data.cobradoTotal || 0,
+        porMetodo: data.porMetodo,
+        totalEmpresa: data.totalEmpresa,
+        totalRider: data.totalRider,
+        clientes: data.clientes || [],
+      });
+    });
+    registros.sort((a, b) => {
+      const ka = a.finalizadaAt || a.iniciadaAt || a.fecha || '';
+      const kb = b.finalizadaAt || b.iniciadaAt || b.fecha || '';
+      return kb.localeCompare(ka);
+    });
+    return registros.slice(0, max);
+  } catch (e) {
+    console.error('❌ Error leyendo historial:', e);
+    return [];
+  }
+}
+
+/** Elimina una ruta del historial */
+export async function eliminarRutaHistorial(userId: string, registroId: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'historial_rutas', registroId));
+    console.log('🗑️ Ruta eliminada del historial');
+  } catch (e) {
+    console.error('❌ Error eliminando ruta del historial:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 💾 BACKUPS EN LA NUBE (Fase 2.5)
+// Colección: backups_v2 — snapshot completo de la ruta actual.
+// El usuario puede guardarlo, verlo, volver a cargarlo o borrarlo
+// desde el menú hamburguesa (como el backup de la v1, pero en
+// la nube de Firebase — nada de archivos descargados).
+// ═══════════════════════════════════════════════════════════
+
+/** Guarda un backup de la ruta actual en la nube */
+export async function guardarBackupNube(
+  userId: string,
+  clientes: Cliente[],
+  opts?: { auto?: boolean }
+): Promise<string> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+  const ST_FALLIDOS = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta', 'reprogramar'];
+  const ahora = new Date();
+  const entregados = clientes.filter(c => ST_ENTREGADOS.includes(c.st)).length;
+  const fallidos = clientes.filter(c => ST_FALLIDOS.includes(c.st)).length;
+  const cobrado = clientes
+    .filter(c => ST_ENTREGADOS.includes(c.st))
+    .reduce((s, c) => s + parseFloat(String(c.cobrar || 0)), 0);
+
+  const id = `${userId}_${ahora.getTime()}`;
+  const backup: Omit<BackupNube, 'id'> & { id?: string } = {
+    uid: userId,
+    creadoAt: ahora.toISOString(),
+    fecha: ahora.toISOString().split('T')[0],
+    hora: ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+    totalClientes: clientes.length,
+    entregados,
+    pendientes: clientes.length - entregados - fallidos,
+    fallidos,
+    cobradoTotal: cobrado,
+    clientes: JSON.parse(JSON.stringify(clientes)),
+    auto: opts?.auto || false,
+  };
+
+  await setDoc(doc(db, 'backups_v2', id), backup);
+  console.log('💾 Backup guardado en la nube:', id);
+  return id;
+}
+
+/** Lista los backups del usuario (los últimos 40) */
+export async function listarBackupsNube(userId: string, max = 40): Promise<BackupNube[]> {
+  if (!db || !userId) return [];
+  try {
+    const ref = collection(db, 'backups_v2');
+    const q = query(ref, limit(200));
+    const snap = await getDocs(q);
+    const backups: BackupNube[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      backups.push({
+        id: d.id,
+        uid: data.uid || userId,
+        creadoAt: data.creadoAt || '',
+        fecha: data.fecha || '',
+        hora: data.hora || '',
+        totalClientes: data.totalClientes || 0,
+        entregados: data.entregados || 0,
+        pendientes: data.pendientes || 0,
+        fallidos: data.fallidos || 0,
+        cobradoTotal: data.cobradoTotal || 0,
+        clientes: data.clientes || [],
+        auto: data.auto,
+      });
+    });
+    backups.sort((a, b) => (b.creadoAt || '').localeCompare(a.creadoAt || ''));
+    return backups.slice(0, max);
+  } catch (e) {
+    console.error('❌ Error listando backups:', e);
+    return [];
+  }
+}
+
+/** Elimina un backup de la nube */
+export async function eliminarBackupNube(backupId: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'backups_v2', backupId));
+    console.log('🗑️ Backup eliminado');
+  } catch (e) {
+    console.error('❌ Error eliminando backup:', e);
+    throw e;
+  }
+}
+
+/**
+ * CARGAR un backup: restaura los clientes a ruta_activa + respaldo V2.
+ * La ruta actual se PISA con los clientes del backup (por eso pide
+ * confirmación en la UI antes de llamar).
+ */
+export async function cargarBackupNube(userId: string, backup: BackupNube): Promise<number> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const clientes = backup.clientes || [];
+  if (clientes.length === 0) throw new Error('El backup no tiene clientes');
+  // Publicar en ruta_activa (fuente de verdad del bot) + respaldo V2
+  await publicarClientesEnRutaActiva(userId, clientes);
+  await guardarClientes(userId, clientes);
+  console.log('⬆️ Backup cargado:', backup.id, clientes.length, 'clientes');
+  return clientes.length;
 }
