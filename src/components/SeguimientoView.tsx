@@ -447,6 +447,34 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                 🍽️ +{Math.round(calculo.refriExtraMs / 60000)} min de refrigerio
               </span>
             )}
+            {/* (Fase 2.11) Transparencia: si el refrigerio NO entra en el
+                cálculo, se ve explícito — antes no había forma de saber si
+                los 30 min estaban contados o no. Toca para programarlo. */}
+            {calculo.refriExtraMs === 0 && refri.refri.estado === 'pendiente' && (
+              <button
+                onClick={() => {
+                  setRefriPanelAbierto(true);
+                  setTimeout(
+                    () => document.getElementById('refri-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+                    80
+                  );
+                }}
+                className={`px-2 py-1 rounded-full border text-[10px] font-bold transition-colors active:scale-95 ${
+                  refri.refri.programadoHora
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-400'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                }`}
+                title={
+                  refri.refri.programadoHora
+                    ? `Tu refrigerio de las ${refri.refri.programadoHora} ya pasó o cae después de la hora de fin — por eso no suma al ETA`
+                    : `Programa tu refrigerio (${refri.refri.duracionMin} min) y se sumará a la hora de fin`
+                }
+              >
+                🍽️ {refri.refri.programadoHora
+                  ? `Refrigerio ${refri.refri.programadoHora} · no suma al ETA`
+                  : `Sin refrigerio programado · no suma ${refri.refri.duracionMin} min`}
+              </button>
+            )}
             <div className="ml-auto flex items-center gap-1.5">
               <button
                 onClick={() => {
@@ -584,7 +612,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       </div>
 
       {/* ══════ 🍽️ REFRIGERIO ══════ */}
-      <div className={`rounded-2xl border p-3.5 transition-colors ${
+      <div id="refri-card" className={`rounded-2xl border p-3.5 transition-colors ${
         refri.activo
           ? 'border-orange-500/50 bg-orange-500/10'
           : 'border-slate-700/60 bg-slate-900/60'
@@ -908,8 +936,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       {!rutaVacia && !rutaTerminada && (
         <p className="text-[10px] text-slate-500 text-center px-4 leading-snug">
           La hora de fin incluye el viaje entre paradas y tu tiempo de atención. Se recalcula con
-          tu ritmo real: si vas más rápido, la hora de fin va bajando solita (como en Circuit) — y
-          el refrigerio se descuenta automáticamente.
+          tu ritmo real: si vas más rápido, la hora de fin va bajando solita (como en Circuit) — y si
+          programas tu refrigerio 🍽️ (abajo), sus minutos se suman automáticamente cada día.
         </p>
       )}
     </div>

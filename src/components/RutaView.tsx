@@ -591,8 +591,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
       {/* Header con stats - Mobile optimized */}
       <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 sm:p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="mb-2.5">
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
               <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
               Mi Ruta
@@ -606,21 +605,23 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               {new Date().toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} · {stats.total} clientes
             </p>
           </div>
-          <div className="flex flex-wrap justify-end gap-1.5">
-            {/* (Fase 2.10) El botón Excel se mudó del header a la tarjeta
-                "🏁 Gestión de ruta" — junto a EXPORTAR A CIRCUIT: el header
-                quedaba desordenado con 4 botones. Aquí quedan Sync | Ruta | + */}
+          {/* (Fase 2.11) Botonera en UNA sola línea: grid de 3 columnas.
+              Antes, con flex-wrap junto al título, el botón + se caía a
+              una 2ª fila en pantallas angostas y quedaba disparejo
+              (Sync y Ruta arriba, + abajo). El botón + ahora dice
+              "Agregar" — es más claro que el signo solo. */}
+          <div className="grid grid-cols-3 gap-1.5 mb-3">
             <button
               onClick={async () => {
                 const count = await sincronizarDesdeModular();
                 onShowToast?.('🔄 Sincronizado', `${count} clientes sincronizados con el Modular`, 'success');
               }}
               disabled={sincronizando}
-              className="flex items-center gap-1 px-2.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50 min-w-0"
               title="Sincronizar con RiderTrack Modular"
             >
-              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <TrendingUp className="w-3.5 h-3.5" />}
-              <span>Sync</span>
+              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{sincronizando ? 'Sync…' : 'Sync'}</span>
             </button>
             <button
               onClick={async () => {
@@ -665,20 +666,21 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 }
               }}
               disabled={sincronizando || optimizando || clientes.length === 0}
-              className="flex items-center gap-1 px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50 min-w-0"
               title="Optimizar ruta por distancia real (inicio/GPS + geocodificación)"
             >
-              {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
-              <span className="max-w-[120px] truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
+              {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <MapPin className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
             </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
-              className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0"
+              title="Agregar un cliente a mano"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">Agregar</span>
             </button>
           </div>
-        </div>
 
         {/* Stats rápidas - 5 columnas en móvil (Fase 2.5: + NO entregados) */}
         <div className="grid grid-cols-5 gap-1.5">
