@@ -296,12 +296,19 @@ export async function finalizarRutaActiva(userId: string): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * FINALIZAR RUTA:
- * Marca la ruta como finalizada, guarda un resumen en historial_rutas
- * y MANTIENE los clientes visibles en ruta_activa para consulta.
- * Útil cuando terminaste todas las entregas del día.
+ * FINALIZAR Y GUARDAR RUTA (= cerrar() de la v1):
+ * 1. Guarda el registro completo en historial_rutas (con tu plata
+ *    y la de la empresa, como D.hist de la v1)
+ * 2. Backup automático a la nube (usuarios/{uid}/backups/auto_{fecha},
+ *    como _backupAutoAlCerrar de la v1)
+ * 3. Registra los clientes en clientes_registrados (respaldo)
+ * 4. LIMPIA ruta_activa y usuarios/{uid}.clientes → la lista queda
+ *    vacía para el día siguiente (v1: D.cl=[] tras cerrar)
+ * ⚠️ Fase 2.6 (fix): ANTES dejaba los clientes en ruta_activa “para
+ * consulta” y “Guardar y cerrar” ni siquiera guardaba en historial —
+ * el usuario se quedaba con la lista vieja y sin historial.
  */
-export async function finalizarRuta(userId: string, clientes: Cliente[]): Promise<void> {
+export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
   if (!db || !userId) return;
   try {
     // 1. Calcular resumen del día
@@ -313,7 +320,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
     ).length;
 
-    // 2. Guardar resumen en historial_rutas
+    // 2. Guardar registro en historial_rutas
     // (Fase 2.5: ID único por cierre con timestamp — antes era
     //  `${uid}_${fecha}` con merge y dos cierres el mismo día se
     //  fusionaban. Se agregan desgloses por método y rider/empresa.)
@@ -355,7 +362,32 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
     }
     const cobrado = totalRider + totalEmpresa;
 
-    await setDoc(doc(db, 'historial_rutas', `${userId}_${Date.now()}`), {
+    // Snapshot de clientes (mismo formato que viaja al historial,
+    // al backup de la nube y a clientes_registrados)
+    const clientesSnapshot = clientes.map(c => ({
+      id: c.id,
+      num: c.num || null,
+      nombre: c.nombre || 'Cliente',
+      cel: c.cel || '',
+      prod: c.prod || '',
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      mEf: parseFloat(String(c.mEf || 0)),
+      mYp: parseFloat(String(c.mYp || 0)),
+      mEmp: parseFloat(String(c.mEmp || 0)),
+      mVt: parseFloat(String(c.mVt || 0)),
+      dir: c.dir || '',
+      dist: c.dist || '',
+      st: c.st || 'pendiente',
+      hora: c.hora || '',
+      obs: c.obs || '',
+      nota: c.nota || '',
+      // ✅ el check de verificación con la empresa viaja al historial
+      webReg: c.webReg === true,
+    }));
+
+    // 2a. Escribir el registro en historial_rutas
+    // (limpiarUndefined: ningún campo `undefined` puede entrar — Firestore lo rechaza)
+    await setDoc(doc(db, 'historial_rutas', `${userId}_${Date.now()}`), limpiarUndefined({
       uid: userId,
       fecha: fechaHoy,
       iniciadaAt: new Date().toISOString(),
@@ -368,64 +400,38 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       porMetodo,
       totalEmpresa,
       totalRider,
-      clientes: clientes.map(c => ({
-        id: c.id,
-        num: c.num || null,
-        nombre: c.nombre,
-        cel: c.cel,
-        prod: c.prod,
-        cobrar: parseFloat(String(c.cobrar || 0)),
-        mEf: parseFloat(String(c.mEf || 0)),
-        mYp: parseFloat(String(c.mYp || 0)),
-        mEmp: parseFloat(String(c.mEmp || 0)),
-        mVt: parseFloat(String(c.mVt || 0)),
-        dir: c.dir,
-        dist: c.dist,
-        st: c.st || 'pendiente',
-        hora: c.hora || '',
-        obs: c.obs || '',
-        nota: c.nota || '',
-        // ✅ Fase 2.6: el check de verificación con la empresa viaja
-        // al historial (null nunca — Firestore lo acepta, pero por
-        // orden se guarda siempre como boolean)
-        webReg: c.webReg === true,
-      })),
-    });
+      // ⏱ duración de la ruta medida por el cronómetro (como la v1)
+      tiempoRuta: tiempoRutaMs && tiempoRutaMs > 0 ? tiempoRutaMs : null,
+      clientes: clientesSnapshot,
+    }));
 
-    // 3. Marcar ruta_activa como finalizada (pero MANTENER los clientes)
-    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
-      activa: false,
-      finalizadaAt: new Date().toISOString(),
-      actualizadaAt: new Date().toISOString(),
-      resumen: { total, entregados, fallidos, cobradoTotal: cobrado },
-    }, { merge: true });
+    // 2b. ☁️ Backup automático a la nube (v1: _backupAutoAlCerrar).
+    //     Si falla, NO bloquea el cierre — el historial ya está guardado.
+    try {
+      await setDoc(doc(db, 'usuarios', userId, 'backups', `auto_${fechaHoy}`), limpiarUndefined({
+        cl: clientesSnapshot,
+        registro: { fecha: fechaHoy, total, entregados, fallidos, cobradoTotal: cobrado, totalRider, totalEmpresa, porMetodo },
+        fecha: fechaHoy,
+        hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+        clientes: total,
+        auto: true,
+        tipo: 'cierre-ruta',
+        creadoAt: new Date().toISOString(),
+      }), { merge: true });
+      console.log('☁️ Backup automático de cierre guardado (auto_' + fechaHoy + ')');
+    } catch (e) {
+      console.warn('⚠️ Backup de cierre falló (el historial SÍ se guardó):', (e as Error).message);
+    }
 
-    console.log('🏁 Ruta finalizada y guardada en historial');
-  } catch (e) {
-    console.error('❌ Error finalizando ruta:', e);
-    throw e;
-  }
-}
-
-/**
- * GUARDAR Y CERRAR RUTA:
- * Guarda los clientes actuales en ruta_activa y en clientes_registrados
- * (como respaldo histórico) y marca la ruta como inactiva.
- * Los clientes siguen visibles en el panel para consulta.
- */
-export async function guardarYCerrarRuta(userId: string, clientes: Cliente[]): Promise<void> {
-  if (!db || !userId) return;
-  try {
-    // 1. Guardar en ruta_activa
-    await publicarClientesEnRutaActiva(userId, clientes);
-
-    // 2. Guardar cada cliente en clientes_registrados (respaldo histórico)
-    const batch = writeBatch(db);
-    clientes.forEach((c) => {
-      const tel = String(c.cel || '').replace(/\D/g, '');
-      if (tel) {
-        const ref = doc(db, 'clientes_registrados', tel);
-        batch.set(ref, {
+    // 2c. Registrar clientes (respaldo histórico — como hacía
+    //     “Guardar y cerrar”). Si falla, no bloquea el cierre.
+    try {
+      const batch = writeBatch(db);
+      let enBatch = 0;
+      clientes.forEach((c) => {
+        const tel = String(c.cel || '').replace(/\D/g, '');
+        if (!tel) return;
+        batch.set(doc(db, 'clientes_registrados', tel), {
           telefono: tel,
           nombre: c.nombre || '',
           prod: c.prod || '',
@@ -434,23 +440,52 @@ export async function guardarYCerrarRuta(userId: string, clientes: Cliente[]): P
           dist: c.dist || '',
           st: c.st || 'pendiente',
           ultimaVisita: new Date().toISOString(),
+          registradoAt: new Date().toISOString(),
         }, { merge: true });
-      }
-    });
-    await batch.commit();
+        enBatch++;
+      });
+      if (enBatch > 0) await batch.commit();
+    } catch (e) {
+      console.warn('⚠️ clientes_registrados falló (no bloquea el cierre):', (e as Error).message);
+    }
 
-    // 3. Marcar ruta como inactiva pero manteniendo los clientes
-    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
+    // 3. 🧹 LIMPIAR la ruta para el día siguiente (v1: D.cl=[]).
+    //    El bot también deja de reconocer clientes (ruta inactiva).
+    await setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+      clientes: [],
+      totalClientes: 0,
+      pendientes: 0,
       activa: false,
-      guardadaAt: new Date().toISOString(),
+      finalizadaAt: new Date().toISOString(),
       actualizadaAt: new Date().toISOString(),
+      resumen: { total, entregados, fallidos, cobradoTotal: cobrado },
     }, { merge: true });
 
-    console.log('💾 Ruta guardada y cerrada (clientes preservados)');
+    // 4. Limpiar también el respaldo local de clientes
+    try {
+      await setDoc(doc(db, 'usuarios', userId), {
+        clientes: [],
+        rutaLimpiadaAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn('⚠️ No se pudo limpiar usuarios/{uid}.clientes:', (e as Error).message);
+    }
+
+    console.log('🏁 Ruta finalizada: historial + backup nube + lista limpia');
   } catch (e) {
-    console.error('❌ Error guardando ruta:', e);
+    console.error('❌ Error finalizando ruta:', e);
     throw e;
   }
+}
+
+/**
+ * GUARDAR Y CERRAR RUTA — ⚠️ Fase 2.6 (fix): ahora hace EXACTAMENTE
+ * lo mismo que finalizarRuta (= cerrar() de la v1: historial + nube
+ * + lista limpia). Antes guardaba en clientes_registrados pero NO en
+ * el historial y dejaba la lista sucia — confundía al usuario.
+ */
+export async function guardarYCerrarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
+  return finalizarRuta(userId, clientes, tiempoRutaMs);
 }
 
 /**
@@ -499,7 +534,7 @@ const UID_BOT_MODULAR = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
  * Esto permite que RiderTrack V2 vea los clientes del Modular automáticamente.
  */
 export function subscribeToRutaActiva(
-  onUpdate: (clientes: Cliente[]) => void,
+  onUpdate: (clientes: Cliente[], meta?: { existe: boolean }) => void,
   onError?: (err: Error) => void
 ): () => void {
   if (!db) {
@@ -547,9 +582,11 @@ export function subscribeToRutaActiva(
             ...(c.latSrc ? { latSrc: c.latSrc } : {}),
           }));
           console.log('🔄 Clientes del Modular cargados:', clientes.length);
-          onUpdate(clientes);
+          onUpdate(clientes, { existe: true });
         } else {
-          onUpdate([]);
+          // El doc NO existe → la app puede mostrar el respaldo
+          // (clientes_registrados) si lo hay
+          onUpdate([], { existe: false });
         }
       },
       (err) => {
