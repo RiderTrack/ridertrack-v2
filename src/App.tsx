@@ -24,6 +24,10 @@ import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
 import { YapeQRView } from './components/YapeQRView';
+// Fase 2.5: vistas nuevas — historial, broadcast y backups
+import { HistorialView } from './components/HistorialView';
+import { BroadcastView } from './components/BroadcastView';
+import { BackupsView } from './components/BackupsView';
 import { guardarAvatarRider } from './services/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
 import {
@@ -573,6 +577,15 @@ export default function App() {
               onOpenWhatsAppModal={handleOpenWhatsAppModal}
             />
           )}
+
+          {/* Fase 2.5: 📢 Broadcast masivo con el bot (delay anti-ban) */}
+          {activeTab === 'broadcast' && <BroadcastView onShowToast={showToast} />}
+
+          {/* Fase 2.5: 📖 Historial de rutas cerradas */}
+          {activeTab === 'historial' && <HistorialView onShowToast={showToast} />}
+
+          {/* Fase 2.5: 💾 Backups en la nube */}
+          {activeTab === 'backups' && <BackupsView onShowToast={showToast} />}
 
           {activeTab === 'estadisticas' && <ResumenView />}
 
