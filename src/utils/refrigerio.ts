@@ -279,6 +279,75 @@ export function useCronoRuta(uid?: string | null): { crono: CronoRutaState | nul
   return { crono, rutaMs: msRuta(crono), tick };
 }
 
+// ── 🚀 HORA DE INICIO DE JORNADA (Fase 2.8) ──────────────
+// "¿A qué hora empiezo a trabajar?" — el rider la define (ej:
+// 10:00) y el ETA del Seguimiento arranca desde ahí mientras no
+// haya ritmo real: así "terminas a las X" es de verdad aunque
+// consulte la app a las 7 de la mañana. Vive en localStorage
+// `rt_jornada_{uid}` (reset diario) + evento 'rt-jornada-cambio'.
+
+export interface EstadoJornada {
+  /** Hora planeada de salida, 'HH:MM' ('' = sin definir) */
+  inicioHora: string;
+  /** Día del estado (YYYY-MM-DD) — al cambiar de día se resetea */
+  fecha: string;
+}
+
+const EVENTO_JORNADA = 'rt-jornada-cambio';
+const JORNADA_INICIAL: EstadoJornada = { inicioHora: '', fecha: hoyStr() };
+
+function claveJornada(uid?: string | null): string {
+  return `rt_jornada_${uid || 'anon'}`;
+}
+
+function leerJornada(uid?: string | null): EstadoJornada {
+  try {
+    const raw = localStorage.getItem(claveJornada(uid));
+    if (raw) {
+      const p = JSON.parse(raw) as EstadoJornada;
+      if (p.fecha === hoyStr()) return { inicioHora: p.inicioHora || '', fecha: p.fecha };
+    }
+  } catch {
+    // sin storage
+  }
+  return { ...JORNADA_INICIAL, fecha: hoyStr() };
+}
+
+function escribirJornada(uid: string | null | undefined, e: EstadoJornada) {
+  try {
+    localStorage.setItem(claveJornada(uid), JSON.stringify(e));
+  } catch {
+    // sin storage
+  }
+  window.dispatchEvent(new CustomEvent(EVENTO_JORNADA, { detail: e }));
+}
+
+/** Hook React: hora de inicio de jornada del día + acciones */
+export function useJornada(uid?: string | null) {
+  const [estado, setEstado] = useState<EstadoJornada>(() => leerJornada(uid));
+
+  useEffect(() => {
+    setEstado(leerJornada(uid));
+  }, [uid]);
+
+  // Sincronización entre vistas
+  useEffect(() => {
+    const onCambio = () => setEstado(leerJornada(uid));
+    window.addEventListener(EVENTO_JORNADA, onCambio);
+    return () => window.removeEventListener(EVENTO_JORNADA, onCambio);
+  }, [uid]);
+
+  const definirInicio = (hhmm: string) => {
+    escribirJornada(uid, { inicioHora: hhmm || '', fecha: hoyStr() });
+  };
+
+  const quitarInicio = () => {
+    escribirJornada(uid, { ...JORNADA_INICIAL, fecha: hoyStr() });
+  };
+
+  return { inicioHora: estado.inicioHora, definirInicio, quitarInicio };
+}
+
 // ── Formato helpers ───────────────────────────────────────
 
 export function formatearDuracion(seg: number): string {
