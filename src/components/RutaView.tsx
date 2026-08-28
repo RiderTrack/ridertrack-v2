@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Pencil,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
@@ -36,7 +37,7 @@ import { FotoEntregaModal } from './FotoEntregaModal';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
-import { recordarCoordenadasCliente } from '../services/geocoding';
+import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import { Flag, MapPinned } from 'lucide-react';
 
@@ -70,6 +71,54 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // 📍 Ubicar cliente manualmente (Fase 1.4)
   const [ubicarClienteId, setUbicarClienteId] = useState<string | number | null>(null);
   const ubicarCliente = ubicarClienteId != null ? clientes.find((c) => c.id === ubicarClienteId) || null : null;
+
+  // ✏️ Editar datos del cliente: precio, dirección, teléfono, observaciones (Fase 2.4)
+  const [editarId, setEditarId] = useState<string | number | null>(null);
+  const editarCliente = editarId != null ? clientes.find((c) => c.id === editarId) || null : null;
+  const [editPrecio, setEditPrecio] = useState('');
+  const [editDir, setEditDir] = useState('');
+  const [editDist, setEditDist] = useState('');
+  const [editCel, setEditCel] = useState('');
+  const [editObs, setEditObs] = useState('');
+
+  const abrirEdicion = (c: Cliente) => {
+    setEditPrecio(String(parseFloat(String(c.cobrar || 0)) || ''));
+    setEditDir(c.dir || '');
+    setEditDist(c.dist || '');
+    setEditCel(c.cel || '');
+    setEditObs(c.obs || '');
+    setEditarId(c.id);
+  };
+
+  const guardarEdicion = () => {
+    if (!editarCliente || editarId == null) return;
+    const precioNum = parseFloat(editPrecio.replace(',', '.')) || 0;
+    const dirNueva = editDir.trim();
+    const dirCambio = dirNueva !== (editarCliente.dir || '');
+    const cambios: Partial<Cliente> = {
+      precio: precioNum,
+      cobrar: precioNum,
+      dir: dirNueva,
+      dist: editDist.trim(),
+      cel: editCel.trim(),
+      obs: editObs.trim(),
+    };
+    // Si la dirección cambió → olvidar la ubicación vieja para que la
+    // próxima optimización la re-ubique (el pin no queda en la casa anterior)
+    if (dirCambio) {
+      olvidarCoordenadasCliente(editarId);
+      cambios.lat = undefined;
+      cambios.lng = undefined;
+      cambios.latSrc = undefined;
+    }
+    actualizarCliente(editarId, cambios);
+    setEditarId(null);
+    onShowToast?.(
+      '✏️ Cliente actualizado',
+      dirCambio ? `${editarCliente.nombre}: se re-ubicará al optimizar` : `${editarCliente.nombre}: datos guardados`,
+      'success'
+    );
+  };
 
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
@@ -938,6 +987,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         : '📍 Ubicar en el mapa'}
                     </button>
 
+                    {/* Botón ✏️ Editar datos (Fase 2.4 — precio, dirección, teléfono, observaciones) */}
+                    <button
+                      onClick={() => abrirEdicion(c)}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 rounded-md text-[10px] font-bold transition-all active:scale-95"
+                      title="Editar precio, dirección, teléfono, distrito y observaciones"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Editar datos
+                    </button>
+
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">
                       {/* Botones de mover (arriba/abajo) */}
@@ -1056,6 +1115,107 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           <button onClick={() => setBotModalId(null)} className="w-full mt-2 py-2 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 rounded-lg text-xs font-bold transition-all">
                             Cerrar
                           </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ═══ Modal ✏️ Editar datos del cliente (Fase 2.4 — como el Rider modular v1) ═══ */}
+                    {editarId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setEditarId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-base font-bold text-white">✏️ Editar cliente</h3>
+                            <button onClick={() => setEditarId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mb-3">
+                            <span className="text-white font-bold">{c.nombre}</span> · los cambios se sincronizan con la ruta y el bot
+                          </div>
+
+                          <div className="space-y-3">
+                            {/* Precio */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">💰 Precio / por cobrar (S/)</label>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.5"
+                                min="0"
+                                value={editPrecio}
+                                onChange={(e) => setEditPrecio(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm font-bold outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Dirección */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📍 Dirección</label>
+                              <input
+                                type="text"
+                                value={editDir}
+                                onChange={(e) => setEditDir(e.target.value)}
+                                placeholder="Av / Jr / Calle y número"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                              <p className="text-[9px] text-amber-400 mt-1">
+                                Si cambias la dirección, el cliente se re-ubica en el mapa al optimizar la ruta.
+                              </p>
+                            </div>
+
+                            {/* Distrito */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">🏙️ Distrito</label>
+                              <input
+                                type="text"
+                                value={editDist}
+                                onChange={(e) => setEditDist(e.target.value)}
+                                placeholder="Ej: San Miguel"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Teléfono */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📱 Teléfono</label>
+                              <input
+                                type="tel"
+                                inputMode="tel"
+                                value={editCel}
+                                onChange={(e) => setEditCel(e.target.value)}
+                                placeholder="9 dígitos"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Observaciones */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📝 Observaciones</label>
+                              <textarea
+                                rows={3}
+                                value={editObs}
+                                onChange={(e) => setEditObs(e.target.value)}
+                                placeholder="Ej: dejar en recepción, llamar al llegar…"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors resize-none custom-scrollbar"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 mt-4">
+                            <button
+                              onClick={() => setEditarId(null)}
+                              className="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-95"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={guardarEdicion}
+                              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-600/20"
+                            >
+                              💾 Guardar cambios
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
