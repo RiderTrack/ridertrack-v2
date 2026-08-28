@@ -14,7 +14,6 @@ import {
   actualizarClienteEnRutaActiva,
   publicarClientesEnRutaActiva,
   finalizarRuta,
-  guardarYCerrarRuta,
   limpiarRutaSinGuardar,
   subirFotoEntrega,
 } from '../services/firestore';
@@ -72,6 +71,11 @@ export function useClientes() {
   // Refs para guardar los datos de cada listener por separado
   const clientesRutaRef = useRef<Cliente[]>([]);
   const clientesRegistradosRef = useRef<Cliente[]>([]);
+  // ¿Existe el doc ruta_activa? (Fase 2.6 fix): si EXISTE, es la
+  // autoridad AUNQUE esté vacío (ruta cerrada → lista limpia, como
+  // la v1 tras cerrar()). Solo si NO existe se muestra el respaldo
+  // de clientes_registrados.
+  const rutaExisteRef = useRef<boolean | null>(null);
   const actualizandoDesdeV2 = useRef(false);
 
   // 🔄 Combinar clientes de ambas fuentes
@@ -91,20 +95,23 @@ export function useClientes() {
         return c;
       });
 
-    // Si hay clientes en ruta_activa (ruta del día actual), usar esos
-    if (clientesRutaRef.current.length > 0) {
+    // 🧹 Fase 2.6 (fix cierre v1): si el doc ruta_activa EXISTE, su
+    // lista manda — aunque esté VACÍA (ruta finalizada/limpia: hay
+    // que empezar el día con la lista en blanco, como la v1).
+    // El respaldo (clientes_registrados) solo se usa si el doc
+    // ruta_activa no existe (cuenta nueva / nunca hubo ruta).
+    if (rutaExisteRef.current === true) {
       setClientes(rehidratar(clientesRutaRef.current));
       setLoading(false);
       return;
     }
-    // Si no, usar clientes_registrados (todos los históricos del Modular)
+    // Doc inexistente o aún desconocido → respaldo si lo hay
     if (clientesRegistradosRef.current.length > 0) {
       setClientes(rehidratar(clientesRegistradosRef.current));
       setLoading(false);
       return;
     }
-    // Si no hay en ninguno, mantener vacío
-    setClientes([]);
+    setClientes(rehidratar(clientesRutaRef.current));
     setLoading(false);
   }, []);
 
@@ -122,8 +129,11 @@ export function useClientes() {
 
     // 1. Escuchar ruta_activa (clientes del día actual)
     const unsubRuta = subscribeToRutaActiva(
-      (clientesModular) => {
+      (clientesModular, meta) => {
         clientesRutaRef.current = clientesModular;
+        if (typeof meta?.existe === 'boolean') {
+          rutaExisteRef.current = meta.existe;
+        }
         if (!actualizandoDesdeV2.current) {
           combinarClientes();
         } else {
@@ -256,29 +266,49 @@ export function useClientes() {
     }
   }, [user, clientes]);
 
-  // 🏁 FINALIZAR RUTA: guarda resumen en historial, marca como finalizada
+  // 🏁 FINALIZAR Y GUARDAR RUTA (= cerrar() de la v1):
+  // historial + backup nube + lista LIMPIA para mañana.
+  // (Fase 2.6 fix: antes dejaba la lista sucia "para consulta" y el
+  //  usuario arrastraba los pedidos del día anterior.)
   const finalizarRutaActual = useCallback(async () => {
     if (!user || clientes.length === 0) return;
     setSincronizando(true);
     try {
-      await finalizarRuta(user.uid, clientes);
+      // ⏱ Duración de la ruta según el cronómetro (como la v1:
+      // acumulado + tramo en curso si sigue corriendo)
+      let tiempoRutaMs = 0;
+      try {
+        const raw = localStorage.getItem(`rt_crono_${user.uid}`);
+        if (raw) {
+          const crono = JSON.parse(raw) as { activo: boolean; inicio: number | null; acumulado: number };
+          tiempoRutaMs =
+            (crono.acumulado || 0) +
+            (crono.activo && crono.inicio ? Date.now() - crono.inicio : 0);
+        }
+      } catch {}
+
+      await finalizarRuta(user.uid, clientes, tiempoRutaMs || undefined);
+
+      // 🧹 Lista limpia YA (el listener lo confirmará con el doc vacío)
+      setClientes([]);
+      clientesRutaRef.current = [];
+
+      // ⏱ Reset del cronómetro (v1: resetCronometro() al cerrar)
+      try { localStorage.removeItem(`rt_crono_${user.uid}`); } catch {}
+      window.dispatchEvent(new CustomEvent('rt-ruta-finalizada'));
+
       return true;
     } finally {
       setSincronizando(false);
     }
   }, [user, clientes]);
 
-  // 💾 GUARDAR Y CERRAR RUTA: guarda en clientes_registrados y ruta_activa
+  // 💾 GUARDAR Y CERRAR RUTA — Fase 2.6 (fix): ahora idéntico a
+  // finalizarRutaActual (cerrar() de la v1). Antes guardaba en
+  // clientes_registrados PERO NO en el historial y no limpiaba.
   const guardarYCerrarRutaActual = useCallback(async () => {
-    if (!user || clientes.length === 0) return;
-    setSincronizando(true);
-    try {
-      await guardarYCerrarRuta(user.uid, clientes);
-      return true;
-    } finally {
-      setSincronizando(false);
-    }
-  }, [user, clientes]);
+    return finalizarRutaActual();
+  }, [finalizarRutaActual]);
 
   // 🗑️ LIMPIAR SIN GUARDAR: vacía ruta_activa y estado local
   const limpiarRuta = useCallback(async () => {
