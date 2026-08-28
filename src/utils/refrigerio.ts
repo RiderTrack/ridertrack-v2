@@ -63,15 +63,32 @@ function clave(uid?: string | null): string {
   return `rt_refri_${uid || 'anon'}`;
 }
 
+/** Cambió el día → limpia lo ANDADO (estado, sesiones, minutos
+ *  tomados) pero MANTIENE la programación (hora + duración):
+ *  así el ETA de HOY sigue contando el refrigerio sin tener que
+ *  reprogramarlo cada mañana — como Circuit, que guarda el
+ *  horario de descanso en la configuración. (Fase 2.11) */
+function resetDiario(e: EstadoRefrigerio): EstadoRefrigerio {
+  return {
+    ...e,
+    estado: 'pendiente',
+    inicioAt: null,
+    tomadoSeg: 0,
+    cronoEstabaActivo: false,
+    sesiones: [],
+    fecha: hoyStr(),
+  };
+}
+
 function leer(uid?: string | null): EstadoRefrigerio {
   try {
     const raw = localStorage.getItem(clave(uid));
     if (raw) {
       const p = JSON.parse(raw) as EstadoRefrigerio;
       const base = { ...ESTADO_INICIAL, ...p };
-      // Cambió el día → reset (el refrigerio es diario)
+      // Cambió el día → reset de lo andado, NO de la programación
       if (base.fecha !== hoyStr()) {
-        return { ...ESTADO_INICIAL, fecha: hoyStr() };
+        return resetDiario(base);
       }
       return base;
     }
@@ -197,10 +214,10 @@ export function useRefrigerio(uid?: string | null) {
     return () => clearInterval(t);
   }, [estado.estado]);
 
-  // Reiniciar automático al cambiar de día
+  // Reiniciar automático al cambiar de día (mantiene la programación)
   useEffect(() => {
     if (estado.fecha !== hoyStr()) {
-      setEstado({ ...ESTADO_INICIAL, fecha: hoyStr() });
+      setEstado(resetDiario(estado));
     }
   }, [estado.fecha]);
 
@@ -305,7 +322,11 @@ function leerJornada(uid?: string | null): EstadoJornada {
     const raw = localStorage.getItem(claveJornada(uid));
     if (raw) {
       const p = JSON.parse(raw) as EstadoJornada;
-      if (p.fecha === hoyStr()) return { inicioHora: p.inicioHora || '', fecha: p.fecha };
+      // Cambió el día → la hora de salida se MANTIENE (sueles salir
+      // a la misma hora cada día, como en Circuit); solo se renueva
+      // la fecha. (Fase 2.11 — antes se borraba y había que fijarla
+      // otra vez cada mañana.)
+      if (p.inicioHora) return { inicioHora: p.inicioHora, fecha: hoyStr() };
     }
   } catch {
     // sin storage
