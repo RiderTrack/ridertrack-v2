@@ -1,28 +1,122 @@
 // ═══════════════════════════════════════════════════════════
-// 👤 AVATARES — Fase 1.5
-// Galería estilo Netflix/streaming: personajes ilustrados en SVG
-// (nada de fotos genéricas). El rider elige el suyo desde el menú
-// hamburguesa y aparece en el header, sidebar y GPS del motorizado.
+// 👤 AVATARES — Fase 2.13
+// Galería con los DISEÑOS PROPIOS del equipo: 32 ilustraciones
+// en 4 categorías (🏍️ Rider, 💻 Tecnología, 🐾 Animales, 🎮 Gaming)
+// + los 12 clásicos SVG como pestaña extra. El rider elige el
+// suyo desde el menú hamburguesa y aparece en el header, el
+// sidebar y el GPS del motorizado.
 // ═══════════════════════════════════════════════════════════
 
 import React from 'react';
 
+// ── Ilustraciones propias (WebP 192×192, ~18 KB c/u, se
+//    empaquetan dentro del APK — funcionan sin internet) ──
+import av001 from '../assets/avatares/001_rider_urbano.webp';
+import av002 from '../assets/avatares/002_rider_deportivo.webp';
+import av003 from '../assets/avatares/003_rider_nocturno.webp';
+import av004 from '../assets/avatares/004_rider_mecanico.webp';
+import av005 from '../assets/avatares/005_rider_ninja.webp';
+import av006 from '../assets/avatares/006_rider_cyber.webp';
+import av007 from '../assets/avatares/007_rider_aventurero.webp';
+import av008 from '../assets/avatares/008_rider_legendario.webp';
+import av009 from '../assets/avatares/009_programador.webp';
+import av010 from '../assets/avatares/010_programadora.webp';
+import av011 from '../assets/avatares/011_robot_ia.webp';
+import av012 from '../assets/avatares/012_cyborg.webp';
+import av013 from '../assets/avatares/013_cientifico.webp';
+import av014 from '../assets/avatares/014_ingeniero.webp';
+import av015 from '../assets/avatares/015_ia.webp';
+import av016 from '../assets/avatares/016_hacker_cyber.webp';
+import av017 from '../assets/avatares/017_lobo.webp';
+import av018 from '../assets/avatares/018_zorro.webp';
+import av019 from '../assets/avatares/019_leon.webp';
+import av020 from '../assets/avatares/020_tigre.webp';
+import av021 from '../assets/avatares/021_aguila.webp';
+import av022 from '../assets/avatares/022_panda.webp';
+import av023 from '../assets/avatares/023_oso.webp';
+import av024 from '../assets/avatares/024_gato.webp';
+import av025 from '../assets/avatares/025_gamer.webp';
+import av026 from '../assets/avatares/026_ninja.webp';
+import av027 from '../assets/avatares/027_guerrero.webp';
+import av028 from '../assets/avatares/028_mecha.webp';
+import av029 from '../assets/avatares/029_alien.webp';
+import av030 from '../assets/avatares/030_hechicero.webp';
+import av031 from '../assets/avatares/031_piloto.webp';
+import av032 from '../assets/avatares/032_heroe.webp';
+
+export type CategoriaAvatar = 'rider' | 'tecnologia' | 'animales' | 'gaming' | 'clasicos';
+
+export interface CategoriaDef {
+  id: CategoriaAvatar;
+  nombre: string;
+  emoji: string;
+  /** degradado de fondo de las tarjetas (solo avatares con imagen) */
+  fondo: string;
+}
+
+export const CATEGORIAS: CategoriaDef[] = [
+  { id: 'rider', nombre: 'Rider', emoji: '🏍️', fondo: 'from-blue-500 to-blue-900' },
+  { id: 'tecnologia', nombre: 'Tecnología', emoji: '💻', fondo: 'from-cyan-400 to-slate-900' },
+  { id: 'animales', nombre: 'Animales', emoji: '🐾', fondo: 'from-amber-400 to-amber-900' },
+  { id: 'gaming', nombre: 'Gaming', emoji: '🎮', fondo: 'from-purple-400 to-purple-900' },
+  { id: 'clasicos', nombre: 'Clásicos', emoji: '⭐', fondo: 'from-slate-600 to-slate-900' },
+];
+
 export interface AvatarDef {
   id: string;
   nombre: string;
-  /** emoji para el título del picker */
   emoji: string;
-  svg: string; // SVG interno (sin <svg> wrapper) — viewBox 0 0 100 100
+  categoria: CategoriaAvatar;
+  /** ilustración WebP (diseños propios — Fase 2.13) */
+  img?: string;
+  /** SVG interno (sin <svg> wrapper) — viewBox 0 0 100 100 (clásicos) */
+  svg?: string;
 }
 
-// ── Cada SVG usa gradientes con ID único (av-<key>) para que
-//    varios avatares puedan convivir en la misma pantalla ──
-
 export const AVATARES: AvatarDef[] = [
+  // ── 🏍️ RIDER (diseños propios) ──
+  { id: '001_rider_urbano', nombre: 'Rider Urbano', emoji: '🛵', categoria: 'rider', img: av001 },
+  { id: '002_rider_deportivo', nombre: 'Rider Deportivo', emoji: '🏁', categoria: 'rider', img: av002 },
+  { id: '003_rider_nocturno', nombre: 'Rider Nocturno', emoji: '🌙', categoria: 'rider', img: av003 },
+  { id: '004_rider_mecanico', nombre: 'Rider Mecánico', emoji: '🔧', categoria: 'rider', img: av004 },
+  { id: '005_rider_ninja', nombre: 'Rider Ninja', emoji: '🥷', categoria: 'rider', img: av005 },
+  { id: '006_rider_cyber', nombre: 'Rider Cyber', emoji: '🤖', categoria: 'rider', img: av006 },
+  { id: '007_rider_aventurero', nombre: 'Rider Aventurero', emoji: '🧭', categoria: 'rider', img: av007 },
+  { id: '008_rider_legendario', nombre: 'Rider Legendario', emoji: '👑', categoria: 'rider', img: av008 },
+  // ── 💻 TECNOLOGÍA (diseños propios) ──
+  { id: '009_programador', nombre: 'Programador', emoji: '💻', categoria: 'tecnologia', img: av009 },
+  { id: '010_programadora', nombre: 'Programadora', emoji: '👩‍💻', categoria: 'tecnologia', img: av010 },
+  { id: '011_robot_ia', nombre: 'Robot IA', emoji: '🤖', categoria: 'tecnologia', img: av011 },
+  { id: '012_cyborg', nombre: 'Cyborg', emoji: '🦾', categoria: 'tecnologia', img: av012 },
+  { id: '013_cientifico', nombre: 'Científico', emoji: '🔬', categoria: 'tecnologia', img: av013 },
+  { id: '014_ingeniero', nombre: 'Ingeniero', emoji: '⚙️', categoria: 'tecnologia', img: av014 },
+  { id: '015_ia', nombre: 'IA', emoji: '🧠', categoria: 'tecnologia', img: av015 },
+  { id: '016_hacker_cyber', nombre: 'Hacker Cyber', emoji: '👾', categoria: 'tecnologia', img: av016 },
+  // ── 🐾 ANIMALES (diseños propios) ──
+  { id: '017_lobo', nombre: 'Lobo', emoji: '🐺', categoria: 'animales', img: av017 },
+  { id: '018_zorro', nombre: 'Zorro', emoji: '🦊', categoria: 'animales', img: av018 },
+  { id: '019_leon', nombre: 'León', emoji: '🦁', categoria: 'animales', img: av019 },
+  { id: '020_tigre', nombre: 'Tigre', emoji: '🐯', categoria: 'animales', img: av020 },
+  { id: '021_aguila', nombre: 'Águila', emoji: '🦅', categoria: 'animales', img: av021 },
+  { id: '022_panda', nombre: 'Panda', emoji: '🐼', categoria: 'animales', img: av022 },
+  { id: '023_oso', nombre: 'Oso', emoji: '🐻', categoria: 'animales', img: av023 },
+  { id: '024_gato', nombre: 'Gato', emoji: '🐱', categoria: 'animales', img: av024 },
+  // ── 🎮 GAMING (diseños propios) ──
+  { id: '025_gamer', nombre: 'Gamer', emoji: '🎮', categoria: 'gaming', img: av025 },
+  { id: '026_ninja', nombre: 'Ninja', emoji: '🥷', categoria: 'gaming', img: av026 },
+  { id: '027_guerrero', nombre: 'Guerrero', emoji: '⚔️', categoria: 'gaming', img: av027 },
+  { id: '028_mecha', nombre: 'Mecha', emoji: '🦾', categoria: 'gaming', img: av028 },
+  { id: '029_alien', nombre: 'Alien', emoji: '👽', categoria: 'gaming', img: av029 },
+  { id: '030_hechicero', nombre: 'Hechicero', emoji: '🧙', categoria: 'gaming', img: av030 },
+  { id: '031_piloto', nombre: 'Piloto', emoji: '🚀', categoria: 'gaming', img: av031 },
+  { id: '032_heroe', nombre: 'Héroe', emoji: '🦸', categoria: 'gaming', img: av032 },
+
+  // ── ⭐ CLÁSICOS (SVG de la Fase 1.5 — pestaña extra) ──
   {
     id: 'rider',
     nombre: 'Rider Pro',
     emoji: '🏍️',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-rider-bg" x1="0" y1="0" x2="1" y2="1">
@@ -54,6 +148,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'chica',
     nombre: 'Rider Chic',
     emoji: '👩‍🏍️',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-chica-bg" x1="0" y1="0" x2="1" y2="1">
@@ -88,6 +183,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'ninja',
     nombre: 'Ninja',
     emoji: '🥷',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-ninja-bg" x1="0" y1="0" x2="1" y2="1">
@@ -114,6 +210,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'robot',
     nombre: 'Robot',
     emoji: '🤖',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-robot-bg" x1="0" y1="0" x2="1" y2="1">
@@ -147,6 +244,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'gato',
     nombre: 'Michi',
     emoji: '🐱',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-gato-bg" x1="0" y1="0" x2="1" y2="1">
@@ -180,6 +278,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'panda',
     nombre: 'Panda',
     emoji: '🐼',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-panda-bg" x1="0" y1="0" x2="1" y2="1">
@@ -210,6 +309,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'zorro',
     nombre: 'Zorro',
     emoji: '🦊',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-zorro-bg" x1="0" y1="0" x2="1" y2="1">
@@ -238,6 +338,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'astronauta',
     nombre: 'Astro',
     emoji: '👨‍🚀',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-astro-bg" x1="0" y1="0" x2="1" y2="1">
@@ -269,6 +370,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'vikingo',
     nombre: 'Vikingo',
     emoji: '🧔',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-vik-bg" x1="0" y1="0" x2="1" y2="1">
@@ -299,6 +401,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'dj',
     nombre: 'DJ',
     emoji: '🎧',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-dj-bg" x1="0" y1="0" x2="1" y2="1">
@@ -330,6 +433,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'chef',
     nombre: 'Chef',
     emoji: '👨‍🍳',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-chef-bg" x1="0" y1="0" x2="1" y2="1">
@@ -356,6 +460,7 @@ export const AVATARES: AvatarDef[] = [
     id: 'heroe',
     nombre: 'Héroe',
     emoji: '🦸',
+    categoria: 'clasicos',
     svg: `
       <defs>
         <linearGradient id="av-heroe-bg" x1="0" y1="0" x2="1" y2="1">
@@ -381,13 +486,24 @@ export const AVATARES: AvatarDef[] = [
   },
 ];
 
-export const AVATAR_DEFAULT = 'rider';
+/** avatar por defecto: el primer diseño propio */
+export const AVATAR_DEFAULT = '001_rider_urbano';
 
 export function avatarPorId(id?: string): AvatarDef {
   return AVATARES.find((a) => a.id === id) || AVATARES[0];
 }
 
-/** ¿Es uno de nuestros avatares ilustrados? (si no, es una foto/URL) */
+/** categoría de un avatar por id (para abrir el picker en la pestaña correcta) */
+export function categoriaDeAvatar(id?: string): CategoriaAvatar {
+  return avatarPorId(id).categoria;
+}
+
+/** degradado de fondo de la categoría (para tarjetas con imagen) */
+export function fondoDeCategoria(cat: CategoriaAvatar): string {
+  return CATEGORIAS.find((c) => c.id === cat)?.fondo || 'from-slate-600 to-slate-900';
+}
+
+/** ¿es uno de los avatares de la galería? (si no, es una foto/URL externa) */
 export function esAvatarValido(id?: string | null): boolean {
   return !!id && AVATARES.some((a) => a.id === id);
 }
@@ -400,13 +516,33 @@ interface AvatarSvgProps {
 }
 
 /**
- * Renderiza el avatar ilustrado como SVG inline.
- * Si el id no existe, cae al avatar 'rider'.
+ * Renderiza el avatar: ilustración WebP (diseños propios) o SVG
+ * clásico. Si el id no existe, cae al primer diseño propio.
  */
-export const AvatarSvg: React.FC<AvatarSvgProps> = ({ id, className = 'w-10 h-10', anillo }) => (
-  <div className={`${className} rounded-2xl overflow-hidden shrink-0 bg-slate-800 ${anillo || ''}`}>
-    <svg viewBox="0 0 100 100" className="w-full h-full block" role="img" aria-label="Avatar">
-      <g dangerouslySetInnerHTML={{ __html: avatarPorId(id).svg }} />
-    </svg>
-  </div>
-);
+export const AvatarSvg: React.FC<AvatarSvgProps> = ({ id, className = 'w-10 h-10', anillo }) => {
+  const av = avatarPorId(id);
+  if (av.img) {
+    return (
+      <div
+        className={`${className} rounded-2xl overflow-hidden shrink-0 bg-gradient-to-br ${fondoDeCategoria(
+          av.categoria
+        )} ${anillo || ''}`}
+      >
+        <img
+          src={av.img}
+          alt={av.nombre}
+          title={av.nombre}
+          draggable={false}
+          className="w-full h-full object-contain block select-none"
+        />
+      </div>
+    );
+  }
+  return (
+    <div className={`${className} rounded-2xl overflow-hidden shrink-0 bg-slate-800 ${anillo || ''}`}>
+      <svg viewBox="0 0 100 100" className="w-full h-full block" role="img" aria-label="Avatar">
+        <g dangerouslySetInnerHTML={{ __html: av.svg || '' }} />
+      </svg>
+    </div>
+  );
+};
