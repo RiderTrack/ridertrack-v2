@@ -104,6 +104,19 @@ export const CronometroRuta: React.FC<CronometroRutaProps> = ({
     setTranscurrido(crono.acumulado);
   }, [crono.activo, crono.inicio, crono.acumulado]);
 
+  // 🏁 Reset cuando la ruta se FINALIZA desde "Mi Ruta"
+  // (v1: resetCronometro() al cerrar la ruta). El hook useClientes
+  // emite 'rt-ruta-finalizada' tras guardar el historial.
+  useEffect(() => {
+    const alFinalizar = () => {
+      setCrono({ activo: false, inicio: null, acumulado: 0 });
+      setTranscurrido(0);
+      try { if (uid) localStorage.removeItem(CRONO_KEY(uid)); } catch {}
+    };
+    window.addEventListener('rt-ruta-finalizada', alFinalizar);
+    return () => window.removeEventListener('rt-ruta-finalizada', alFinalizar);
+  }, [uid]);
+
   // ── ▶ INICIAR / ⏸ PAUSAR / ▶ CONTINUAR ──
   const handleToggle = async () => {
     if (!crono.activo) {

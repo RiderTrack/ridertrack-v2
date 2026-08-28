@@ -49,7 +49,7 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
 
   const [search, setSearch] = useState('');
@@ -2291,18 +2291,26 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         </div>
       )}
 
-      {/* 🏁 BOTONES DE GESTIÓN DE RUTA (Finalizar, Guardar, Limpiar) */}
+      {/* 🏁 BOTONES DE GESTIÓN DE RUTA — como la v1: cerrar (guarda
+          TODO y limpia) + limpiar sin guardar */}
       {clientes.length > 0 && (
         <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-2">
           <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">🏁 Gestión de ruta</div>
 
-          {/* Finalizar Ruta */}
+          {/* Finalizar y Guardar Ruta (= cerrar de la v1) */}
           <button
             onClick={async () => {
-              if (!confirm('¿Finalizar ruta?\n\nSe guardará un resumen en el historial y la ruta se marcará como finalizada.\nLos clientes seguirán visibles para consulta.')) return;
+              if (!confirm(
+                '¿Finalizar y guardar la ruta?\n\n' +
+                'Como la versión 1:\n' +
+                '✅ Se guarda en el Historial (con tu plata y la de la empresa)\n' +
+                '☁️ Respaldo automático en la nube\n' +
+                '🧹 La lista queda LIMPIA para el día siguiente\n\n' +
+                '¿Continuar?'
+              )) return;
               try {
                 await finalizarRutaActual();
-                onShowToast?.('🏁 Ruta finalizada', 'Resumen guardado en historial', 'success');
+                onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial y en la nube — lista limpia para mañana', 'success');
               } catch (e: any) {
                 onShowToast?.('❌ Error', e.message || 'No se pudo finalizar', 'error');
               }
@@ -2311,25 +2319,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
           >
             {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🏁'}
-            FINALIZAR RUTA
-          </button>
-
-          {/* Guardar y Cerrar Ruta */}
-          <button
-            onClick={async () => {
-              if (!confirm('¿Guardar y cerrar ruta?\n\nSe guardarán los clientes en clientes_registrados como respaldo histórico.\nLos clientes seguirán visibles en el panel.')) return;
-              try {
-                await guardarYCerrarRutaActual();
-                onShowToast?.('💾 Ruta guardada', 'Clientes guardados en historial', 'success');
-              } catch (e: any) {
-                onShowToast?.('❌ Error', e.message || 'No se pudo guardar', 'error');
-              }
-            }}
-            disabled={sincronizando}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400"
-          >
-            {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '💾'}
-            GUARDAR Y CERRAR RUTA
+            FINALIZAR Y GUARDAR RUTA
           </button>
 
           {/* Limpiar sin Guardar */}
