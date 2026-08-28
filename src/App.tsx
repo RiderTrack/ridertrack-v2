@@ -10,7 +10,6 @@ import { CustomersView } from './components/CustomersView';
 import { DriversView } from './components/DriversView';
 import { LiveMap } from './components/LiveMap';
 import { MotorizadosView } from './components/MotorizadosView';
-import { CronometroPill } from './components/CronometroRuta';
 import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppView } from './components/WhatsAppView';
 import { ResumenView } from './components/ResumenView';
@@ -25,7 +24,7 @@ import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
 import { YapeQRView } from './components/YapeQRView';
-import { guardarAvatarRider, sincronizarCronometroAlBot } from './services/firestore';
+import { guardarAvatarRider } from './services/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
 import {
   clientesAOrdenes,
@@ -587,12 +586,9 @@ export default function App() {
       {/* Toast Notifications Overlay */}
       <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
 
-      {/* ⏱️ Cronómetro de ruta flotante (Fase 1.5): visible en
-          cualquier pantalla mientras corre; abre GPS del Motorizado */}
-      <CronometroPill
-        onSync={(e) => (user ? sincronizarCronometroAlBot(user.uid, e) : Promise.resolve())}
-        onAbrir={() => setActiveTab('motorizados')}
-      />
+      {/* ⏱️ Nota: el cronómetro de ruta vive en Mi Ruta (CronometroRuta
+          Fase 2.2) — integrado arriba de la lista de clientes, con
+          aviso silencioso al bot y voz al iniciar. Sin pill flotante. */}
 
       {/* 🎭 Picker de avatar (desde el header) */}
       <AvatarPicker
