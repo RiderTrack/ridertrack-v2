@@ -45,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
+  const [currentDateShort, setCurrentDateShort] = useState<string>('');
   const [showNotifications, setShowNotifications] = useState(false);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -67,6 +68,12 @@ export const Header: React.FC<HeaderProps> = ({
           year: 'numeric',
         })
       );
+      // Fase 2.5: versión corta para MÓVIL (como el reloj del topbar de la v1:
+      // "VIE 28/08") — compacta, no rompe la armonía del header chico
+      const dias = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+      const d = String(now.getDate()).padStart(2, '0');
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      setCurrentDateShort(`${dias[now.getDay()]} ${d}/${m}`);
     };
     updateClock();
     const timer = setInterval(updateClock, 1000);
@@ -107,10 +114,12 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
-              <span className="font-black text-lg tracking-tight text-white group-hover:text-blue-400 transition-colors">
+              <span className="font-black text-base sm:text-lg tracking-tight text-white group-hover:text-blue-400 transition-colors">
                 RiderTrack
               </span>
-              <span className="px-1.5 py-0.2 text-[10px] font-black rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+              {/* Fase 2.5: oculto en pantallas muy chicas para darle
+                  espacio al reloj en el header móvil */}
+              <span className="hidden sm:inline-block px-1.5 py-0.2 text-[10px] font-black rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
                 V2.4 PRO
               </span>
             </div>
@@ -141,7 +150,18 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls & Status Indicators (Fase 2.2: limpio — solo real) */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Live Clock & Date */}
+        {/* Live Clock & Date — Fase 2.5: también visible en MÓVIL
+            (antes estaba oculto con hidden sm:flex y en el celular
+            nunca se veía la hora). En móvil: compacto (hora + día corto,
+            como el topbar de la v1). */}
+        {/* Versión móvil (compacta) */}
+        <div className="flex sm:hidden flex-col items-center px-2 py-0.5 rounded-lg bg-slate-800/60 border border-slate-700/50 leading-none">
+          <span className="text-[11px] text-white font-bold font-mono flex items-center gap-0.5">
+            <Clock className="w-2.5 h-2.5 text-blue-400" /> {currentTime.slice(0, 5)}
+          </span>
+          <span className="text-[8px] text-slate-400 uppercase tracking-wider mt-0.5">{currentDateShort}</span>
+        </div>
+        {/* Versión desktop (completa) */}
         <div className="hidden sm:flex flex-col items-end px-2.5 py-0.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-xs font-mono">
           <span className="text-white font-bold flex items-center gap-1">
             <Clock className="w-3 h-3 text-blue-400" /> {currentTime || '17:10:00'}

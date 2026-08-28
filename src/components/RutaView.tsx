@@ -39,7 +39,9 @@ import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
 import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
-import { Flag, MapPinned } from 'lucide-react';
+import { Flag, MapPinned, ClipboardList, Copy, Check } from 'lucide-react';
+// Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
+import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -51,7 +53,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { config, guardar: guardarConfig } = useConfig();
 
   const [search, setSearch] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
   const [filtroDistrito, setFiltroDistrito] = useState<string>('');
   const [filtroProducto, setFiltroProducto] = useState<string>('');
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
@@ -59,6 +61,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [importando, setImportando] = useState(false);
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 📋 Listado de verificación (Fase 2.5): mini-listado para cruzar
+  // con la página de la empresa — se filtra con la búsqueda/filtros
+  const [listadoVerifAbierto, setListadoVerifAbierto] = useState(false);
+  const [listadoCopiado, setListadoCopiado] = useState(false);
 
   // Estado de optimización en curso (Fase 1.3 — progreso real)
   const [optimizando, setOptimizando] = useState(false);
@@ -252,10 +259,18 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       filtrados = filtrados.filter(c =>
         ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st)
       );
-    } else if (filtroEstado === 'fallidos') {
+    } else if (filtroEstado === 'fallidos' || filtroEstado === 'noentreg') {
+      // "No entregados" = fallidos (fallida, rechazado, cancelado, ausente, no-contesta)
       filtrados = filtrados.filter(c =>
         ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
       );
+    } else if (filtroEstado === 'empresa') {
+      // Pagados por empresa (Fase 2.5)
+      filtrados = filtrados.filter(c => c.st === 'empresa');
+    } else if (filtroEstado === 'mzsn') {
+      // ⚠️ Direcciones por manzana o sin número (Fase 2.5 — como la v1):
+      // verlos juntos para pedirles la ubicación exacta de una vez
+      filtrados = filtrados.filter(c => direccionIncompleta(c.dir, c.obs));
     }
 
     // Filtro por distrito
@@ -292,6 +307,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const productos = clientes.map(c => (c.prod || '').trim()).filter(Boolean);
     return [...new Set(productos)].sort();
   }, [clientes]);
+
+  // ⚠️ Fase 2.5: contadores para los chips nuevos — clientes con dirección
+  // por manzana / sin número (como la v1) y pagados por empresa
+  const nMzsn = useMemo(() => clientes.filter(c => direccionIncompleta(c.dir, c.obs)).length, [clientes]);
+  const nEmpresa = useMemo(() => clientes.filter(c => c.st === 'empresa').length, [clientes]);
 
   // Botones de pago (iguales que RiderTrack Modular)
   const pagosList = [
@@ -385,6 +405,60 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const cel = String(cliente.cel || '').replace(/\D/g, '');
     const telCompleto = cel.length === 9 ? `51${cel}` : cel;
     window.open(`https://wa.me/${telCompleto}`, '_blank');
+  };
+
+  // 📲 Pedir ubicación exacta por WhatsApp DIRECTO (Fase 2.5 — estilo v1
+  // enviarMsgDirIA): para clientes con dirección por manzana o sin número.
+  // Abre wa.me con el mensaje listo — no depende del bot.
+  const pedirUbicacionDirecta = (cliente: Cliente) => {
+    const tel = _botCel(cliente.cel || '');
+    if (!tel) {
+      onShowToast?.('Sin celular', `${cliente.nombre} no tiene celular válido`, 'warning');
+      return;
+    }
+    const msg = mensajePedirUbicacion(cliente.nombre, config?.empresa?.nombre);
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank');
+    onShowToast?.('📲 Mensaje listo', `Pide a ${cliente.nombre} su dirección o 📍 ubicación`, 'info');
+  };
+
+  // 📋 Copiar el listado de verificación (Fase 2.5): texto plano con
+  // cliente / S/ / método / hora para pegarlo y cruzarlo con la
+  // página de la empresa
+  const copiarListadoVerificacion = async () => {
+    const stTexto = (st: string) => {
+      if (!st || st === 'pendiente') return 'Pendiente';
+      const pagos: Record<string, string> = {
+        'efectivo': 'Efectivo', 'yape-rudy': 'Yape Rudy', 'yape-efectivo': 'Yape+Efectivo',
+        'yape-plin': 'Yape/Plin', 'transferencia': 'Transferencia', 'pos': 'POS',
+        'pago-link': 'Pago Link', 'jose-smith': 'J.Smith', 'cambio': 'Cambio', 'mixto': 'Mixto',
+        'empresa': 'Empresa', 'fallida': 'Fallida', 'reprogramar': 'Reprogramado',
+        'rechazado': 'Rechazado', 'ausente': 'Ausente', 'no-contesta': 'No contesta', 'cancelado': 'Cancelado',
+      };
+      return pagos[st] || st;
+    };
+    const lineas: string[] = [
+      `📋 VERIFICACIÓN DE RUTA — ${new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
+      `${clientesFiltrados.length} clientes · Cobrado S/ ${stats.cobrado.toFixed(2)} · Por cobrar S/ ${stats.porCobrar.toFixed(2)}`,
+      '',
+    ];
+    clientesFiltrados.forEach((c) => {
+      const hora = c.hora ? ` (${c.hora})` : '';
+      lineas.push(`${c.num || '·'}. ${c.nombre || 'Cliente'} — S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} — ${stTexto(c.st)}${hora}`);
+    });
+    const texto = lineas.join('\n');
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setListadoCopiado(true);
+    setTimeout(() => setListadoCopiado(false), 2000);
+    onShowToast?.('📋 Listado copiado', `${clientesFiltrados.length} clientes listos para pegar`, 'success');
   };
 
   // 🤖 Enviar acción al bot de Baileys vía Firestore
@@ -571,8 +645,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           </div>
         </div>
 
-        {/* Stats rápidas - 4 columnas en móvil */}
-        <div className="grid grid-cols-4 gap-1.5">
+        {/* Stats rápidas - 5 columnas en móvil (Fase 2.5: + NO entregados) */}
+        <div className="grid grid-cols-5 gap-1.5">
           <div className="p-2 rounded-lg bg-slate-900 border border-slate-700/50 text-center">
             <div className="text-[9px] text-slate-500 uppercase">Total</div>
             <div className="text-sm font-black text-white">{stats.total}</div>
@@ -584,6 +658,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-center">
             <div className="text-[9px] text-amber-400/70 uppercase">Pend</div>
             <div className="text-sm font-black text-amber-400">{stats.pendientes}</div>
+          </div>
+          <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
+            <div className="text-[9px] text-red-400/70 uppercase">No entreg</div>
+            <div className="text-sm font-black text-red-400">{stats.fallidos}</div>
           </div>
           <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
             <div className="text-[9px] text-blue-400/70 uppercase">S/</div>
@@ -740,37 +818,115 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
       {/* Buscador y filtros - Mobile optimized */}
       <div className="flex flex-col gap-1.5">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar..."
-            className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
-          />
+        <div className="relative flex gap-1.5">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar..."
+              className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
+            />
+          </div>
+          {/* 📋 Listado de verificación (Fase 2.5) — para cruzar con la página de la empresa */}
+          <button
+            onClick={() => setListadoVerifAbierto(!listadoVerifAbierto)}
+            className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
+              listadoVerifAbierto
+                ? 'bg-blue-600 border-blue-500 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+            }`}
+            title="Listado de verificación para cruzar con la página de la empresa"
+          >
+            <ClipboardList className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Filtros por estado (chips) */}
+        {/* Filtros por estado (chips) — Fase 2.5: + No entregados, Empresa y Mz/SN */}
         <div className="flex gap-1 overflow-x-auto scrollbar-none">
           {[
             { id: 'todos', label: 'Todos', count: stats.total },
             { id: 'pendientes', label: 'Pend', count: stats.pendientes },
             { id: 'entregados', label: 'Entreg', count: stats.entregados },
-            { id: 'fallidos', label: 'Fall', count: stats.fallidos },
+            { id: 'fallidos', label: '❌ No entreg', count: stats.fallidos },
+            { id: 'empresa', label: '🏪 Empresa', count: nEmpresa },
+            { id: 'mzsn', label: '⚠️ Mz/SN', count: nMzsn },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setFiltroEstado(tab.id as any)}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all border ${
                 filtroEstado === tab.id
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : tab.id === 'fallidos'
+                  ? 'bg-red-500/10 text-red-400 border-red-500/25 hover:bg-red-500/20'
+                  : tab.id === 'empresa'
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/25 hover:bg-blue-500/20'
+                  : tab.id === 'mzsn'
+                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/25 hover:bg-orange-500/20'
+                  : 'bg-slate-800 text-slate-400 hover:text-white border-slate-700'
               }`}
             >
               {tab.label} ({tab.count})
             </button>
           ))}
         </div>
+
+        {/* 📋 Panel de verificación (Fase 2.5) — mini-listado para
+            contrastar con la página de la empresa; se filtra igual que la lista */}
+        {listadoVerifAbierto && (
+          <div className="rounded-xl bg-slate-800 border border-blue-500/30 overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-blue-500/10 border-b border-blue-500/20">
+              <div className="flex items-center gap-2 min-w-0">
+                <ClipboardList className="w-4 h-4 text-blue-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white">Verificación con la empresa</div>
+                  <div className="text-[9px] text-slate-400 truncate">
+                    {clientesFiltrados.length} cliente{clientesFiltrados.length !== 1 ? 's' : ''} · S/ {stats.cobrado.toFixed(2)} cobrado
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={copiarListadoVerificacion}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-95 border ${
+                  listadoCopiado
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-blue-600 hover:bg-blue-500 border-blue-500 text-white'
+                }`}
+              >
+                {listadoCopiado ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {listadoCopiado ? 'Copiado' : 'Copiar'}
+              </button>
+            </div>
+            <div className="max-h-56 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40">
+              {clientesFiltrados.length === 0 ? (
+                <p className="text-[11px] text-slate-400 text-center py-4">Nada con estos filtros</p>
+              ) : (
+                clientesFiltrados.map((c) => {
+                  const entregado = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st);
+                  const fallido = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st);
+                  return (
+                    <div key={String(c.id)} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                      <div className="min-w-0 flex-1 flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entregado ? 'bg-emerald-500' : fallido ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span className="text-[11px] font-bold text-white truncate">
+                          {c.num ? `${c.num}. ` : ''}{c.nombre || 'Cliente'}
+                        </span>
+                        {c.hora && <span className="text-[9px] text-slate-500 shrink-0">{c.hora}</span>}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[11px] font-black text-slate-200">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</span>
+                        <span className={`ml-1.5 text-[9px] font-bold ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
+                          {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Filtros por distrito y producto */}
         {clientes.length > 0 && (
@@ -869,6 +1025,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-bold text-white truncate">{c.nombre || 'Cliente'}</span>
+                      {/* ⚠️ Fase 2.5: badge de dirección incompleta (manzana / sin número) */}
+                      {tipoDireccion(c.dir, c.obs) !== 'ok' && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded border text-[8px] font-bold shrink-0 ${claseBadgeDireccion(tipoDireccion(c.dir, c.obs))}`}
+                          title={`Dirección por ${tipoDireccion(c.dir, c.obs) === 'mz' ? 'manzana' : tipoDireccion(c.dir, c.obs) === 'sn' ? 'SIN NÚMERO' : 'referencia'} — pídele su ubicación`}
+                        >
+                          {etiquetaDireccion(tipoDireccion(c.dir, c.obs))}
+                        </span>
+                      )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -996,6 +1161,20 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       <Pencil className="w-3 h-3" />
                       Editar datos
                     </button>
+
+                    {/* 📲 Pedir ubicación exacta (Fase 2.5) — SOLO para direcciones
+                        por manzana o sin número, estilo v1: abre WhatsApp con el
+                        mensaje pidiendo la dirección o la 📍 ubicación */}
+                    {tipoDireccion(c.dir, c.obs) !== 'ok' && (
+                      <button
+                        onClick={() => pedirUbicacionDirecta(c)}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/40 text-orange-300 rounded-md text-[10px] font-bold transition-all active:scale-95"
+                        title="Su dirección es por manzana o no tiene número — pídele la ubicación exacta por WhatsApp"
+                      >
+                        <span className="text-[11px]">📲</span>
+                        Pedir ubicación exacta ({tipoDireccion(c.dir, c.obs) === 'mz' ? 'manzana' : tipoDireccion(c.dir, c.obs) === 'sn' ? 'sin número' : 'referencia'})
+                      </button>
+                    )}
 
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">

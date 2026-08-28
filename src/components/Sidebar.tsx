@@ -18,6 +18,9 @@ import {
   QrCode,
   Radar,
   Camera,
+  History,
+  Megaphone,
+  Cloud,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -92,6 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'mapa', label: 'Mapa de Entregas', icon: MapPin },
         { id: 'motorizados', label: 'GPS del Motorizado', icon: Radar },
+        { id: 'broadcast', label: 'Broadcast WhatsApp', icon: Megaphone },
         { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
       ],
     },
@@ -99,11 +103,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       titulo: 'Análisis',
       items: [
         { id: 'estadisticas', label: 'Resumen del día', icon: PieChart },
+        { id: 'historial', label: 'Historial de rutas', icon: History },
       ],
     },
     {
       titulo: 'Sistema',
       items: [
+        { id: 'backups', label: 'Backups en la nube', icon: Cloud },
         { id: 'configuracion', label: 'Configuración', icon: Settings },
         { id: 'medios', label: 'Medios', icon: Music },
         { id: 'perfil', label: 'Perfil', icon: User },
