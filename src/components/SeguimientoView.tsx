@@ -35,6 +35,16 @@ import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
 import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
+// ⏱️ ETA estilo Circuit (Fase 2.9): viaje entre paradas + ritmo real
+import {
+  planificarRuta,
+  factorRitmo,
+  mensajeRitmo,
+  leerVelocidadKmh,
+  guardarVelocidadKmh,
+  VELOCIDAD_OPCIONES,
+  VELOCIDAD_ETIQUETAS,
+} from '../utils/etaRuta';
 
 interface SeguimientoViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -96,6 +106,9 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
     }
   });
 
+  // 🚦 Velocidad según tráfico (Fase 2.9) — para el viaje entre paradas
+  const [velocidadKmh, setVelocidadKmh] = useState<number>(() => leerVelocidadKmh());
+
   const [ajusteRitmoAbierto, setAjusteRitmoAbierto] = useState(false);
   const [refriPanelAbierto, setRefriPanelAbierto] = useState(false);
   const [filtro, setFiltro] = useState<Filtro>('todos');
@@ -118,9 +131,12 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
   // ── Cálculo del ETA (cada segundo via tick del hook) ──
   const calculo = useMemo(() => {
     const ahora = Date.now();
-    const entregados = clientes.filter((c) => ST_ENTREGADOS.includes(c.st));
-    const fallidos = clientes.filter((c) => ST_FALLIDOS.includes(c.st));
-    const pendientes = clientes.filter((c) => c.st === 'pendiente' || !c.st);
+    // Orden de ruta SIEMPRE por num (los ETAs siguen el orden real)
+    const orden = [...clientes].sort((a, b) => (a.num || 0) - (b.num || 0));
+    const entregados = orden.filter((c) => ST_ENTREGADOS.includes(c.st));
+    const fallidos = orden.filter((c) => ST_FALLIDOS.includes(c.st));
+    const pendientes = orden.filter((c) => c.st === 'pendiente' || !c.st);
+    const hechos = [...entregados, ...fallidos];
 
     // 🚀 Hora de inicio de jornada (Fase 2.8): si el rider definió
     // a qué hora sale (ej: 10:00) y la ruta todavía no arranca (sin
@@ -134,12 +150,33 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
         ? inicioJornadaMs
         : ahora;
 
-    // ⏱ Ritmo real suavizado: mientras arranca la ruta mezcla el
-    // ritmo por defecto con el real (factor bayesiano simple),
-    // para no pronosticar 2 min/parada con la primera entrega.
-    const FACTOR = 2;
-    const segRuta = rutaMs / 1000;
-    const ritmoSeg = (segRuta + minPorParada * 60 * FACTOR) / (entregados.length + FACTOR);
+    // 🛣️ Plan estilo Circuit (Fase 2.9): CADA parada = viaje hasta
+    // ella (tramo desde la anterior con distancia y tráfico) + tu
+    // tiempo de atención. Ya no es solo "min × paradas": si tus
+    // paradas están lejos entre sí, la hora de fin lo refleja.
+    const plan = planificarRuta(orden, minPorParada, velocidadKmh);
+
+    // ⚡ Factor de ritmo real: compara tu cronómetro con lo planificado
+    // para las paradas ya atendidas. Si vas más rápido que el plan,
+    // la hora de fin BAJA solita (como Circuit: 5:00 → 4:30 → 3:00).
+    const planTotalMs = (plan.viajeTotalSeg + plan.servicioTotalSeg) * 1000;
+    const planHechoMs =
+      hechos.length > 0
+        ? plan.paradas
+            .filter((p) => ST_ENTREGADOS.includes(p.cliente.st) || ST_FALLIDOS.includes(p.cliente.st))
+            .reduce((s, p) => s + (p.viajeSeg + p.servicioSeg) * 1000, 0)
+        : 0;
+    const avgParadaMs =
+      plan.paradas.length > 0 ? planTotalMs / plan.paradas.length : minPorParada * 60_000;
+    const factor = factorRitmo(rutaMs, planHechoMs, avgParadaMs * 2);
+
+    // Tiempo restante planificado (viaje + atención de las pendientes)
+    const restanteMs =
+      pendientes.length > 0
+        ? plan.paradas
+            .filter((p) => p.cliente.st === 'pendiente' || !p.cliente.st)
+            .reduce((s, p) => s + (p.viajeSeg + p.servicioSeg) * 1000, 0) * factor
+        : 0;
 
     // 🍽️ Refrigerio: tiempo extra que entra en la ventana restante
     const durMs = refri.refri.duracionMin * 60 * 1000;
@@ -149,7 +186,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
     } else if (refri.refri.estado === 'pendiente' && refri.refri.programadoHora) {
       const horaProgMs = hoyHoraAMs(refri.refri.programadoHora);
       if (horaProgMs !== null) {
-        const etaBaseMs = baseMs + pendientes.length * ritmoSeg * 1000;
+        const etaBaseMs = baseMs + restanteMs;
         // ¿La hora del refrigerio cae antes de terminar la ruta?
         if (horaProgMs < etaBaseMs && horaProgMs + durMs > ahora) {
           refriExtraMs = Math.max(0, Math.min(durMs, horaProgMs + durMs - ahora));
@@ -157,17 +194,20 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       }
     }
 
-    const etaFinalMs = baseMs + pendientes.length * ritmoSeg * 1000 + refriExtraMs;
+    const etaFinalMs = baseMs + restanteMs + refriExtraMs;
 
-    // ⏰ ETA de llegada por cliente pendiente (en orden de ruta)
+    // ⏰ ETA de llegada por cliente pendiente (en orden de ruta,
+    // acumulando viaje + atención, con el ritmo real aplicado)
     const etas = new Map<string, number>();
     let t = baseMs;
     let refriAplicado = refri.refri.estado !== 'pendiente'; // activo/terminado ya no se aplican
     if (refri.refri.estado === 'activo') {
       t += refri.segundosRestantes * 1000; // lo que falta del refri actual
     }
-    for (const c of pendientes) {
-      t += ritmoSeg * 1000;
+    for (const p of plan.paradas) {
+      const c = p.cliente;
+      if (!(c.st === 'pendiente' || !c.st)) continue;
+      t += (p.viajeSeg + p.servicioSeg) * 1000 * factor;
       if (!refriAplicado && refri.refri.programadoHora) {
         const hp = hoyHoraAMs(refri.refri.programadoHora);
         if (hp !== null && hp <= t) {
@@ -185,14 +225,15 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       entregados,
       fallidos,
       pendientes,
-      ritmoSeg,
+      plan,
+      factor,
       refriExtraMs,
       etaFinalMs,
       etas,
       segundosRestantes: Math.max(0, (etaFinalMs - ahora) / 1000),
       progreso: clientes.length > 0 ? entregados.length / clientes.length : 0,
     };
-  }, [clientes, rutaMs, refri.refri, refri.segundosRestantes, minPorParada, inicioHora]);
+  }, [clientes, rutaMs, refri.refri, refri.segundosRestantes, minPorParada, velocidadKmh, inicioHora]);
 
   // ── Acciones ──
   const llamarCliente = (c: Cliente) => {
@@ -222,7 +263,11 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
     try {
       localStorage.setItem(MIN_PARADA_KEY, String(v));
     } catch {}
-    setAjusteRitmoAbierto(false);
+  };
+
+  const guardarVelocidad = (v: number) => {
+    setVelocidadKmh(v);
+    guardarVelocidadKmh(v);
   };
 
   const guardarHoraInicio = () => {
@@ -350,11 +395,35 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
         {!rutaVacia && (
           <div className="flex flex-wrap items-center gap-1.5 mt-3">
             <span className="px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-[10px] font-bold text-slate-300">
-              ⏱️ ~{Math.max(1, Math.round(calculo.ritmoSeg / 60))} min por parada
+              ⏱️ {minPorParada} min en cada parada
             </span>
+            {calculo.plan.paradas.length > 1 && (
+              <span className="px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-[10px] font-bold text-slate-300">
+                🛣️ ~{Math.max(1, Math.round(calculo.plan.viajePromedioMin))} min de viaje entre paradas
+              </span>
+            )}
+            {calculo.plan.sinUbicar > 0 && (
+              <span
+                className="px-2 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold"
+                title="Optimiza la ruta (botón Ruta en Mi Ruta) o marca 📍 Ubicar en tus clientes para medir los tramos con precisión"
+              >
+                🧭 {calculo.plan.sinUbicar} sin ubicar · viaje estimado
+              </span>
+            )}
             {calculo.baseMs > calculo.ahora && (
               <span className="px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold">
                 🚀 Sales a las {inicioHora}
+              </span>
+            )}
+            {mensajeRitmo(calculo.factor) && calculo.yaEmpezo && (
+              <span
+                className={`px-2 py-1 rounded-full border text-[10px] font-bold ${
+                  calculo.factor < 1
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-red-500/10 border-red-500/30 text-red-300'
+                }`}
+              >
+                {mensajeRitmo(calculo.factor)}
               </span>
             )}
             {crono ? (
@@ -407,25 +476,52 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
 
         {/* Ajuste de ritmo */}
         {ajusteRitmoAbierto && !rutaVacia && (
-          <div className="mt-2.5 rounded-xl bg-slate-800/80 border border-slate-700 p-2.5">
-            <p className="text-[10px] text-slate-400 mb-2">
-              ¿Cuánto tardas por parada? (se usa mientras no haya suficiente ritmo real)
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {MIN_PARADA_OPCIONES.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => guardarMinParada(m)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
-                    minPorParada === m
-                      ? 'bg-indigo-600 border-indigo-500 text-white'
-                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  {m} min
-                </button>
-              ))}
+          <div className="mt-2.5 rounded-xl bg-slate-800/80 border border-slate-700 p-2.5 space-y-2.5">
+            <div>
+              <p className="text-[10px] text-slate-400 mb-1.5">
+                ⏱️ ¿Cuánto tardas ATENDIENDO cada parada? (cobrar, entregar, foto)
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {MIN_PARADA_OPCIONES.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => guardarMinParada(m)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                      minPorParada === m
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {m} min
+                  </button>
+                ))}
+              </div>
             </div>
+            <div>
+              <p className="text-[10px] text-slate-400 mb-1.5">
+                🚦 ¿Cómo va el tráfico? (velocidad promedio de tu moto entre paradas)
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {VELOCIDAD_OPCIONES.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => guardarVelocidad(v)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                      velocidadKmh === v
+                        ? 'bg-cyan-600 border-cyan-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {VELOCIDAD_ETIQUETAS[v]} · {v} km/h
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-snug">
+              La hora de fin = viaje entre paradas (distancia × tráfico) + atención por parada +
+              refrigerio. Si tus paradas están ubicadas (📍), los tramos se miden con su distancia
+              real — como en Circuit.
+            </p>
           </div>
         )}
 
@@ -811,8 +907,9 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       {/* Nota al pie */}
       {!rutaVacia && !rutaTerminada && (
         <p className="text-[10px] text-slate-500 text-center px-4 leading-snug">
-          La hora de finalización se recalcula con tu ritmo real: cada entrega que registras hace el cálculo
-          más preciso (como Circuit). El refrigerio programado se descuenta automáticamente.
+          La hora de fin incluye el viaje entre paradas y tu tiempo de atención. Se recalcula con
+          tu ritmo real: si vas más rápido, la hora de fin va bajando solita (como en Circuit) — y
+          el refrigerio se descuenta automáticamente.
         </p>
       )}
     </div>
