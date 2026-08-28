@@ -54,6 +54,9 @@ export interface Cliente {
   nota: string;
   fotoUrl?: string;
   respondioInicioRuta?: boolean;
+  /** ✅ Registro en la web (Fase 2.6 — como la v1): ya pasó a la
+   *  página de la empresa. Se marca desde el panel de Verificación. */
+  webReg?: boolean;
   /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
    *  no volver a geocodificar la misma dirección nunca más */
   lat?: number;
@@ -367,6 +370,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       totalRider,
       clientes: clientes.map(c => ({
         id: c.id,
+        num: c.num || null,
         nombre: c.nombre,
         cel: c.cel,
         prod: c.prod,
@@ -381,6 +385,10 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
         hora: c.hora || '',
         obs: c.obs || '',
         nota: c.nota || '',
+        // ✅ Fase 2.6: el check de verificación con la empresa viaja
+        // al historial (null nunca — Firestore lo acepta, pero por
+        // orden se guarda siempre como boolean)
+        webReg: c.webReg === true,
       })),
     });
 
@@ -529,6 +537,8 @@ export function subscribeToRutaActiva(
             nota: c.nota || '',
             fotoUrl: c.fotoUrl,
             respondioInicioRuta: c.respondioInicioRuta,
+            // ✅ Registro web (verificación con la empresa — Fase 2.6)
+            webReg: c.webReg === true,
             // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
             // el cliente para no volver a geocodificar nunca
             ...(typeof c.lat === 'number' && typeof c.lng === 'number'
@@ -679,6 +689,7 @@ export async function publicarClientesEnRutaActiva(
       nota: c.nota || '',
       obs: c.obs || '',
       hora: c.hora || '',
+      ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
       ...(typeof c.lat === 'number' && typeof c.lng === 'number'
         ? { lat: c.lat, lng: c.lng }
         : {}),
@@ -1545,6 +1556,30 @@ export async function leerHistorialV1(userId: string): Promise<{ entradas: RutaV
   return { entradas: mejor, fuente };
 }
 
+/**
+ * Limpia recursivamente los valores `undefined` de un objeto.
+ * Firestore RECHAZA undefined en WriteBatch.set()/setDoc() con el error
+ * "Unsupported field value: undefined" — por eso, antes de escribir
+ * docs importados de la v1 (que traen huecos), se pasan por aquí.
+ * Devuelve una copia nueva (no muta el original).
+ */
+function limpiarUndefined<T>(valor: T): T {
+  if (Array.isArray(valor)) {
+    return valor
+      .filter((v) => v !== undefined)
+      .map((v) => limpiarUndefined(v)) as unknown as T;
+  }
+  if (valor && typeof valor === 'object' && !(valor instanceof Date)) {
+    const limpio: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) {
+      if (v === undefined) continue; // ← se omite la clave completa
+      limpio[k] = limpiarUndefined(v);
+    }
+    return limpio as T;
+  }
+  return valor;
+}
+
 /** Convierte una ruta del historial v1 al formato de historial_rutas (v2) */
 function convertirRutaV1(h: RutaV1, userId: string): Record<string, any> | null {
   const cl = Array.isArray(h.cl) ? h.cl : [];
@@ -1589,11 +1624,15 @@ function convertirRutaV1(h: RutaV1, userId: string): Record<string, any> | null 
     porMetodo,
     totalEmpresa,
     totalRider,
-    km: h.km || undefined,
-    tiempoRuta: h.tiempoRuta || undefined,
-    clientes: cl.map((c: any) => ({
-      id: c.id,
-      num: c.num,
+    km: h.km || null,
+    // ⚠️ FIX: antes era `|| undefined` y Firestore lo rechazaba con
+    // "Unsupported field value: undefined (found in field tiempoRuta)"
+    // al importar rutas de la v1 que nunca guardaron ese campo.
+    // null SÍ es un valor válido para Firestore.
+    tiempoRuta: h.tiempoRuta || null,
+    clientes: cl.map((c: any, i: number) => ({
+      id: c.id != null ? c.id : `v1c_${id}_${i}`,
+      num: c.num != null ? c.num : i + 1,
       nombre: c.nombre || 'Cliente',
       cel: c.cel || '',
       prod: c.prod || '',
@@ -1649,7 +1688,9 @@ export async function importarHistorialV1(userId: string): Promise<{ importadas:
     const lote = nuevas.slice(i, i + 400);
     const batch = writeBatch(db);
     for (const datos of lote) {
-      batch.set(doc(db, 'historial_rutas', `v1_${datos.v1Id}`), datos);
+      // Doble protección: ni un solo undefined puede entrar al batch
+      // (la v1 guardaba huecos en cl, km, tiempoRuta...)
+      batch.set(doc(db, 'historial_rutas', `v1_${datos.v1Id}`), limpiarUndefined(datos));
     }
     await batch.commit();
     escritas += lote.length;
