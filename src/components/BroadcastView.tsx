@@ -1,15 +1,18 @@
 // ═══════════════════════════════════════════════════════════
-// 📢 BROADCAST VIEW — RiderTrack V2 (Fase 2.5)
-// Envío masivo por WhatsApp mediante el bot de Baileys, como en
-// el Rider Modular v1:
+// 📢 BROADCAST VIEW — RiderTrack V2 (Fase 2.5 / fix 2.6)
+// Envío masivo por WhatsApp mediante el bot de Baileys, EXACTAMENTE
+// como en el Rider Modular v1 (bot-baileys.js → botBroadcastEnviar
+//Seleccionados):
 //   1. Seleccionas todos los clientes (o solo algunos)
-//   2. Editas la plantilla del mensaje y el DELAY entre envíos
-//      (20-30 seg — evita que WhatsApp banee el número)
-//   3. El bot manda UNO POR UNO con pausa, y ves el progreso
-//      con countdown, enviados/pendientes/fallidos, pausa y stop.
-// Encola acciones `broadcast_inicio` en acciones_bot/{uid}/pendientes
-// (mismo formato que la v1 + el mensaje final ya armado en
-// `mensaje` para que el parche del bot lo use directo).
+//   2. El DELAY entre envíos (20-30 seg) evita el baneo
+//   3. La app encola las acciones UNO POR UNO y el BOT manda cada
+//      una con SU PLANTILLA OFICIAL + IMAGEN de inicio de ruta
+//      (imagenes_bot/inicio_ruta.jpg del rudy-bot).
+// ⚠️ Fix 2.6: el payload es AHORA IDÉNTICO al de la v1 — el bot
+// ya tiene su propia plantilla con imagen y arma el mensaje él
+// mismo. La app SOLO manda los datos del cliente (no un mensaje
+// armado). También se corrigió rider.telefono: ahora es el
+// celular DEL RIDER (v1: _botCel(D.myCel)), no el de la empresa.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,9 +29,9 @@ import {
   AlertTriangle,
   Bot,
   Timer,
-  MessageSquareText,
   Check,
   RefreshCw,
+  ImageIcon,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
@@ -40,11 +43,7 @@ interface BroadcastViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
-const PLANTILLA_DEFAULT =
-  '🌞 ¡Hola {nombre}! 👋\nLe saluda su motorizado de {empresa} 🚚\n\n📦 {prod}\n💰 S/ {cobrar}\n📍 {dir}, {dist}\n\nHoy paso por tu zona — ¡te aviso cuando esté cerca! 🛵';
-
 const DELAY_KEY = 'rt_broadcast_delay';
-const PLANTILLA_KEY = 'rt_broadcast_plantilla';
 
 type FaseBroadcast = 'config' | 'enviando' | 'completado';
 
@@ -65,13 +64,6 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
       return !isNaN(v) && v >= 5 && v <= 120 ? v : 25;
     } catch {
       return 25;
-    }
-  });
-  const [plantilla, setPlantilla] = useState<string>(() => {
-    try {
-      return localStorage.getItem(PLANTILLA_KEY) || PLANTILLA_DEFAULT;
-    } catch {
-      return PLANTILLA_DEFAULT;
     }
   });
 
@@ -116,31 +108,6 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
       localStorage.setItem(DELAY_KEY, String(delaySeg));
     } catch { /* sin storage */ }
   }, [delaySeg]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(PLANTILLA_KEY, plantilla);
-    } catch { /* sin storage */ }
-  }, [plantilla]);
-
-  // ── Armado del mensaje con variables ──
-  const armarMensaje = (c: Cliente): string => {
-    return plantilla
-      .replace(/\{nombre\}/g, (c.nombre || 'Cliente').split(' ')[0])
-      .replace(/\{prod\}/g, c.prod || 'tu pedido')
-      .replace(/\{cobrar\}/g, parseFloat(String(c.cobrar || 0)).toFixed(2))
-      .replace(/\{dir\}/g, c.dir || '—')
-      .replace(/\{dist\}/g, c.dist || '—')
-      .replace(/\{empresa\}/g, config?.empresa?.nombre || 'MATE')
-      .replace(/\{pos\}/g, String(c.num || 0));
-  };
-
-  // Preview con el primer cliente
-  const preview = useMemo(() => {
-    if (clientesConCel.length === 0) return '—';
-    return armarMensaje(clientesConCel[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientesConCel, plantilla, config]);
 
   // ── Selección masiva ──
   const seleccionarTodos = () => {
@@ -196,6 +163,11 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
         }
       });
 
+      // ── PAYLOAD IDÉNTICO A LA V1 (bot-baileys.js) ──
+      // El bot (rudy-bot) recibe `broadcast_inicio` y él mismo arma
+      // su plantilla oficial con la imagen de inicio de ruta.
+      // v1: rider = {nombre, telefono (celular DEL RIDER), fotoUrl, empresa}
+      const celRider = _botCel(config?.yape?.telefono || '') || '';
       await encolarAccionBot(user!.uid, {
         tipo: 'broadcast_inicio',
         clienteId: item.cliente.id,
@@ -205,19 +177,15 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
         cobrar: parseFloat(String(item.cliente.cobrar || 0)),
         dir: item.cliente.dir || '',
         dist: item.cliente.dist || '',
-        st: item.cliente.st || 'pendiente',
         rider: {
           nombre: profile?.nombre || 'Rider',
-          telefono: config?.empresa?.telefono || '',
+          telefono: celRider || config?.empresa?.telefono || '',
+          fotoUrl: '',
           empresa: config?.empresa?.nombre || 'MATE',
         },
         rutaDistritos: distritosOrden,
         rutaClientes,
         miPosicion: item.cliente.num || 0,
-        // El mensaje FINAL ya armado con la plantilla — el bot solo
-        // reenvía esto (parche 2.6) o arma el suyo si es el bot v1.
-        mensaje: armarMensaje(item.cliente),
-        delaySeg,
       } as any);
 
       setEnviados((n) => n + 1);
@@ -478,32 +446,26 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
         </div>
       </div>
 
-      {/* Configuración del mensaje */}
+      {/* Cómo funciona el mensaje (plantilla oficial del bot) */}
       <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <MessageSquareText className="w-4 h-4 text-purple-400" />
-          <h2 className="text-sm font-bold text-white">Mensaje</h2>
+          <ImageIcon className="w-4 h-4 text-purple-400" />
+          <h2 className="text-sm font-bold text-white">El mensaje lo arma el bot 🤖</h2>
         </div>
 
-        <textarea
-          value={plantilla}
-          onChange={(e) => setPlantilla(e.target.value)}
-          rows={7}
-          className="w-full bg-slate-900 text-white text-xs rounded-lg p-3 border border-slate-700 focus:border-purple-500 outline-none resize-none font-mono leading-relaxed"
-          placeholder="Escribe tu mensaje…"
-        />
-
-        <div className="flex flex-wrap gap-1.5">
-          {['{nombre}', '{prod}', '{cobrar}', '{dir}', '{dist}', '{empresa}', '{pos}'].map((v) => (
-            <button
-              key={v}
-              onClick={() => setPlantilla((p) => p + v)}
-              className="px-2 py-1 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono text-purple-300 hover:border-purple-500/50 transition-colors"
-              title="Toca para agregar al mensaje"
-            >
-              {v}
-            </button>
-          ))}
+        <div className="rounded-lg bg-slate-900 border border-slate-700 p-3 space-y-2">
+          <div className="flex items-start gap-2.5">
+            <span className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs shrink-0">🖼️</span>
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold text-white">Con imagen y texto ya listo</div>
+              <p className="text-[10px] text-slate-400 leading-relaxed mt-0.5">
+                Igual que en la versión 1: el bot envía a cada cliente su
+                <strong className="text-emerald-400"> plantilla oficial de inicio de ruta</strong> con la
+                <strong className="text-emerald-400"> imagen</strong> incluida, con los datos de cada cliente
+                (producto, monto, dirección y tu nombre). Acá solo eliges <strong>a quién</strong> y <strong>con cuánta pausa</strong>.
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Delay */}
@@ -528,14 +490,6 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
               className="w-16 px-2 py-1.5 bg-slate-800 border border-slate-600 rounded-lg text-white text-xs text-center outline-none focus:border-amber-500"
             />
             <span className="text-[10px] text-slate-400 font-bold">seg</span>
-          </div>
-        </div>
-
-        {/* Preview */}
-        <div className="rounded-lg bg-slate-900 border border-slate-700 p-3">
-          <div className="text-[9px] text-slate-500 uppercase font-bold mb-2">Así lo vería {clientesConCel[0]?.nombre?.split(' ')[0] || 'el cliente'}:</div>
-          <div className="rounded-lg bg-emerald-600/15 border border-emerald-500/20 p-2.5 text-[11px] text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
-            {preview}
           </div>
         </div>
       </div>
