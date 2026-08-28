@@ -1,8 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-// 📍 UBICAR CLIENTE - RiderTrack V2 (Fase 1.4)
+// 📍 UBICAR CLIENTE - RiderTrack V2 (Fase 1.4 → fix Fase 2.8)
 // Modal para ubicar manualmente a un cliente en el mapa:
 //   • Buscas su dirección con autocompletado (estilo Circuit)
-//   • Ves el punto en un mini-mapa de verificación
+//   • Ves el punto en el mini-mapa de verificación — AHORA SE
+//     VE SIEMPRE (Fase 2.8: antes el mapa nunca se inicializaba
+//     porque el div se creaba DESPUÉS del useEffect de init →
+//     quedaba un bloque negro/blanco vacío)
+//   • Tiles según el tema de la app (claro/oscuro)
+//   • Pin ARRASTRABLE y toque en el mapa para afinar la posición
 //   • Guardas → coordenada EXACTA (src: 'manual') para siempre
 //
 // Cuándo usarlo: cuando la geocodificación automática solo
@@ -13,9 +18,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { X, MapPin, Loader2, Save, Home, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, MapPin, Loader2, Save, Home, AlertTriangle, CheckCircle2, Move } from 'lucide-react';
 import { Cliente } from '../services/firestore';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
+import { tilesDeEstilo } from '../services/mapStyle';
 
 interface UbicarClienteModalProps {
   cliente: Cliente;
@@ -25,13 +31,16 @@ interface UbicarClienteModalProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
+/** Selección actual: dirección elegida + marca si el pin se movió a mano */
+type Seleccion = DireccionElegida & { ajustadoAMano?: boolean };
+
 export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
   cliente,
   onClose,
   onGuardar,
   onShowToast,
 }) => {
-  const [seleccion, setSeleccion] = useState<DireccionElegida | null>(null);
+  const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
   const [guardando, setGuardando] = useState(false);
 
   const yaTieneCoords =
@@ -50,33 +59,59 @@ export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Mini-mapa de verificación ───────────────────────────
+  // ── Mini-mapa de verificación (SIEMPRE visible) ─────────
+  // Fase 2.8: el div del mapa se renderiza desde el primer
+  // pintado (ya no depende de `seleccion`), así el useEffect de
+  // inicialización SÍ encuentra el nodo y el mapa carga.
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
 
+  // Centro inicial: coordenadas del cliente si ya tiene, si no Lima
+  const centroInicial: [number, number] = yaTieneCoords
+    ? [cliente.lat!, cliente.lng!]
+    : [-12.046374, -77.042793];
+
   useEffect(() => {
     if (!mapDivRef.current || mapRef.current) return;
     const map = L.map(mapDivRef.current, {
-      center: [seleccion?.lat ?? -12.046374, seleccion?.lng ?? -77.042793],
-      zoom: seleccion ? 16 : 11,
+      center: centroInicial,
+      zoom: yaTieneCoords ? 16 : 11,
       zoomControl: true,
       attributionControl: false,
     });
-    // Fase 2.0: tiles ESRI dark (sin API key — CARTO empezó a pedir
-    // key y mostraba "API KEY REQUIRED" sobre el mapa)
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-    }).addTo(map);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-    }).addTo(map);
+    // Tiles según el TEMA de la app (html.light → tiles claros),
+    // con la misma config gratuita ESRI del mapa de entregas.
+    const esTemaClaro =
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('light');
+    const conf = tilesDeEstilo(esTemaClaro ? 'claro' : 'oscuro');
+    L.tileLayer(conf.url, { maxZoom: conf.maxZoom }).addTo(map);
+    if (conf.refUrl) L.tileLayer(conf.refUrl, { maxZoom: conf.maxZoom }).addTo(map);
+
+    // Toque en el mapa → mover el pin ahí (precisión a mano)
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      const { lat, lng } = e.latlng;
+      setSeleccion((prev) =>
+        prev
+          ? { ...prev, lat, lng, ajustadoAMano: true }
+          : {
+              nombre: 'Punto elegido en el mapa',
+              distrito: cliente.dist,
+              lat,
+              lng,
+              ajustadoAMano: true,
+            }
+      );
+    });
+
     mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Mover el marcador cuando cambia la selección
@@ -89,7 +124,7 @@ export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
       html:
         `<div style="width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
         `background:#6366f1;border:3px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.6);` +
-        `display:flex;align-items:center;justify-content:center;">` +
+        `display:flex;align-items:center;justify-content:center;cursor:grab;">` +
         `<span style="transform:rotate(45deg);color:#fff;font-weight:900;font-size:14px">📍</span></div>`,
       iconSize: [34, 34],
       iconAnchor: [17, 34],
@@ -99,9 +134,19 @@ export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
       markerRef.current.setLatLng([seleccion.lat, seleccion.lng]);
       markerRef.current.setIcon(icon);
     } else {
-      markerRef.current = L.marker([seleccion.lat, seleccion.lng], { icon }).addTo(map);
+      const m = L.marker([seleccion.lat, seleccion.lng], { icon, draggable: true }).addTo(map);
+      // Arrastrar el pin → nueva posición exacta
+      m.on('dragend', () => {
+        const p = m.getLatLng();
+        setSeleccion((prev) =>
+          prev ? { ...prev, lat: p.lat, lng: p.lng, ajustadoAMano: true } : prev
+        );
+      });
+      // Evitar que tocar el pin dispare el click del mapa
+      m.on('click', (e) => L.DomEvent.stopPropagation(e as unknown as Event));
+      markerRef.current = m;
     }
-    map.setView([seleccion.lat, seleccion.lng], 17, { animate: true });
+    map.setView([seleccion.lat, seleccion.lng], Math.max(map.getZoom(), 16), { animate: true });
   }, [seleccion]);
 
   const guardar = async () => {
@@ -161,27 +206,48 @@ export const UbicarClienteModal: React.FC<UbicarClienteModalProps> = ({
             placeholder="ej: av sucre 523, jr cuzco…"
             icono="cliente"
             valorGuardado={null}
-            onElegir={(d) => setSeleccion(d)}
+            onElegir={(d) => setSeleccion({ ...d })}
             ayuda="Escribe la avenida o calle y elige la opción correcta de la lista."
           />
 
-          {/* Mini-mapa de verificación */}
-          {seleccion && (
-            <div className="space-y-2">
-              <div className="rounded-xl overflow-hidden border border-slate-700 relative">
-                <div ref={mapDivRef} className="h-44 w-full bg-slate-950" />
-              </div>
+          {/* Mini-mapa de verificación — SIEMPRE visible (Fase 2.8) */}
+          <div className="space-y-2">
+            <div className="rounded-xl overflow-hidden border border-slate-700 relative">
+              <div ref={mapDivRef} className="h-44 w-full bg-slate-950 z-0" />
+              {!seleccion && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-[1px] pointer-events-none px-6 text-center">
+                  <MapPin className="w-5 h-5 text-indigo-400 mb-1.5" />
+                  <p className="text-[11px] font-bold text-slate-200">
+                    {yaTieneCoords
+                      ? 'Esta es su ubicación guardada'
+                      : 'Sin ubicación todavía'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                    Busca la dirección abajo o toca el mapa para poner el pin
+                  </p>
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 flex items-center gap-1.5">
+              <Move className="w-3 h-3 shrink-0" />
+              Toca el mapa o arrastra el pin 📍 para afinar la posición exacta
+            </p>
+            {seleccion && (
               <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-indigo-300 truncate">{seleccion.nombre}</p>
+                  <p className="text-[11px] font-bold text-indigo-300 truncate">
+                    {seleccion.nombre}
+                    {seleccion.ajustadoAMano ? ' · ajustado a mano' : ''}
+                  </p>
                   <p className="text-[10px] text-slate-400">
-                    {seleccion.distrito ? `${seleccion.distrito} · ` : ''}verifica el punto en el mapa de arriba
+                    {seleccion.distrito ? `${seleccion.distrito} · ` : ''}
+                    verifica el punto en el mapa de arriba
                   </p>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Botones */}
           <div className="flex gap-2 pt-1">

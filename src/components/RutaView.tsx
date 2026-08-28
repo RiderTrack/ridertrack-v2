@@ -39,7 +39,9 @@ import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
 import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
-import { Flag, MapPinned, ClipboardList, Copy, Check } from 'lucide-react';
+import { Flag, MapPinned, ClipboardList, Copy, Check, Bike } from 'lucide-react';
+// Fase 2.8: exportación a la app Circuit (formato de importación)
+import { exportarCircuitRuta } from '../utils/exportarExcel';
 // Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
 import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
 
@@ -356,6 +358,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     return st;
   };
 
+  // 🛵 Exportar la ruta a la app Circuit (Fase 2.8 — como la v1)
+  const handleExportarCircuit = async () => {
+    if (clientes.length === 0) {
+      onShowToast?.('Sin clientes', 'No hay clientes en la ruta para exportar', 'warning');
+      return;
+    }
+    const orden = [...clientes].sort((a, b) => (a.num || 0) - (b.num || 0));
+    await exportarCircuitRuta(orden, onShowToast);
+  };
+
   // Importar Excel
   const handleImportarExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -602,6 +614,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             >
               {importando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
               <span>Excel</span>
+            </button>
+            {/* 🛵 Exportar a Circuit (Fase 2.8) — Excel con el formato
+                exacto de importación de la app Circuit */}
+            <button
+              onClick={handleExportarCircuit}
+              disabled={clientes.length === 0}
+              className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
+              title="Exportar la ruta como Excel para importar en la app Circuit (direcciones, teléfonos y notas)"
+            >
+              <Bike className="w-3.5 h-3.5" />
+              <span>Circuit</span>
             </button>
             <button
               onClick={async () => {

@@ -32,6 +32,7 @@ import {
   Play,
   Square,
   Bike,
+  LocateFixed,
 } from 'lucide-react';
 import { Order, NavigationTab } from '../types';
 import { Coordenadas, vigilarPosicion } from '../services/geocoding';
@@ -175,6 +176,11 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
   const [cargandoRuta, setCargandoRuta] = useState(false);
   const [simulando, setSimulando] = useState(false);
   const [inicioEstable, setInicioEstable] = useState<{ lat: number; lng: number } | null>(null);
+  // 🛵 Modo SEGUIRME (Fase 2.8, estilo Circuit): la cámara sigue
+  // a la moto en cada actualización del GPS; si el usuario arrastra
+  // el mapa, se desactiva solo.
+  const [siguiendo, setSiguiendo] = useState(false);
+  const siguiendoRef = useRef(false);
 
   // ── Refs ──────────────────────────────────────────────────
   const mapDivRef = useRef<HTMLDivElement>(null);
@@ -281,6 +287,13 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
           setSeleccionado(null);
         });
 
+        // 🛵 Arrastrar el mapa APAGA el modo seguirme (el usuario
+        // toma el control de la cámara, como en Circuit)
+        gmaps.event.addListener(map, 'dragstart', () => {
+          siguiendoRef.current = false;
+          setSiguiendo(false);
+        });
+
         setMapaListo(true);
       })
       .catch((e: any) => {
@@ -378,6 +391,10 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
         });
         m.setMap(map);
         riderMarkerRef.current = m;
+      }
+      // 🛵 Modo seguirme: la cámara persigue a la moto (Circuit-like)
+      if (siguiendoRef.current && map) {
+        map.panTo({ lat: miPosicion.lat, lng: miPosicion.lng });
       }
     }
 
@@ -620,10 +637,23 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
   }, []);
 
   // ── Acciones ──────────────────────────────────────────────
+  const activarSeguimiento = () => {
+    const nuevoValor = !siguiendo;
+    siguiendoRef.current = nuevoValor;
+    setSiguiendo(nuevoValor);
+    if (nuevoValor && miPosicion && mapRef.current) {
+      mapRef.current.setZoom(16);
+      mapRef.current.panTo({ lat: miPosicion.lat, lng: miPosicion.lng });
+    }
+  };
+
   const centrarEnMi = () => {
     if (miPosicion && mapRef.current) {
-      mapRef.current.panTo({ lat: miPosicion.lat, lng: miPosicion.lng });
+      // Centrar + activar el seguimiento (así la moto no se pierde)
+      siguiendoRef.current = true;
+      setSiguiendo(true);
       mapRef.current.setZoom(16);
+      mapRef.current.panTo({ lat: miPosicion.lat, lng: miPosicion.lng });
     }
   };
 
@@ -775,12 +805,32 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
           </button>
         )}
 
+        {/* Botón 🛵 Seguirme (Fase 2.8 — estilo Circuit): la cámara
+            persigue a la moto; arrastrar el mapa lo apaga */}
+        <button
+          onClick={activarSeguimiento}
+          disabled={!miPosicion}
+          className={`absolute bottom-4 left-3 z-10 flex items-center gap-1.5 px-3 py-2.5 rounded-xl border shadow-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-40 ${
+            siguiendo
+              ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 text-white animate-pulse'
+              : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-white'
+          }`}
+          title={
+            siguiendo
+              ? 'Siguiéndote — arrastra el mapa para soltar'
+              : 'El mapa te sigue mientras manejas (como Circuit)'
+          }
+        >
+          <LocateFixed className="w-4 h-4" />
+          {siguiendo ? 'Siguiéndote' : 'Seguirme'}
+        </button>
+
         {/* Botón centrar en mi posición */}
         <button
           onClick={centrarEnMi}
           disabled={!miPosicion}
           className="absolute bottom-4 right-3 z-10 p-2.5 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg disabled:opacity-40 transition-all"
-          title="Centrar mapa en mi posición"
+          title="Centrar mapa en mi posición (y seguirte)"
         >
           <Crosshair className="w-4 h-4" />
         </button>

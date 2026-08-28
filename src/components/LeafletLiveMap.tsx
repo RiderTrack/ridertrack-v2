@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Route as RouteIcon,
   Flag,
+  LocateFixed,
 } from 'lucide-react';
 import { Order, NavigationTab } from '../types';
 import { Coordenadas, vigilarPosicion } from '../services/geocoding';
@@ -107,6 +108,10 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
   const inicioMarkerRef = useRef<L.Marker | null>(null);
   const finMarkerRef = useRef<L.Marker | null>(null);
   const numMarcadoresRef = useRef(-1);
+  // 🛵 Modo SEGUIRME (Fase 2.8, estilo Circuit): la cámara sigue
+  // a la moto en cada tick del GPS; arrastrar el mapa lo apaga.
+  const [siguiendo, setSiguiendo] = useState(false);
+  const siguiendoRef = useRef(false);
 
   // ── Datos derivados ───────────────────────────────────────
   const ubicados = useMemo(
@@ -169,6 +174,13 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
     }).addTo(map);
 
     mapRef.current = map;
+
+    // 🛵 Arrastrar el mapa APAGA el modo seguirme (el usuario
+    // toma el control de la cámara, como en Circuit)
+    map.on('dragstart', () => {
+      siguiendoRef.current = false;
+      setSiguiendo(false);
+    });
 
     return () => {
       map.remove();
@@ -338,6 +350,11 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
           .bindTooltip(riderName || 'Tú', { className: 'rtmap-tooltip', direction: 'top', offset: [0, -18] })
           .addTo(map);
       }
+
+      // 🛵 Modo seguirme: la cámara persigue a la moto (Circuit-like)
+      if (siguiendoRef.current && map) {
+        map.panTo([miPosicion.lat, miPosicion.lng], { animate: true });
+      }
     }
 
     // 🏁 Inicio de ruta (bandera verde)
@@ -406,8 +423,21 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [miPosicion, ubicados, rutaInicio, rutaFin]);
 
+  const activarSeguimiento = () => {
+    const nuevoValor = !siguiendo;
+    siguiendoRef.current = nuevoValor;
+    setSiguiendo(nuevoValor);
+    if (nuevoValor && miPosicion && mapRef.current) {
+      mapRef.current.setZoom(16);
+      mapRef.current.panTo([miPosicion.lat, miPosicion.lng], { animate: true });
+    }
+  };
+
   const centrarEnMi = () => {
     if (miPosicion && mapRef.current) {
+      // Centrar + activar el seguimiento (así la moto no se pierde)
+      siguiendoRef.current = true;
+      setSiguiendo(true);
       mapRef.current.setView([miPosicion.lat, miPosicion.lng], 16, { animate: true });
     }
   };
@@ -520,12 +550,32 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
       <div className="relative h-[420px] sm:h-[520px]">
         <div ref={mapDivRef} className="absolute inset-0 z-0" />
 
+        {/* Botón 🛵 Seguirme (Fase 2.8 — estilo Circuit): la cámara
+            persigue a la moto; arrastrar el mapa lo apaga */}
+        <button
+          onClick={activarSeguimiento}
+          disabled={!miPosicion}
+          className={`absolute bottom-4 left-3 z-10 flex items-center gap-1.5 px-3 py-2.5 rounded-xl border shadow-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-40 ${
+            siguiendo
+              ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 text-white animate-pulse'
+              : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-white'
+          }`}
+          title={
+            siguiendo
+              ? 'Siguiéndote — arrastra el mapa para soltar'
+              : 'El mapa te sigue mientras manejas (como Circuit)'
+          }
+        >
+          <LocateFixed className="w-4 h-4" />
+          {siguiendo ? 'Siguiéndote' : 'Seguirme'}
+        </button>
+
         {/* Botón centrar en mi posición */}
         <button
           onClick={centrarEnMi}
           disabled={!miPosicion}
           className="absolute bottom-4 right-3 z-10 p-2.5 rounded-xl bg-slate-900/90 text-white hover:bg-slate-800 border border-slate-700 shadow-lg disabled:opacity-40 transition-all"
-          title="Centrar mapa en mi posición"
+          title="Centrar mapa en mi posición (y seguirte)"
         >
           <Crosshair className="w-4 h-4" />
         </button>

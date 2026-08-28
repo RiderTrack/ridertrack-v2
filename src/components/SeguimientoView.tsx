@@ -34,7 +34,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
-import { useRefrigerio, useCronoRuta, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
+import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
 
 interface SeguimientoViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -83,6 +83,9 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
   const { clientes, loading, stats } = useClientes();
   const { crono, rutaMs } = useCronoRuta(user?.uid);
   const refri = useRefrigerio(user?.uid);
+  // 🚀 Hora de inicio de jornada (Fase 2.8): "empiezo a las 10" →
+  // el ETA se calcula desde esa hora mientras la ruta no arranque
+  const { inicioHora, definirInicio, quitarInicio } = useJornada(user?.uid);
 
   const [minPorParada, setMinPorParada] = useState<number>(() => {
     try {
@@ -98,6 +101,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const [horaProg, setHoraProg] = useState<string>('');
   const [duracionProg, setDuracionProg] = useState<number>(30);
+  const [inicioPanelAbierto, setInicioPanelAbierto] = useState(false);
+  const [horaInicioEdit, setHoraInicioEdit] = useState<string>('');
 
   // Cargar valores programados al panel
   useEffect(() => {
@@ -105,12 +110,29 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
     setDuracionProg(refri.refri.duracionMin || 30);
   }, [refri.refri.programadoHora, refri.refri.duracionMin]);
 
+  // Cargar la hora de inicio al panel
+  useEffect(() => {
+    setHoraInicioEdit(inicioHora || '');
+  }, [inicioHora]);
+
   // ── Cálculo del ETA (cada segundo via tick del hook) ──
   const calculo = useMemo(() => {
     const ahora = Date.now();
     const entregados = clientes.filter((c) => ST_ENTREGADOS.includes(c.st));
     const fallidos = clientes.filter((c) => ST_FALLIDOS.includes(c.st));
     const pendientes = clientes.filter((c) => c.st === 'pendiente' || !c.st);
+
+    // 🚀 Hora de inicio de jornada (Fase 2.8): si el rider definió
+    // a qué hora sale (ej: 10:00) y la ruta todavía no arranca (sin
+    // cronómetro ni entregas), los ETAs parten de esa hora — no de
+    // la hora actual. Así el pronóstico sirve a cualquier hora del
+    // día en que consulte la app.
+    const inicioJornadaMs = inicioHora ? hoyHoraAMs(inicioHora) : null;
+    const yaEmpezo = rutaMs > 0 || entregados.length > 0;
+    const baseMs =
+      inicioJornadaMs !== null && !yaEmpezo && inicioJornadaMs > ahora
+        ? inicioJornadaMs
+        : ahora;
 
     // ⏱ Ritmo real suavizado: mientras arranca la ruta mezcla el
     // ritmo por defecto con el real (factor bayesiano simple),
@@ -127,7 +149,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
     } else if (refri.refri.estado === 'pendiente' && refri.refri.programadoHora) {
       const horaProgMs = hoyHoraAMs(refri.refri.programadoHora);
       if (horaProgMs !== null) {
-        const etaBaseMs = ahora + pendientes.length * ritmoSeg * 1000;
+        const etaBaseMs = baseMs + pendientes.length * ritmoSeg * 1000;
         // ¿La hora del refrigerio cae antes de terminar la ruta?
         if (horaProgMs < etaBaseMs && horaProgMs + durMs > ahora) {
           refriExtraMs = Math.max(0, Math.min(durMs, horaProgMs + durMs - ahora));
@@ -135,11 +157,11 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       }
     }
 
-    const etaFinalMs = ahora + pendientes.length * ritmoSeg * 1000 + refriExtraMs;
+    const etaFinalMs = baseMs + pendientes.length * ritmoSeg * 1000 + refriExtraMs;
 
     // ⏰ ETA de llegada por cliente pendiente (en orden de ruta)
     const etas = new Map<string, number>();
-    let t = ahora;
+    let t = baseMs;
     let refriAplicado = refri.refri.estado !== 'pendiente'; // activo/terminado ya no se aplican
     if (refri.refri.estado === 'activo') {
       t += refri.segundosRestantes * 1000; // lo que falta del refri actual
@@ -158,6 +180,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
 
     return {
       ahora,
+      baseMs,
+      yaEmpezo,
       entregados,
       fallidos,
       pendientes,
@@ -168,7 +192,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       segundosRestantes: Math.max(0, (etaFinalMs - ahora) / 1000),
       progreso: clientes.length > 0 ? entregados.length / clientes.length : 0,
     };
-  }, [clientes, rutaMs, refri.refri, refri.segundosRestantes, minPorParada]);
+  }, [clientes, rutaMs, refri.refri, refri.segundosRestantes, minPorParada, inicioHora]);
 
   // ── Acciones ──
   const llamarCliente = (c: Cliente) => {
@@ -199,6 +223,18 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       localStorage.setItem(MIN_PARADA_KEY, String(v));
     } catch {}
     setAjusteRitmoAbierto(false);
+  };
+
+  const guardarHoraInicio = () => {
+    definirInicio(horaInicioEdit);
+    setInicioPanelAbierto(false);
+    onShowToast?.(
+      '🚀 Hora de inicio guardada',
+      horaInicioEdit
+        ? `Sales a las ${horaInicioEdit} — tu hora de fin se recalcula desde ahí`
+        : 'Se calculará desde la hora actual',
+      'success'
+    );
   };
 
   const guardarProgramacionRefri = () => {
@@ -299,6 +335,9 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
               <>
                 <p className="text-4xl font-black text-white leading-tight tabular-nums">{horaDe(calculo.etaFinalMs)}</p>
                 <p className="text-xs text-slate-400">
+                  {calculo.baseMs > calculo.ahora && (
+                    <span className="text-blue-300 font-bold">sales {inicioHora} · </span>
+                  )}
                   faltan ~{formatearDuracion(calculo.segundosRestantes)} · {calculo.pendientes.length}{' '}
                   {calculo.pendientes.length === 1 ? 'parada' : 'paradas'} por hacer
                 </p>
@@ -313,6 +352,11 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
             <span className="px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-[10px] font-bold text-slate-300">
               ⏱️ ~{Math.max(1, Math.round(calculo.ritmoSeg / 60))} min por parada
             </span>
+            {calculo.baseMs > calculo.ahora && (
+              <span className="px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold">
+                🚀 Sales a las {inicioHora}
+              </span>
+            )}
             {crono ? (
               <span
                 className={`px-2 py-1 rounded-full border text-[10px] font-bold ${
@@ -334,13 +378,30 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                 🍽️ +{Math.round(calculo.refriExtraMs / 60000)} min de refrigerio
               </span>
             )}
-            <button
-              onClick={() => setAjusteRitmoAbierto(!ajusteRitmoAbierto)}
-              className="ml-auto flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-slate-300 transition-colors"
-            >
-              <Settings2 className="w-3 h-3" />
-              Ajustar ritmo
-            </button>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setInicioPanelAbierto(!inicioPanelAbierto);
+                  setAjusteRitmoAbierto(false);
+                  if (inicioPanelAbierto) setHoraInicioEdit(inicioHora || '');
+                }}
+                className={`flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] font-bold transition-colors ${
+                  inicioPanelAbierto
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-300'
+                }`}
+                title="¿A qué hora empiezas a trabajar? Mejora el cálculo de tu hora de fin"
+              >
+                🚀 {inicioHora ? (calculo.yaEmpezo ? `Saliste ${inicioHora}` : `Sales ${inicioHora}`) : 'Hora de inicio'}
+              </button>
+              <button
+                onClick={() => setAjusteRitmoAbierto(!ajusteRitmoAbierto)}
+                className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-slate-300 transition-colors"
+              >
+                <Settings2 className="w-3 h-3" />
+                Ajustar ritmo
+              </button>
+            </div>
           </div>
         )}
 
@@ -365,6 +426,63 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* 🚀 Hora de inicio de jornada (Fase 2.8) */}
+        {inicioPanelAbierto && !rutaVacia && (
+          <div className="mt-2.5 rounded-xl bg-slate-800/80 border border-slate-700 p-2.5 space-y-2">
+            <p className="text-[10px] text-slate-400">
+              ¿A qué hora empiezas a trabajar? Si la ruta aún no arranca, tu hora de fin se
+              calcula desde aquí (ej: sales a las 10:00) — no desde la hora en que miras la app.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="time"
+                value={horaInicioEdit}
+                onChange={(e) => setHoraInicioEdit(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-blue-500"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {['08:00', '09:00', '10:00', '11:00'].map((h) => (
+                  <button
+                    key={h}
+                    onClick={() => setHoraInicioEdit(h)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                      horaInicioEdit === h
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={guardarHoraInicio}
+                className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all active:scale-95"
+              >
+                Guardar
+              </button>
+              {inicioHora && (
+                <button
+                  onClick={() => {
+                    quitarInicio();
+                    setInicioPanelAbierto(false);
+                    onShowToast?.('Hora de inicio quitada', 'El cálculo parte de la hora actual', 'info');
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold transition-all active:scale-95"
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 leading-snug">
+              Cuando inicies el cronómetro o registres tu primera entrega, el cálculo pasa
+              automáticamente a tu ritmo real.
+            </p>
           </div>
         )}
       </div>
