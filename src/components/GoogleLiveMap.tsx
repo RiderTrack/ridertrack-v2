@@ -312,9 +312,24 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
   // ── Efecto 2: cambiar el skin (estilos) ──────────────────
   useEffect(() => {
     if (mapRef.current && gmapsRef.current) {
-      mapRef.current.setOptions({ styles: estilosGoogleDe(estilo) });
+      mapRef.current.setOptions({
+        styles: estilosGoogleDe(estilo),
+        // El fondo tras los tiles también sigue al estilo (sin
+        // “flash” oscuro al cargar el mapa claro)
+        backgroundColor: estilo === 'claro' ? '#e8eef6' : '#0f172a',
+      });
     }
   }, [estilo, mapaListo]);
+
+  // ── Efecto 2b: el mapa sigue al TEMA de la app en vivo (Fase
+  //    2.10). Al tocar el sol/luna del header, App cambia
+  //    rt_tile_style y dispara "rt_theme" — aquí lo escuchamos y
+  //    re-skinneamos el mapa SIN recargar la vista. ──────────
+  useEffect(() => {
+    const onTema = () => setEstilo(getEstiloMapa());
+    window.addEventListener('rt_theme', onTema);
+    return () => window.removeEventListener('rt_theme', onTema);
+  }, []);
 
   // ── Efecto 3: GPS en vivo ────────────────────────────────
   useEffect(() => {
@@ -671,23 +686,29 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
 
   // ── Render ────────────────────────────────────────────────
   return (
-    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 light:border-slate-200 overflow-hidden shadow-xl flex flex-col isolate">
+    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 overflow-hidden shadow-xl flex flex-col isolate">
       {/* Animaciones y ajustes visuales sobre Google Maps */}
       <style>{`
         @keyframes rtgPing { 0% { transform: scale(1); opacity: 0.6 } 100% { transform: scale(2.6); opacity: 0 } }
-        .rtgmap-container { position: absolute; inset: 0; z-index: 0; background: #0f172a; }
+        .rtgmap-container { position: absolute; inset: 0; z-index: 0; background: ${
+          estilo === 'claro' ? '#e8eef6' : '#0f172a'
+        }; }
         .rtgmap-container .gm-style .gm-style-mtc, .rtgmap-container .gm-svpc { display: none !important; }
         @media (max-width: 640px) { .rtgmap-container { filter: saturate(1.05); } }
       `}</style>
 
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-b border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 z-10">
+      {/* Header — (Fase 2.10) sin clases light:bg-slate-100: en esta
+          app el tema claro INVIERTE la paleta slate con variables CSS
+          (slate-100 = tinta oscura), así que esas clases pintaban la
+          franja de azul marino. Las utilidades base (bg-slate-900/90,
+          text-white, border-slate-700/70) ya se invierten solas. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 border-b border-slate-700/70 dark:border-slate-700/70 z-10">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
             <MapPin className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-sm text-white dark:text-white light:text-slate-900 flex items-center gap-2">
+            <h3 className="font-bold text-sm text-white dark:text-white flex items-center gap-2">
               Mapa de Entregas
               {gpsEstado === 'ok' && (
                 <span className="flex h-2 w-2 relative">
@@ -962,14 +983,15 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
         )}
       </div>
 
-      {/* Barra inferior: siguiente parada + estimación real */}
-      <div className="p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-t border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 flex flex-wrap items-center justify-between gap-3">
+      {/* Barra inferior: siguiente parada + estimación real
+          (Fase 2.10 — sin light:bg-slate-100, misma razón del header) */}
+      <div className="p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 border-t border-slate-700/70 dark:border-slate-700/70 flex flex-wrap items-center justify-between gap-3">
         {siguienteParada ? (
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">
               Siguiente parada
             </p>
-            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900 truncate">
+            <p className="text-sm font-bold text-white dark:text-white truncate">
               #{siguienteParada.num ?? '·'} {siguienteParada.cliente}
             </p>
             <p className="text-[11px] text-slate-400 truncate">
@@ -980,7 +1002,7 @@ export const GoogleLiveMap: React.FC<GoogleLiveMapProps> = ({
         ) : (
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Ruta</p>
-            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900">
+            <p className="text-sm font-bold text-white dark:text-white">
               {orders.length === 0
                 ? 'Sin clientes'
                 : entregados === orders.length

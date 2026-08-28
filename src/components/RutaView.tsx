@@ -607,14 +607,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             </p>
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importando}
-              className="flex items-center gap-1 px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
-            >
-              {importando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-              <span>Excel</span>
-            </button>
+            {/* (Fase 2.10) El botón Excel se mudó del header a la tarjeta
+                "🏁 Gestión de ruta" — junto a EXPORTAR A CIRCUIT: el header
+                quedaba desordenado con 4 botones. Aquí quedan Sync | Ruta | + */}
             <button
               onClick={async () => {
                 const count = await sincronizarDesdeModular();
@@ -2331,6 +2326,20 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       {clientes.length > 0 && (
         <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-2">
           <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">🏁 Gestión de ruta</div>
+
+          {/* 📂 Importar Excel (Fase 2.10 — mudado del header aquí, junto
+              a Exportar a Circuit: los 2 Excel de la ruta viven juntos y
+              el header de Mi Ruta queda limpio: Sync | Ruta | +) */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importando}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
+            title="Cargar los clientes del día desde un Excel (.xlsx / .xls)"
+          >
+            {importando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            IMPORTAR EXCEL
+            <span className="text-[10px] font-medium text-emerald-400/70">· clientes del día</span>
+          </button>
 
           {/* 🛵 Exportar a Circuit (Fase 2.8, movido aquí en la 2.9 para
               no saturar el header) — Excel con el formato exacto de

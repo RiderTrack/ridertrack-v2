@@ -206,6 +206,16 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
     (tileRef.current as any).eachLayer?.((l: any) => l.bringToBack?.());
   }, [estilo]);
 
+  // ── El mapa sigue al TEMA de la app en vivo (Fase 2.10): App
+  //    cambia rt_tile_style y dispara "rt_theme" al tocar el
+  //    sol/luna — aquí lo escuchamos y cambiamos los tiles sin
+  //    recargar la vista.
+  useEffect(() => {
+    const onTema = () => setEstilo(getEstiloMapa());
+    window.addEventListener('rt_theme', onTema);
+    return () => window.removeEventListener('rt_theme', onTema);
+  }, []);
+
   // ── GPS en vivo ───────────────────────────────────────────
   useEffect(() => {
     setGpsEstado('buscando');
@@ -453,8 +463,10 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
   const nombreEstilo = estilo === 'oscuro' ? 'Oscuro' : estilo === 'claro' ? 'Claro' : 'Estándar';
 
   return (
-    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 light:border-slate-200 overflow-hidden shadow-xl flex flex-col isolate">
-      {/* Estilos para popups/tooltip oscuros + animaciones sobre el mapa Leaflet */}
+    <div className="relative rounded-2xl bg-slate-800 dark:bg-slate-800 light:bg-white border border-slate-700/80 dark:border-slate-700/80 overflow-hidden shadow-xl flex flex-col isolate">
+      {/* Estilos para popups/tooltip + animaciones sobre el mapa Leaflet.
+          (Fase 2.10) Los popups/controles oscuros ahora tienen su versión
+          clara bajo .light — antes quedaban oscuros sobre el mapa claro. */}
       <style>{`
         @keyframes rtmapPing { 0% { transform: scale(1); opacity: 0.6 } 100% { transform: scale(2.6); opacity: 0 } }
         @keyframes rtmapFlujo { to { stroke-dashoffset: -300; } }
@@ -464,21 +476,35 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         .rtmap-popup .leaflet-popup-content { margin: 12px 14px; font-size: 12px; line-height: 1.5; }
         .rtmap-tooltip.leaflet-tooltip { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; font-size: 11px; font-weight: 700; }
         .rtmap-tooltip.leaflet-tooltip::before { border-top-color: #1e293b; }
-        .leaflet-container { background: #0f172a; font-family: inherit; }
+        .leaflet-container { background: ${
+          estilo === 'claro' ? '#e8eef6' : '#0f172a'
+        }; font-family: inherit; }
         .leaflet-bar a { background: #1e293b; color: #e2e8f0; border-color: #334155; }
         .leaflet-bar a:hover { background: #334155; }
         .leaflet-control-attribution { background: rgba(15,23,42,.75) !important; color: #94a3b8 !important; font-size: 9px !important; }
         .leaflet-control-attribution a { color: #cbd5e1 !important; }
+        /* ── Versión CLARA (tema claro de la app) ── */
+        .light .rtmap-popup .leaflet-popup-content-wrapper { background: #ffffff; color: #0f1a2e; border-color: #dbe3ee; box-shadow: 0 8px 24px rgba(15,23,42,.18); }
+        .light .rtmap-popup .leaflet-popup-tip { background: #ffffff; border-color: #dbe3ee; }
+        .light .rtmap-tooltip.leaflet-tooltip { background: #ffffff; color: #0f1a2e; border-color: #dbe3ee; }
+        .light .rtmap-tooltip.leaflet-tooltip::before { border-top-color: #ffffff; }
+        .light .leaflet-bar a { background: #ffffff; color: #334155; border-color: #dbe3ee; }
+        .light .leaflet-bar a:hover { background: #f1f5f9; }
+        .light .leaflet-control-attribution { background: rgba(255,255,255,.82) !important; color: #51617b !important; }
+        .light .leaflet-control-attribution a { color: #2563eb !important; }
       `}</style>
 
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-b border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 z-10">
+      {/* Header — (Fase 2.10) sin clases light:bg-slate-100: el tema
+          claro de esta app INVIERTE la paleta slate con variables CSS
+          (slate-100 = tinta oscura), así que esas clases pintaban la
+          franja de azul marino. Las utilidades base ya se invierten solas. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 border-b border-slate-700/70 dark:border-slate-700/70 z-10">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
             <MapPin className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-sm text-white dark:text-white light:text-slate-900 flex items-center gap-2">
+            <h3 className="font-bold text-sm text-white dark:text-white flex items-center gap-2">
               Mapa de Entregas
               <span className="px-1.5 py-0.5 rounded bg-slate-700/60 text-[9px] font-bold text-slate-300">
                 modo sin conexión a Google
@@ -649,14 +675,15 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         )}
       </div>
 
-      {/* Barra inferior: siguiente parada + estimación de ruta */}
-      <div className="p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 light:bg-slate-100 border-t border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 flex flex-wrap items-center justify-between gap-3">
+      {/* Barra inferior: siguiente parada + estimación de ruta
+          (Fase 2.10 — sin light:bg-slate-100, misma razón del header) */}
+      <div className="p-3.5 px-5 bg-slate-900/90 dark:bg-slate-900/90 border-t border-slate-700/70 dark:border-slate-700/70 flex flex-wrap items-center justify-between gap-3">
         {siguienteParada ? (
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">
               Siguiente parada
             </p>
-            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900 truncate">
+            <p className="text-sm font-bold text-white dark:text-white truncate">
               #{siguienteParada.num ?? '·'} {siguienteParada.cliente}
             </p>
             <p className="text-[11px] text-slate-400 truncate">
@@ -667,7 +694,7 @@ export const LeafletLiveMap: React.FC<LeafletLiveMapProps> = ({
         ) : (
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Ruta</p>
-            <p className="text-sm font-bold text-white dark:text-white light:text-slate-900">
+            <p className="text-sm font-bold text-white dark:text-white">
               {orders.length === 0
                 ? 'Sin clientes'
                 : entregados === orders.length
