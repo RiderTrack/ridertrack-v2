@@ -174,8 +174,19 @@ export function useClientes() {
   }, [clientes, guardar]);
 
   // Actualizar un cliente
+  // (Fase 2.4: si un valor del cambio es explícitamente `undefined`,
+  //  el campo se ELIMINA del cliente — ej: borrar lat/lng cuando el
+  //  usuario cambia la dirección y hay que re-ubicarla. Firestore
+  //  rechaza valores undefined, así que jamás viajan.)
   const actualizarCliente = useCallback((id: string | number, cambios: Partial<Cliente>) => {
-    const nuevos = clientes.map(c => c.id === id ? { ...c, ...cambios } : c);
+    const nuevos = clientes.map(c => {
+      if (c.id !== id) return c;
+      const mezclado: Record<string, unknown> = { ...c, ...cambios };
+      for (const k of Object.keys(mezclado)) {
+        if (mezclado[k] === undefined) delete mezclado[k];
+      }
+      return mezclado as unknown as Cliente;
+    });
     guardar(nuevos);
   }, [clientes, guardar]);
 
