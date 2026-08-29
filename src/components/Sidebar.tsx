@@ -6,7 +6,6 @@ import {
   Users,
   Bike,
   MapPin,
-  MessageSquare,
   BarChart2,
   Settings,
   User,
@@ -24,6 +23,7 @@ import {
   Navigation,
   TrendingUp,
   Images,
+  Bot,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -38,6 +38,8 @@ interface SidebarProps {
   onCloseMobile: () => void;
   activeOrdersCount: number;
   activeDriversCount: number;
+  /** Fase 3.1: chats sin leer del bot de Baileys (badge del menú) */
+  chatNoLeidos?: number;
   /** Nombre real del rider (perfil) */
   riderName?: string;
   /** Avatar ilustrado elegido (Fase 1.5) */
@@ -68,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   activeOrdersCount,
   activeDriversCount,
+  chatNoLeidos = 0,
   riderName = 'Rider',
   riderAvatar,
   onSeleccionarAvatar,
@@ -107,7 +110,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'motorizados', label: 'GPS del Motorizado', icon: Radar },
         { id: 'broadcast', label: 'Broadcast WhatsApp', icon: Megaphone },
         { id: 'galeria', label: 'Galería de Entregas', icon: Images },
-        { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
+        {
+          id: 'whatsapp',
+          label: 'Chat Baileys',
+          icon: Bot,
+          badge: chatNoLeidos > 0 ? `${chatNoLeidos}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
       ],
     },
     {
