@@ -581,7 +581,7 @@ export const BroadcastView: React.FC<BroadcastViewProps> = ({ onShowToast }) => 
                       )}
                     </div>
                     <div className="text-[10px] text-slate-400 truncate">
-                      {c.dist || 'Sin distrito'} · 📱 {c.cel} · S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}
+                      {c.dist || 'Sin distrito'} · 📱 {c.cel} · S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}
                     </div>
                   </div>
                   {marcado && <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />}

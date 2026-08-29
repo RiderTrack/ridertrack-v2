@@ -251,7 +251,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
                               {c.dist && <div className="text-[9px] text-slate-500 truncate">{c.dist}</div>}
                             </div>
                             <div className="text-right shrink-0">
-                              <div className="text-[11px] font-black text-slate-200">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</div>
+                              <div className="text-[11px] font-black text-slate-200">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                               <div className={`text-[9px] ${entregado ? 'text-emerald-400' : 'text-amber-400'}`}>
                                 {ETIQUETAS_ESTADO[c.st] || c.st || 'Pendiente'}
                               </div>

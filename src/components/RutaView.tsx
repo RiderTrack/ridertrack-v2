@@ -988,7 +988,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         {c.hora && <span className="text-[9px] text-slate-500 shrink-0">{c.hora}</span>}
                       </div>
                       <div className="text-right shrink-0">
-                        <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</span>
+                        <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</span>
                         <span className={`ml-1.5 text-[9px] font-bold ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
                           {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
                         </span>
@@ -1145,7 +1145,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                   {/* Monto */}
                   <div className="text-right shrink-0">
-                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</div>
+                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                     <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
 

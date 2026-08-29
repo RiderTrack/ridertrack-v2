@@ -31,6 +31,7 @@ import { leerHistorial, RegistroHistorial, Cliente } from '../services/firestore
 import { FotoEntregaModal } from './FotoEntregaModal';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
 import { partirHoy, fotosDeHistorial, FotoHistorial } from '../utils/stats';
+import { descargarArchivo } from '../utils/descargaArchivo';
 
 interface GaleriaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -82,34 +83,52 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
   const historico = useMemo(() => fotosDeHistorial(registros), [registros]);
 
   // ── Lightbox: descargar / compartir ──
+  // Fix 2.18: usan descargarArchivo() — en el APK el <a download> y
+  // el navigator.share del WebView no existen; ahora la foto se
+  // comparte por la hoja nativa (o se guarda en Documentos).
+  const fotoABlob = async (foto: FotoHistorial): Promise<Blob> => {
+    const res = await fetch(foto.url);
+    return res.blob();
+  };
+
+  const nombreFoto = (foto: FotoHistorial): string =>
+    `entrega_${foto.nombre.replace(/\s+/g, '_')}.jpg`;
+
   const compartirFoto = async (foto: FotoHistorial) => {
     try {
-      const res = await fetch(foto.url);
-      const blob = await res.blob();
-      const file = new File([blob], `entrega_${foto.nombre.replace(/\s+/g, '_')}.jpg`, { type: blob.type || 'image/jpeg' });
-      if (navigator.share && (navigator as any).canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Foto de entrega' });
-        return;
-      }
-      throw new Error('no-share-files');
-    } catch (e: any) {
-      // Fallback: descargar directo
+      const blob = await fotoABlob(foto);
+      const res = await descargarArchivo(
+        blob,
+        nombreFoto(foto),
+        onShowToast,
+        '📷 Foto compartida',
+        '',
+        true, // APK: abrir primero la hoja de compartir
+      );
+      if (res === null) descargarFoto(foto, true); // último recurso
+    } catch {
       descargarFoto(foto, true);
     }
   };
 
-  const descargarFoto = (foto: FotoHistorial, silencioso = false) => {
-    if (foto.url.startsWith('data:')) {
-      const a = document.createElement('a');
-      a.href = foto.url;
-      a.download = `entrega_${foto.nombre.replace(/\s+/g, '_')}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      if (!silencioso) onShowToast?.('✅ Descargada', 'Foto guardada en tu equipo', 'success');
-    } else {
-      window.open(foto.url, '_blank');
-      if (!silencioso) onShowToast?.('📷 Foto abierta', 'Mantén presionada o usa el menú para guardar', 'info');
+  const descargarFoto = async (foto: FotoHistorial, silencioso = false) => {
+    try {
+      const blob = await fotoABlob(foto);
+      const res = await descargarArchivo(
+        blob,
+        nombreFoto(foto),
+        silencioso ? undefined : onShowToast,
+        '📷 Foto guardada',
+      );
+      if (res === null && !silencioso) {
+        window.open(foto.url, '_blank');
+        onShowToast?.('📷 Foto abierta', 'Mantén presionada o usa el menú para guardar', 'info');
+      }
+    } catch {
+      if (!silencioso) {
+        window.open(foto.url, '_blank');
+        onShowToast?.('📷 Foto abierta', 'Mantén presionada o usa el menú para guardar', 'info');
+      }
     }
   };
 
