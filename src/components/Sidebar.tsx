@@ -22,6 +22,8 @@ import {
   Megaphone,
   Cloud,
   Navigation,
+  TrendingUp,
+  Images,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -104,12 +106,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'mapa', label: 'Mapa de Entregas', icon: MapPin },
         { id: 'motorizados', label: 'GPS del Motorizado', icon: Radar },
         { id: 'broadcast', label: 'Broadcast WhatsApp', icon: Megaphone },
+        { id: 'galeria', label: 'Galería de Entregas', icon: Images },
         { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
       ],
     },
     {
       titulo: 'Análisis',
       items: [
+        { id: 'stats', label: 'Estadísticas', icon: TrendingUp },
         { id: 'estadisticas', label: 'Resumen del día', icon: PieChart },
         { id: 'historial', label: 'Historial de rutas', icon: History },
       ],
