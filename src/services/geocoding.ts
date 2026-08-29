@@ -34,6 +34,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { getGoogleApiKey } from './googleMaps';
+import { extraerCoordenadas } from '../utils/direcciones';
 
 // Re-exports para compatibilidad (SettingsView y otros los usan)
 export { getGoogleApiKey, setGoogleApiKey, motorActivo } from './googleMaps';
@@ -628,6 +629,16 @@ export function vigilarPosicion(
  */
 export async function geocodificarDireccion(dir: string, dist?: string): Promise<Coordenadas | null> {
   if (!dir || !dir.trim()) return null;
+
+  // 0. 📍 Vía rápida de COORDENADAS (Fix 2.18): si la "dirección"
+  //    es un par de coordenadas pegado ("-12.000013,-77.108397"),
+  //    se usa TAL CUAL — exacta, sin gastar geocoder ni red. Así
+  //    el mapa y el optimizador clavan el pin donde el cliente
+  //    dijo que está, y no en otro distrito.
+  const coordsPegadas = extraerCoordenadas(dir);
+  if (coordsPegadas) {
+    return { lat: coordsPegadas.lat, lng: coordsPegadas.lng, src: 'manual' };
+  }
 
   const consulta = normalizarConsulta(dir, dist);
   if (!consulta) return null;
