@@ -9,9 +9,11 @@ import {
   BarChart3,
   Route,
   ShieldCheck,
+  Camera,
 } from 'lucide-react';
 import { UserProfile } from '../hooks/useAuth';
 import { Card, Badge, Button } from './ui';
+import { AvatarSvg, avatarPorId, CATEGORIAS } from '../data/avatars';
 
 interface DriversViewProps {
   profile: UserProfile | null;
@@ -40,6 +42,11 @@ export const DriversView: React.FC<DriversViewProps> = ({
     .join('')
     .toUpperCase();
 
+  // Avatar ilustrado elegido en el picker (Fase 2.14): tiene prioridad
+  // sobre la foto de Google y las iniciales — igual que en header, menú y GPS.
+  const avatarElegido = avatarPorId(profile?.avatar);
+  const categoriaAvatar = CATEGORIAS.find((c) => c.id === avatarElegido.categoria);
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
@@ -61,29 +68,51 @@ export const DriversView: React.FC<DriversViewProps> = ({
       {/* Tarjeta principal del rider */}
       <Card className="space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-          {/* Avatar */}
-          {profile?.foto ? (
-            <img
-              src={profile.foto}
-              alt={nombre}
-              className="w-20 h-20 rounded-2xl object-cover ring-2 ring-blue-500/50 mx-auto sm:mx-0"
-            />
-          ) : (
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-black text-2xl flex items-center justify-center ring-2 ring-blue-500/50 mx-auto sm:mx-0">
-              {iniciales || 'R'}
-            </div>
-          )}
+          {/* Avatar ilustrado elegido (Fase 2.14); si no hay, foto de Google;
+              si tampoco, iniciales. Con cámara para cambiarlo al vuelo. */}
+          <div className="relative group shrink-0 mx-auto sm:mx-0">
+            {profile?.avatar ? (
+              <AvatarSvg
+                id={profile.avatar}
+                className="w-20 h-20"
+                anillo="ring-2 ring-blue-500/50 shadow-lg"
+              />
+            ) : profile?.foto ? (
+              <img
+                src={profile.foto}
+                alt={nombre}
+                className="w-20 h-20 rounded-2xl object-cover ring-2 ring-blue-500/50"
+              />
+            ) : (
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-black text-2xl flex items-center justify-center ring-2 ring-blue-500/50">
+                {iniciales || 'R'}
+              </div>
+            )}
+            <button
+              onClick={() => onNavigateTab('perfil')}
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-600 border-2 border-slate-800 flex items-center justify-center hover:bg-blue-500 transition-colors"
+              title="Cambiar avatar"
+            >
+              <Camera className="w-3 h-3 text-white" />
+            </button>
+          </div>
 
-          <div className="flex-1 text-center sm:text-left">
+          <div className="flex-1 text-center sm:text-left min-w-0">
             <h2 className="text-xl font-black text-white">{nombre}</h2>
             <p className="text-xs text-slate-400 font-mono">{profile?.email || '—'}</p>
             <div className="flex flex-wrap items-center gap-2 mt-2 justify-center sm:justify-start">
               <Badge variant="green" size="sm" dot>
                 En ruta
               </Badge>
-              <Badge variant="blue" size="sm">
-                RiderTrack V2
-              </Badge>
+              {profile?.avatar ? (
+                <Badge variant="purple" size="sm">
+                  {categoriaAvatar?.emoji} {avatarElegido.nombre}
+                </Badge>
+              ) : (
+                <Badge variant="blue" size="sm">
+                  RiderTrack V2
+                </Badge>
+              )}
             </div>
           </div>
         </div>
