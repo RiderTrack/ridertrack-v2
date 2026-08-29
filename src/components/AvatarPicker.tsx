@@ -1,14 +1,23 @@
 // ═══════════════════════════════════════════════════════════
-// 👤 AVATAR PICKER — Fase 1.5
-// Galería estilo Netflix/streaming: "¿Quién está repartiendo hoy?"
+// 👤 AVATAR PICKER — Fase 2.13
+// Galería con los DISEÑOS PROPIOS del equipo en 4 categorías
+// (Rider / Tecnología / Animales / Gaming) + los clásicos SVG.
 // Se abre desde el menú hamburguesa (tocando tu avatar) y desde
 // Perfil. La elección se guarda en Firestore (usuarios/{uid}.avatar)
 // y aparece en header, sidebar y GPS del motorizado.
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Check, Sparkles, Loader2 } from 'lucide-react';
-import { AVATARES, AvatarSvg, avatarPorId } from '../data/avatars';
+import {
+  AVATARES,
+  AVATAR_DEFAULT,
+  CATEGORIAS,
+  CategoriaAvatar,
+  AvatarSvg,
+  avatarPorId,
+  categoriaDeAvatar,
+} from '../data/avatars';
 
 interface AvatarPickerProps {
   isOpen: boolean;
@@ -25,10 +34,32 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   onSeleccionar,
   onShowToast,
 }) => {
-  const [seleccionado, setSeleccionado] = useState<string>(avatarActual || 'rider');
+  const [seleccionado, setSeleccionado] = useState<string>(avatarActual || AVATAR_DEFAULT);
+  // pestaña inicial = categoría del avatar actual (para verlo marcado)
+  const [categoria, setCategoria] = useState<CategoriaAvatar>(categoriaDeAvatar(avatarActual));
   const [guardando, setGuardando] = useState(false);
 
+  // Si la pestaña activa queda fuera de pantalla (fila scrolleable),
+  // centrarla al abrir para que el rider vea su categoría marcada.
+  const chipActivoRef = useRef<HTMLButtonElement | null>(null);
+  const estabaAbierto = useRef(false);
+  useEffect(() => {
+    if (isOpen && !estabaAbierto.current) {
+      // abrir siempre desde el avatar actual (el picker puede quedar
+      // montado en cerrado y conservar estado viejo)
+      setSeleccionado(avatarActual || AVATAR_DEFAULT);
+      setCategoria(categoriaDeAvatar(avatarActual));
+      requestAnimationFrame(() => {
+        chipActivoRef.current?.scrollIntoView({ inline: 'center', block: 'nearest' });
+      });
+    }
+    estabaAbierto.current = isOpen;
+  }, [isOpen, avatarActual]);
+
   if (!isOpen) return null;
+
+  const deCategoria = AVATARES.filter((a) => a.categoria === categoria);
+  const seleccionadoDef = avatarPorId(seleccionado);
 
   const confirmar = async () => {
     setGuardando(true);
@@ -36,7 +67,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
       await onSeleccionar(seleccionado);
       onShowToast?.(
         '✨ Avatar actualizado',
-        `Ahora eres ${avatarPorId(seleccionado).nombre} — se ve en toda la app`,
+        `Ahora eres ${seleccionadoDef.nombre} — se ve en toda la app`,
         'success'
       );
       onClose();
@@ -59,7 +90,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-black text-white">¿Quién reparte hoy?</h2>
               <p className="text-[11px] text-slate-400">
-                Elige tu personaje — se muestra en el menú, el header y el GPS
+                32 diseños propios en 4 estilos — se muestra en el menú, el header y el GPS
               </p>
             </div>
             <button
@@ -72,10 +103,42 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
           </div>
         </div>
 
-        {/* Grid de avatares */}
+        {/* Pestañas de categoría */}
+        <div className="px-3 pt-3 pb-1 border-b border-slate-700/60">
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-2 -mb-px">
+            {CATEGORIAS.map((cat) => {
+              const activo = categoria === cat.id;
+              const n = AVATARES.filter((a) => a.categoria === cat.id).length;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setCategoria(cat.id)}
+                  ref={categoria === cat.id ? chipActivoRef : undefined}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 flex items-center gap-1.5 ${
+                    activo
+                      ? 'bg-indigo-500/25 border-indigo-400 text-indigo-200'
+                      : 'bg-slate-800/70 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                  }`}
+                >
+                  <span className="text-sm leading-none">{cat.emoji}</span>
+                  {cat.nombre}
+                  <span
+                    className={`px-1.5 py-px rounded-md text-[9px] ${
+                      activo ? 'bg-indigo-400/30 text-indigo-100' : 'bg-slate-700/70 text-slate-500'
+                    }`}
+                  >
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Grid de avatares de la categoría */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-            {AVATARES.map((av) => {
+            {deCategoria.map((av) => {
               const activo = seleccionado === av.id;
               return (
                 <button
@@ -110,13 +173,19 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
           </div>
 
           <p className="mt-4 text-[10px] text-slate-500 text-center leading-relaxed">
-            Ilustraciones propias de RiderTrack — más personajes vendrán en futuras
-            versiones 🎨
+            {categoria === 'clasicos'
+              ? 'Los clásicos SVG de la primera versión — siguen disponibles por si te encariñaste 🎨'
+              : 'Ilustraciones diseñadas por el equipo RiderTrack 🎨 — incluidas en el APK, sin internet'}
           </p>
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-700 bg-slate-900/95">
+          {seleccionadoDef.categoria !== categoria && (
+            <p className="mb-2 text-[10px] text-amber-400/90 text-center">
+              ⚠️ Tu selección ({seleccionadoDef.nombre}) está en otra pestaña — igual se guardará
+            </p>
+          )}
           <button
             onClick={confirmar}
             disabled={guardando}
@@ -128,7 +197,8 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
               </>
             ) : (
               <>
-                <Check className="w-4 h-4" /> Usar {avatarPorId(seleccionado).nombre}
+                <AvatarSvg id={seleccionado} className="w-6 h-6 rounded-lg" />
+                <span className="truncate">Usar {seleccionadoDef.nombre}</span>
               </>
             )}
           </button>
