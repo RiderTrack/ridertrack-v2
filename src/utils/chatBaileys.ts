@@ -19,6 +19,17 @@
 // + campanas  (lista de campañas con stats para el panel Broadcast)
 // + bot_silenciado (chats donde apagaste el bot)
 //
+// FASE 3.3:
+// + clientes_registrados.foto_perfil → FOTOS DE PERFIL reales de
+//   WhatsApp (igual que la v1 — el bot las sube y actualiza)
+// + notas de voz → se graban en la app, suben a Storage y el bot
+//   las envía por la vía VERIFICADA de campañas (cola_envio +
+//   multimedia {tipo:'audio'} → PTT), sin tocar el bot
+// + Grupo MATE · Trabajo → conversación especial que reúne todo lo
+//   que el bot reporta al grupo de trabajo (enviar_grupo_mate,
+//   otros_temas_mate, enviar_foto_grupo_mate)
+// + fijar chat / fondo del chat / borrar chat (preferencias locales)
+//
 // La app SOLO escribe en las colas; el robot de Baileys es el único
 // que toca WhatsApp (igual que la v1). Cero riesgo de baneo extra.
 // ═══════════════════════════════════════════════════════════
@@ -40,7 +51,7 @@ import {
   DocumentData,
   Unsubscribe,
 } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { db, storage, storageRef, uploadBytes, getDownloadURL } from '../services/firebase';
 
 /** UID del rider dueño del bot (mismo que usa la v1 y la v2) */
 export const UID_BOT = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
@@ -74,6 +85,8 @@ export interface MensajeChat {
   base64?: string;
   mimetype?: string;
   nombreArchivo?: string;
+  /** nota de voz: URL en Storage para reproducirla */
+  audioUrl?: string;
   /** ubicación */
   lat?: number | null;
   lng?: number | null;
@@ -91,6 +104,25 @@ export interface Conversacion {
   ultimoMensaje: MensajeChat | null;
   silenciado: boolean;
   detalleSilencio?: string;
+  /** foto de perfil REAL de WhatsApp (clientes_registrados.foto_perfil) */
+  foto?: string;
+  /** conversación especial del grupo de trabajo (MATE) */
+  esGrupo?: boolean;
+}
+
+/** Clave de la conversación sintética del grupo de trabajo */
+export const TEL_GRUPO_MATE = 'GRUPO_MATE';
+
+/** Acciones del bot que van al grupo de trabajo MATE */
+const TIPOS_GRUPO_MATE = [
+  'enviar_grupo_mate',
+  'otros_temas_mate',
+  'enviar_foto_grupo_mate',
+  'reporte_pago_mate',
+];
+
+function esAccionGrupoMate(tipo?: string): boolean {
+  return !!tipo && TIPOS_GRUPO_MATE.includes(tipo);
 }
 
 export interface CampanaBot {
@@ -155,17 +187,33 @@ interface SuscripcionesChat {
 }
 
 /**
- * Suscripción combinada a las 4 fuentes de la línea de tiempo.
+ * Suscripción combinada a las fuentes de la línea de tiempo.
  * Devuelve las conversaciones ordenadas por última actividad.
+ * (Incluye la conversación sintética "Grupo MATE · Trabajo" y las
+ * fotos de perfil reales de clientes_registrados.foto_perfil.)
  */
 export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   const convs = new Map<string, Conversacion>();
   let silenciados = new Set<string>();
   const detallesSilencio = new Map<string, string>();
+  const fotos = new Map<string, string>();
   let unsubs: Unsubscribe[] = [];
 
+  // Conversación sintética del grupo de trabajo (siempre presente)
+  const convGrupo: Conversacion = {
+    tel: TEL_GRUPO_MATE,
+    nombre: 'Grupo MATE · Trabajo',
+    mensajes: [],
+    noLeidos: 0,
+    ultimoTimestamp: 0,
+    ultimoMensaje: null,
+    silenciado: false,
+    esGrupo: true,
+  };
+  convs.set(TEL_GRUPO_MATE, convGrupo);
+
   const emitir = () => {
-    // recontar no leídos + silencio
+    // recontar no leídos + silencio + fotos
     let noLeidos = 0;
     let mensajesHoy = 0;
     const inicioHoy = new Date();
@@ -179,14 +227,21 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
       c.ultimoTimestamp = c.ultimoMensaje ? c.ultimoMensaje.timestamp : 0;
       c.silenciado = silenciados.has(c.tel);
       c.detalleSilencio = detallesSilencio.get(c.tel);
+      if (!c.esGrupo) c.foto = fotos.get(c.tel) || undefined;
       noLeidos += c.noLeidos;
       mensajesHoy += c.mensajes.filter((m) => m.timestamp >= inicioHoy.getTime()).length;
     });
 
-    lista.sort((a, b) => b.ultimoTimestamp - a.ultimoTimestamp);
+    lista.sort((a, b) => {
+      // El grupo de trabajo siempre va primero (como un chat fijado)
+      if (a.esGrupo) return -1;
+      if (b.esGrupo) return 1;
+      return b.ultimoTimestamp - a.ultimoTimestamp;
+    });
 
+    const clientes = lista.filter((c) => !c.esGrupo);
     callback(lista, {
-      total: lista.length,
+      total: clientes.length,
       noLeidos,
       mensajesHoy,
       silenciados: silenciados.size,
@@ -250,6 +305,7 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
           });
         });
         convs.forEach((c) => {
+          if (c.esGrupo) return; // el grupo de trabajo siempre vive
           if (c.mensajes.length === 0 && c.ultimoTimestamp === 0) convs.delete(c.tel);
         });
         emitir();
@@ -293,6 +349,8 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   );
 
   // 3. Acciones del bot (avisos, ubicación, yape, broadcast inicio)
+  //    Las acciones dirigidas al GRUPO MATE van a la conversación
+  //    sintética del grupo (como WhatsApp: el mensaje vive en el grupo).
   unsubs.push(
     onSnapshot(
       query(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), orderBy('createdAt', 'desc'), limit(80)),
@@ -300,12 +358,31 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
         convs.forEach((c) => {
           c.mensajes = c.mensajes.filter((m) => m.origen !== 'bot');
         });
+        convGrupo.mensajes = [];
         snap.forEach((d) => {
           const m = d.data();
+          const ts = m.createdAt ? Date.parse(m.createdAt) : 0;
+
+          // → Grupo de trabajo MATE
+          if (esAccionGrupoMate(m.tipo as string)) {
+            convGrupo.mensajes.push({
+              id: 'ab_' + d.id,
+              tel: TEL_GRUPO_MATE,
+              origen: 'bot',
+              tipoContenido: 'texto',
+              texto: String(m.texto || m.mensaje || etiquetaAccionBot(m.tipo as string)),
+              timestamp: ts || (m.processedAt ? Date.parse(m.processedAt) : 0),
+              leido: true,
+              enviado: m.processed === undefined ? null : !!m.processed,
+              accionBot: m.tipo,
+              nombre: m.nombre || 'Rudy',
+            });
+            return;
+          }
+
           const tel = telKey(m.telefono);
           if (!tel) return;
           const conv = asegurarConv(tel, m.nombre);
-          const ts = m.createdAt ? Date.parse(m.createdAt) : 0;
           conv.mensajes.push({
             id: 'ab_' + d.id,
             tel,
@@ -326,18 +403,19 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   );
 
   // 4. Campañas masivas (cola_envio con estado por destinatario)
+  //    Los docs es_chat=true son NOTAS DE VOZ tuyas (Fase 3.3): se
+  //    renderizan como mensaje tuyo con audio, no como campaña.
   unsubs.push(
     onSnapshot(
       query(collection(db!, 'cola_envio'), limit(80)),
       (snap: QuerySnapshot<DocumentData>) => {
         convs.forEach((c) => {
-          c.mensajes = c.mensajes.filter((m) => m.origen !== 'campana');
+          c.mensajes = c.mensajes.filter((m) => m.origen !== 'campana' && !(m.origen === 'rudy' && m.audioUrl));
         });
         snap.forEach((d) => {
           const m = d.data();
           const tel = telKey(m.celular);
           if (!tel) return;
-          const conv = asegurarConv(tel, m.nombre);
           const ts = m.enviado_en
             ? Date.parse(m.enviado_en)
             : m.procesado_en
@@ -345,6 +423,28 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
               : m.creada_en
                 ? Date.parse(m.creada_en)
                 : 0;
+
+          // Nota de voz del chat (enviada por esta app)
+          if (m.es_chat === true) {
+            const conv = asegurarConv(tel, m.nombre);
+            conv.mensajes.push({
+              id: 'ce_' + d.id,
+              tel,
+              origen: 'rudy',
+              tipoContenido: 'audio',
+              texto: '🎙️ Nota de voz',
+              timestamp: ts,
+              leido: true,
+              enviado: m.status === 'enviado',
+              audioUrl: m.audio_url || m.multimedia?.url,
+              mimetype: 'audio/webm',
+              nombreArchivo: m.multimedia?.nombre || 'nota_de_voz.webm',
+              nombre: m.nombre,
+            });
+            return;
+          }
+
+          const conv = asegurarConv(tel, m.nombre);
           conv.mensajes.push({
             id: 'ce_' + d.id,
             tel,
@@ -358,6 +458,25 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
             nombreCampana: m.campaign_id,
             nombre: m.nombre,
           });
+        });
+        emitir();
+      },
+      ignorar
+    )
+  );
+
+  // 6. FOTOS DE PERFIL reales de WhatsApp (clientes_registrados.foto_perfil)
+  //    — igual que la v1: el bot guarda/actualiza la foto y el panel la lee.
+  unsubs.push(
+    onSnapshot(
+      collection(db!, 'clientes_registrados'),
+      (snap: QuerySnapshot<DocumentData>) => {
+        fotos.clear();
+        snap.forEach((d) => {
+          const url = d.data()?.foto_perfil;
+          if (!url) return;
+          const tel = telKey(d.id) || telKey(d.data()?.telefono);
+          if (tel) fotos.set(tel, String(url));
         });
         emitir();
       },
@@ -587,6 +706,317 @@ export async function marcarLeidoChat(tel: string): Promise<void> {
 /** Eliminar un mensaje entrante (spam / foto pesada) */
 export async function eliminarMensajeChat(docId: string): Promise<void> {
   await deleteDoc(doc(db!, 'mensajes_clientes', docId));
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.3 — GRUPO DE TRABAJO MATE
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * ✍️ Escribir al grupo de trabajo MATE desde el chat.
+ * Usa la acción 'enviar_grupo_mate' que el bot YA conoce
+ * (RutaView la usa para los reportes) con { texto }.
+ */
+export async function enviarAGrupoMate(texto: string, rider?: RiderInfo): Promise<void> {
+  const t = texto.trim();
+  if (!t) throw new Error('Escribe un mensaje para el grupo');
+  await addDoc(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), {
+    tipo: 'enviar_grupo_mate',
+    clienteId: 'grupo_mate',
+    telefono: '',
+    nombre: 'Grupo MATE',
+    prod: '',
+    cobrar: 0,
+    dir: '',
+    dist: '',
+    texto: t,
+    ...(rider ? { rider } : {}),
+    createdAt: new Date().toISOString(),
+    processed: false,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.3 — NOTAS DE VOZ (grabar → Storage → bot → WhatsApp)
+// ═══════════════════════════════════════════════════════════
+
+/** Tipos MIME de grabación soportados (el primero que el device soporte) */
+function mimeTypeGrabacion(): string | null {
+  if (typeof MediaRecorder === 'undefined') return null;
+  const opciones = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  return opciones.find((t) => MediaRecorder.isTypeSupported(t)) || null;
+}
+
+export interface Grabacion {
+  blob: Blob;
+  mimetype: string;
+  duracionSeg: number;
+}
+
+/**
+ * Inicia la grabación de una nota de voz.
+ * Devuelve { parar, cancelar } — parar() resuelve con la grabación,
+ * cancelar() descarta todo y libera el micrófono.
+ */
+export async function iniciarGrabacionAudio(): Promise<{
+  parar: () => Promise<Grabacion>;
+  cancelar: () => void;
+}> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Este dispositivo no soporta grabación de audio');
+  }
+  const mime = mimeTypeGrabacion();
+  if (!mime) throw new Error('Formato de audio no soportado en este equipo');
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream, { mimeType: mime });
+  const pedazos: Blob[] = [];
+  const inicio = Date.now();
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) pedazos.push(e.data);
+  };
+
+  const liberar = () => stream.getTracks().forEach((t) => t.stop());
+  recorder.start(250);
+
+  return {
+    parar: () =>
+      new Promise<Grabacion>((resolve) => {
+        recorder.onstop = () => {
+          liberar();
+          resolve({
+            blob: new Blob(pedazos, { type: mime }),
+            mimetype: mime,
+            duracionSeg: Math.max(1, Math.round((Date.now() - inicio) / 1000)),
+          });
+        };
+        try {
+          recorder.stop();
+        } catch {
+          liberar();
+          resolve({ blob: new Blob(pedazos, { type: mime }), mimetype: mime, duracionSeg: 1 });
+        }
+      }),
+    cancelar: () => {
+      try {
+        recorder.onstop = null;
+        recorder.stop();
+      } catch { /* noop */ }
+      liberar();
+    },
+  };
+}
+
+/**
+ * Sube la nota de voz a Firebase Storage y devuelve la URL.
+ * Ruta: campanas/chat_audios/{uid}/{tel}_{ts}.webm (misma familia que
+ * usaba la v1 para las campañas — reglas de Storage ya la permiten).
+ */
+async function subirAudioStorage(uid: string, tel: string, grab: Grabacion): Promise<string> {
+  if (!storage) throw new Error('Storage no disponible');
+  const ext = grab.mimetype.includes('mp4') ? 'm4a' : grab.mimetype.includes('ogg') ? 'ogg' : 'webm';
+  const ruta = `campanas/chat_audios/${uid}/${tel}_${Date.now()}.${ext}`;
+  const ref = storageRef(storage, ruta);
+  await uploadBytes(ref, grab.blob, {
+    contentType: grab.mimetype,
+    customMetadata: { uid, tel, tipo: 'nota_voz_chat' },
+  });
+  return getDownloadURL(ref);
+}
+
+/**
+ * 🎙️ Enviar nota de voz por el chat.
+ * Vía VERIFICADA del bot (campanas_bot.js): doc en cola_envio con
+ * multimedia {tipo:'audio'} → el bot lo manda como nota de voz PTT.
+ * Sin campaign_id → el bot no toca stats de campañas y borra el doc
+ * al terminar. También queda en el historial local del teléfono.
+ */
+export async function enviarAudioNotaChat(
+  uid: string,
+  tel: string,
+  nombre: string,
+  grab: Grabacion
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const url = await subirAudioStorage(uid, t9, grab);
+  const nombreArchivo = `nota_de_voz_${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.${url.includes('.m4a') ? 'm4a' : 'webm'}`;
+
+  await setDoc(doc(db!, 'cola_envio', `${telCompleto(t9)}_chat_${Date.now()}`), {
+    celular: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    mensaje: '',
+    multimedia: { tipo: 'audio', url, nombre: nombreArchivo },
+    audio_url: url,
+    es_chat: true,
+    velocidad: 8,
+    status: 'pendiente',
+    creada_en: new Date().toISOString(),
+    intentos: 0,
+  });
+
+  registrarAudioLocal({ tel: t9, ts: Date.now(), url, seg: grab.duracionSeg });
+}
+
+// ── Historial local de notas de voz (para que no "desaparezcan"
+//    cuando el bot borra el doc de cola_envio al enviarlo) ──
+
+export interface AudioLocal {
+  tel: string;
+  ts: number;
+  url: string;
+  seg: number;
+}
+
+const KEY_AUDIOS = 'rt_chat_audios_v1';
+
+export function leerAudiosLocales(): AudioLocal[] {
+  try {
+    const lista = JSON.parse(localStorage.getItem(KEY_AUDIOS) || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function registrarAudioLocal(a: AudioLocal): void {
+  try {
+    const lista = leerAudiosLocales().filter((x) => x.url !== a.url);
+    lista.unshift(a);
+    localStorage.setItem(KEY_AUDIOS, JSON.stringify(lista.slice(0, 200)));
+  } catch { /* sin espacio */ }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.3 — FIJAR CHAT (como WhatsApp)
+// ═══════════════════════════════════════════════════════════
+
+const KEY_FIJADOS = 'rt_chat_fijados_v1';
+
+export function leerFijados(): Set<string> {
+  try {
+    const lista = JSON.parse(localStorage.getItem(KEY_FIJADOS) || '[]');
+    return new Set(Array.isArray(lista) ? lista : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function toggleFijado(tel: string): boolean {
+  const fijados = leerFijados();
+  if (fijados.has(tel)) fijados.delete(tel);
+  else fijados.add(tel);
+  try {
+    localStorage.setItem(KEY_FIJADOS, JSON.stringify(Array.from(fijados)));
+  } catch { /* noop */ }
+  return fijados.has(tel);
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.3 — FONDO DEL CHAT (como WhatsApp)
+// ═══════════════════════════════════════════════════════════
+
+export interface FondoChat {
+  /** id del preset o 'solido' | 'personalizada' */
+  id: string;
+  /** css background completo (imagen/gradiente/color) */
+  css: string;
+  /** versión oscura del fondo (para burbujas claras si hace falta) */
+  oscuro: boolean;
+}
+
+export const FONDOS_CHAT_PRESET: FondoChat[] = [
+  { id: 'por_defecto', css: '', oscuro: true },
+  {
+    id: 'doodle_oscuro',
+    css:
+      `radial-gradient(circle at 12% 20%, rgba(16,185,129,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 80% 15%, rgba(56,189,248,.08) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 40% 70%, rgba(52,211,153,.09) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 90% 80%, rgba(251,191,36,.07) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 20% 85%, rgba(167,139,250,.08) 0 2px, transparent 3px),` +
+      `#0b141a`,
+    oscuro: true,
+  },
+  {
+    id: 'doodle_claro',
+    css:
+      `radial-gradient(circle at 15% 25%, rgba(5,150,105,.12) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 70% 10%, rgba(2,132,199,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 35% 60%, rgba(22,163,74,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 85% 75%, rgba(217,119,6,.10) 0 2px, transparent 3px),` +
+      `#e7ded3`,
+    oscuro: false,
+  },
+  { id: 'papel', css: 'linear-gradient(160deg, #1c2530 0%, #101820 100%)', oscuro: true },
+  { id: 'bosque', css: 'linear-gradient(160deg, #0f2a1e 0%, #06120c 100%)', oscuro: true },
+  { id: 'noche', css: 'linear-gradient(160deg, #141426 0%, #07070f 100%)', oscuro: true },
+  { id: 'carbon', css: 'linear-gradient(160deg, #1f2937 0%, #0d1117 100%)', oscuro: true },
+  { id: 'vino', css: 'linear-gradient(160deg, #2a1220 0%, #120810 100%)', oscuro: true },
+];
+
+const KEY_FONDO = 'rt_chat_fondo_v1';
+
+export function leerFondoChat(): FondoChat {
+  try {
+    const f = JSON.parse(localStorage.getItem(KEY_FONDO) || 'null');
+    if (f && f.id && typeof f.css === 'string') return f;
+  } catch { /* noop */ }
+  return FONDOS_CHAT_PRESET[0];
+}
+
+export function guardarFondoChat(f: FondoChat): void {
+  try {
+    localStorage.setItem(KEY_FONDO, JSON.stringify(f));
+  } catch { /* sin espacio */ }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.3 — BORRAR CHAT (como WhatsApp)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 🗑️ Borra el historial de una conversación:
+ *  - TODOS los mensajes_clientes del cliente (sus mensajes)
+ *  - las respuestas_manuales YA ENVIADAS (las pendientes se
+ *    respetan porque el bot todavía las tiene en cola)
+ * El chat desaparece de la lista al quedarse sin mensajes.
+ */
+export async function borrarChatCompleto(tel: string): Promise<{ entrantes: number; salientes: number }> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const variantes = telVariants(t9);
+  let entrantes = 0;
+  let salientes = 0;
+
+  // 1. Mensajes del cliente
+  const snapEntrantes = await getDocs(
+    query(collection(db!, 'mensajes_clientes'), where('telefono', 'in', variantes))
+  );
+  if (!snapEntrantes.empty) {
+    const batch1 = writeBatch(db!);
+    snapEntrantes.forEach((d) => batch1.delete(d.ref));
+    await batch1.commit();
+    entrantes = snapEntrantes.size;
+  }
+
+  // 2. Respuestas tuyas YA enviadas (el historial saliente)
+  const snapSalientes = await getDocs(
+    query(collection(db!, 'respuestas_manuales'), where('telefono', 'in', variantes))
+  );
+  const enviadas = snapSalientes.docs.filter((d) => d.data()?.enviado === true);
+  if (enviadas.length > 0) {
+    // Firestore: máx 500 operaciones por batch
+    for (let i = 0; i < enviadas.length; i += 450) {
+      const batch = writeBatch(db!);
+      enviadas.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+    salientes = enviadas.length;
+  }
+
+  return { entrantes, salientes };
 }
 
 // ─────────────────────────────────────────────────────────────
