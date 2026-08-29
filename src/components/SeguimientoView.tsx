@@ -18,6 +18,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Phone,
   MessageCircle,
+  Link2,
   Check,
   X,
   UtensilsCrossed,
@@ -32,6 +33,11 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import {
+  construirLinkSeguimiento,
+  mensajeSeguimiento,
+  compartirLink,
+} from '../utils/seguimientoLink';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
 import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
@@ -256,6 +262,36 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
       return;
     }
     window.open(`https://wa.me/${tel}`, '_blank');
+  };
+
+  // ── 🔗 Compartir link de seguimiento en vivo (Fase 2.15) ──
+  const [compartiendo, setCompartiendo] = useState(false);
+  const compartirSeguimiento = async (c: Cliente) => {
+    if (!user?.uid || compartiendo) return;
+    setCompartiendo(true);
+    try {
+      const link = construirLinkSeguimiento(user.uid, c.id);
+      if (!link) {
+        onShowToast?.('Sin sesión', 'No pude crear el link — reinicia la app', 'error');
+        return;
+      }
+      const texto = mensajeSeguimiento(c.nombre || '', '');
+      const r = await compartirLink(link, texto);
+      if (r === 'compartido') {
+        onShowToast?.('Link enviado', 'Se abrió el menú para compartir', 'success');
+      } else if (r === 'copiado') {
+        onShowToast?.(
+          'Link copiado',
+          `Pégalo en el chat de ${c.nombre || 'tu cliente'}`,
+          'success'
+        );
+      } else {
+        // Último recurso: mostrar el link para copiarlo a mano
+        onShowToast?.('Copia este link', link, 'info');
+      }
+    } finally {
+      setCompartiendo(false);
+    }
   };
 
   const guardarMinParada = (v: number) => {
@@ -793,6 +829,14 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                     </button>
                   </>
                 )}
+                <button
+                  onClick={() => compartirSeguimiento(proximo)}
+                  disabled={compartiendo}
+                  className="w-10 h-10 rounded-full bg-sky-600 hover:bg-sky-500 flex items-center justify-center text-white transition-all active:scale-90 shadow-lg shadow-sky-600/30 disabled:opacity-60"
+                  title={`Compartir seguimiento en vivo con ${proximo.nombre || 'el cliente'}`}
+                >
+                  <Link2 className="w-4.5 h-4.5" />
+                </button>
               </div>
             </div>
           </div>
@@ -906,25 +950,35 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                     </p>
                   </div>
 
-                  {/* Botones rápidos 📞 WA */}
-                  {tel && (
-                    <div className="flex flex-col gap-1 flex-shrink-0">
+                  {/* Botones rápidos 📞 WA 🔗 (el link funciona con o sin celular) */}
+                  <div className="flex flex-col gap-1 flex-shrink-0">
+                    {tel && (
+                      <>
+                        <button
+                          onClick={() => llamarCliente(c)}
+                          className="w-8 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white transition-all active:scale-90"
+                          title={`Llamar a ${c.nombre}`}
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => escribirCliente(c)}
+                          className="w-8 h-8 rounded-full bg-slate-700 hover:bg-teal-600 flex items-center justify-center text-slate-200 hover:text-white transition-all active:scale-90"
+                          title="Escribir por WhatsApp"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
                       <button
-                        onClick={() => llamarCliente(c)}
-                        className="w-8 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white transition-all active:scale-90"
-                        title={`Llamar a ${c.nombre}`}
+                        onClick={() => compartirSeguimiento(c)}
+                        disabled={compartiendo}
+                        className="w-8 h-8 rounded-full bg-sky-600/90 hover:bg-sky-500 flex items-center justify-center text-white transition-all active:scale-90 disabled:opacity-60"
+                        title={`Compartir seguimiento en vivo con ${c.nombre || 'el cliente'}`}
                       >
-                        <Phone className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => escribirCliente(c)}
-                        className="w-8 h-8 rounded-full bg-slate-700 hover:bg-teal-600 flex items-center justify-center text-slate-200 hover:text-white transition-all active:scale-90"
-                        title="Escribir por WhatsApp"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />
+                        <Link2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                  )}
                 </div>
               );
             })}
