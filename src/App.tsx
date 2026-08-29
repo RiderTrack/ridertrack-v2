@@ -14,6 +14,7 @@ import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppModal } from './components/WhatsAppModal';
 // Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
 import { ChatBaileysView } from './components/ChatBaileysView';
+import { BotControlView } from './components/BotControlView';
 import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
@@ -598,6 +599,17 @@ export default function App() {
           {/* Fase 3.1: 🤖 Chat de Baileys estilo WhatsApp Web — todo lo que el
               robot envía y recibe (chats, broadcasts, pedidos de ubicación) */}
           {activeTab === 'whatsapp' && <ChatBaileysView onShowToast={showToast} />}
+
+          {/* Fase 3.2: 🧰 Centro del Bot (mudanza de ClienteTrack) —
+              Plantillas del bot + Automatizaciones (maestro, IA, horario,
+              silenciados, palabras de enojo, registro) en una vista con tabs */}
+          {activeTab === 'plantillas' && (
+            <BotControlView vistaInicial="plantillas" onShowToast={showToast} />
+          )}
+
+          {activeTab === 'automatizaciones' && (
+            <BotControlView vistaInicial="automatizaciones" onShowToast={showToast} />
+          )}
 
           {/* Fase 2.5: 📢 Broadcast masivo con el bot (delay anti-ban) */}
           {activeTab === 'broadcast' && <BroadcastView onShowToast={showToast} />}

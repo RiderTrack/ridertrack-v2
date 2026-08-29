@@ -9,6 +9,8 @@ export type NavigationTab =
   | 'mapa'
   | 'motorizados'
   | 'whatsapp'
+  | 'plantillas'
+  | 'automatizaciones'
   | 'broadcast'
   | 'historial'
   | 'stats'
