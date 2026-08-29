@@ -5,6 +5,8 @@
 //   · KPIs: S/ cobrado (tuyo vs empresa), entregas, km, días
 //     trabajados, promedios por día
 //   · 📅 Comparativa semana vs semana (S/ y entregas, % ▲▼)
+//   · 📈 Curva animada de evolución (Fase 2.17: la curva con
+//     gradiente azul de la vista vieja, ahora con datos reales)
 //   · Gráficos: S/ por día, entregas por día, métodos de pago
 //   · 🏆 Récords: mejor día, día con más entregas, mejor semana
 //   · HOY EN CURSO: si la ruta del día está activa, sus entregas
@@ -33,9 +35,13 @@ import {
   PieChart as PieIcon,
   BarChart3,
   Camera,
+  Download,
+  Activity,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   XAxis,
@@ -50,6 +56,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
 import { leerHistorial, RegistroHistorial } from '../services/firestore';
+import { exportarExcelMes } from '../utils/excelMes';
 import {
   DiaAgregado,
   fechaCorta,
@@ -88,6 +95,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
   const [periodo, setPeriodo] = useState<Periodo>('30d');
+  const [exportandoExcel, setExportandoExcel] = useState(false);
 
   const cargar = useCallback(async (silencioso = false) => {
     if (!user?.uid) return;
@@ -124,6 +132,18 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
     }
     return base;
   }, [registros, hoyVivo, user?.uid]);
+
+  // ── Excel del mes (Fase 2.17-C): exporta el mes en curso ──
+  const exportarMes = useCallback(async () => {
+    if (exportandoExcel) return;
+    setExportandoExcel(true);
+    try {
+      // registrosConHoy: el mes en curso incluye HOY vivo si hay entregas
+      await exportarExcelMes(registrosConHoy, onShowToast);
+    } finally {
+      setExportandoExcel(false);
+    }
+  }, [exportandoExcel, registrosConHoy, onShowToast]);
 
   // ── Agregado por día dentro del periodo ──
   const dias = useMemo<DiaAgregado[]>(() => {
@@ -198,14 +218,25 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
               Tu rendimiento con los datos reales de tus rutas
             </p>
           </div>
-          <button
-            onClick={() => cargar(true)}
-            disabled={refrescando}
-            className="p-2 rounded-xl bg-slate-900/60 border border-slate-700 text-slate-400 hover:text-white transition-colors disabled:opacity-40"
-            title="Actualizar"
-          >
-            <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportarMes}
+              disabled={exportandoExcel || dias.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 text-white font-bold text-xs border border-emerald-500/50 transition-colors"
+              title="Descargar Excel con todo el mes en curso"
+            >
+              {exportandoExcel ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span className="hidden sm:inline">Excel del mes</span>
+            </button>
+            <button
+              onClick={() => cargar(true)}
+              disabled={refrescando}
+              className="p-2 rounded-xl bg-slate-900/60 border border-slate-700 text-slate-400 hover:text-white transition-colors disabled:opacity-40"
+              title="Actualizar"
+            >
+              <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {/* Selector de periodo */}
@@ -310,6 +341,65 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
                 </div>
               </div>
             )}
+          </div>
+
+          {/* 📈 CURVA ANIMADA de evolución (Fase 2.17-E — la curva de la vista vieja, con datos reales) */}
+          <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-blue-400" />
+                  Curva de evolución — S/ cobrados
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Cómo se movieron tus cobros día a día{hoyVivo.hay ? ' · HOY en curso al final' : ''}
+                </p>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-bold text-[10px] shrink-0">
+                {PERIODOS.find(p => p.id === periodo)?.label}
+              </span>
+            </div>
+            {/* key={periodo} en el wrapper → la curva se re-dibuja animada al cambiar de periodo */}
+            <div key={periodo} style={{ height: 220 }} className="w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartDias} margin={{ top: 10, right: 10, left: -18, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="curvaSoles" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis
+                  dataKey="etiqueta"
+                  stroke="#94a3b8"
+                  fontSize={10}
+                  interval="preserveStartEnd"
+                  angle={chartDias.length > 12 ? -45 : 0}
+                  textAnchor={chartDias.length > 12 ? 'end' : 'middle'}
+                  height={chartDias.length > 12 ? 40 : 30}
+                />
+                <YAxis stroke="#94a3b8" fontSize={10} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
+                  formatter={(v: any, _n: any, p: any) => {
+                    const d: DiaAgregado = p?.payload;
+                    return [`${fmtSoles(Number(v))}${d?.enCurso ? ' (en curso)' : ''}`, 'Cobrado'];
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="soles"
+                  stroke="#3b82f6"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#curvaSoles)"
+                  activeDot={{ r: 6, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2 }}
+                  dot={chartDias.length <= 2 ? { r: 4, fill: '#3b82f6' } : false}
+                />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           {/* Gráfico S/ por día */}
