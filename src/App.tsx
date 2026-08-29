@@ -11,12 +11,13 @@ import { DriversView } from './components/DriversView';
 import { LiveMap } from './components/LiveMap';
 import { MotorizadosView } from './components/MotorizadosView';
 import { AvatarPicker } from './components/AvatarPicker';
-import { WhatsAppView } from './components/WhatsAppView';
+import { WhatsAppModal } from './components/WhatsAppModal';
+// Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
+import { ChatBaileysView } from './components/ChatBaileysView';
 import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
 import { MediosView } from './components/MediosView';
-import { WhatsAppModal } from './components/WhatsAppModal';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './hooks/useAuth';
@@ -32,6 +33,8 @@ import { BackupsView } from './components/BackupsView';
 import { EstadisticasView } from './components/EstadisticasView';
 import { GaleriaView } from './components/GaleriaView';
 import { guardarAvatarRider } from './services/firestore';
+import { db } from './services/firebase';
+import { collection, onSnapshot, query, where, limit as fsLimit } from 'firebase/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
 import {
   clientesAOrdenes,
@@ -79,6 +82,19 @@ export default function App() {
 
   // Log de mensajes WhatsApp despachados desde la app (sesión actual)
   const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
+
+  // Fase 3.1: contador de chats sin leer del bot (badge del Sidebar)
+  const [chatNoLeidos, setChatNoLeidos] = useState(0);
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, 'mensajes_clientes'), where('leido', '==', false), fsLimit(200));
+    const unsub = onSnapshot(
+      q,
+      (snap) => setChatNoLeidos(snap.size),
+      (err) => console.warn('[ChatBaileys] badge no leídos:', err.message)
+    );
+    return () => unsub();
+  }, []);
 
   // Actividades en vivo (eventos de esta sesión, se fusionan con las derivadas)
   const [liveActivities, setLiveActivities] = useState<ActivityItem[]>([]);
@@ -490,6 +506,7 @@ export default function App() {
           onCloseMobile={() => setIsMobileMenuOpen(false)}
           activeOrdersCount={pendientesCount}
           activeDriversCount={1}
+          chatNoLeidos={chatNoLeidos}
           riderName={riderName}
           riderAvatar={avatarEfectivo}
           onSeleccionarAvatar={handleSeleccionarAvatar}
@@ -578,12 +595,9 @@ export default function App() {
             <MotorizadosView orders={orders} onShowToast={showToast} />
           )}
 
-          {activeTab === 'whatsapp' && (
-            <WhatsAppView
-              messages={whatsAppMessages}
-              onOpenWhatsAppModal={handleOpenWhatsAppModal}
-            />
-          )}
+          {/* Fase 3.1: 🤖 Chat de Baileys estilo WhatsApp Web — todo lo que el
+              robot envía y recibe (chats, broadcasts, pedidos de ubicación) */}
+          {activeTab === 'whatsapp' && <ChatBaileysView onShowToast={showToast} />}
 
           {/* Fase 2.5: 📢 Broadcast masivo con el bot (delay anti-ban) */}
           {activeTab === 'broadcast' && <BroadcastView onShowToast={showToast} />}
