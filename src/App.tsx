@@ -14,6 +14,8 @@ import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppModal } from './components/WhatsAppModal';
 // Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
 import { ChatBaileysView } from './components/ChatBaileysView';
+import { WhatsAppView } from './components/WhatsAppView';
+import { CatalogoView } from './components/CatalogoView';
 import { BotControlView } from './components/BotControlView';
 import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
@@ -597,18 +599,35 @@ export default function App() {
           )}
 
           {/* Fase 3.1: 🤖 Chat de Baileys estilo WhatsApp Web — todo lo que el
-              robot envía y recibe (chats, broadcasts, pedidos de ubicación) */}
+              robot envía y recibe (chats, broadcasts, pedidos de ubicación).
+              Fase 3.3: fotos de perfil reales, notas de voz, botones rápidos,
+              fijar/borrar chat, fondos y el Grupo MATE de trabajo. */}
           {activeTab === 'whatsapp' && <ChatBaileysView onShowToast={showToast} />}
+
+          {/* Fase 3.3: 💬 Chat API WhatsApp (recuperada) — la vista original de
+              mensajería wa.me que seguía en desarrollo; aquí vivirá la API
+              oficial de WhatsApp Cloud cuando se conecte. */}
+          {activeTab === 'chatapi' && (
+            <WhatsAppView
+              messages={whatsAppMessages}
+              onOpenWhatsAppModal={handleOpenWhatsAppModal}
+            />
+          )}
+
+          {/* Fase 3.3: 🛍️ Catálogo (mudanza de ClienteTrack) — productos con
+              foto/ofertas, identidad de tienda, envío por el bot y exportación
+              del catálogo completo como imagen. */}
+          {activeTab === 'catalogo' && <CatalogoView onShowToast={showToast} />}
 
           {/* Fase 3.2: 🧰 Centro del Bot (mudanza de ClienteTrack) —
               Plantillas del bot + Automatizaciones (maestro, IA, horario,
-              silenciados, palabras de enojo, registro) en una vista con tabs */}
+              silenciados, palabras de enojo, registro) en una vista con tabs.
+              Fase 3.4: UN solo ítem de menú — antes había 2 entradas
+              (Plantillas del Bot / Automatizaciones) que abrían esta misma
+              vista y se sentían como un clon; ahora las pestañas internas
+              hacen el cambio */}
           {activeTab === 'plantillas' && (
-            <BotControlView vistaInicial="plantillas" onShowToast={showToast} />
-          )}
-
-          {activeTab === 'automatizaciones' && (
-            <BotControlView vistaInicial="automatizaciones" onShowToast={showToast} />
+            <BotControlView onShowToast={showToast} />
           )}
 
           {/* Fase 2.5: 📢 Broadcast masivo con el bot (delay anti-ban) */}
