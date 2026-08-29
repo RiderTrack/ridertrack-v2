@@ -53,7 +53,45 @@ export async function compartirQRWhatsApp(opts: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = navigator as any;
 
-  // ── 1) Compartir nativo: IMAGEN + texto ──
+  // ── 0) APK (Capacitor): hoja de compartir NATIVA con la imagen —
+  //    Fix 2.18: en el WebView del APK navigator.share NO existe, así
+  //    que la imagen del QR nunca se adjuntaba y caía al wa.me sin
+  //    QR. Se guarda en Cache y se comparte por el plugin nativo.
+  if (dataUrl) {
+    try {
+      const { Capacitor } = await import('@capacitor/core');
+      if (Capacitor.isNativePlatform()) {
+        const { Filesystem, Directory } = await import('@capacitor/filesystem');
+        const coma = dataUrl.indexOf(',');
+        const b64 = coma >= 0 ? dataUrl.slice(coma + 1) : dataUrl;
+        const res = await Filesystem.writeFile({
+          path: 'qr-pago.jpg',
+          data: b64,
+          directory: Directory.Cache,
+          recursive: true,
+        });
+        const { Share } = await import('@capacitor/share');
+        await Share.share({
+          title: 'QR de pago',
+          text: texto,
+          dialogTitle: 'Enviar QR por WhatsApp',
+          files: [res.uri],
+        });
+        onShowToast?.('📤 QR compartido', 'Elige WhatsApp y el chat del cliente para enviarlo', 'success');
+        return 'imagen';
+      }
+    } catch (e: unknown) {
+      const msg = String((e as { message?: string })?.message || '');
+      const esCancel = /cancel/i.test(msg) || (e as { name?: string })?.name === 'AbortError';
+      if (esCancel) {
+        onShowToast?.('Cancelado', 'No se envió nada', 'info');
+        return 'cancelado';
+      }
+      // Otro error → seguir por la cascada de abajo
+    }
+  }
+
+  // ── 1) Compartir nativo (web): IMAGEN + texto ──
   if (dataUrl) {
     const file = dataUrlAFile(dataUrl, 'qr-pago.jpg');
     if (file && nav.share && nav.canShare && nav.canShare({ files: [file] })) {

@@ -12,6 +12,7 @@
 
 import * as XLSX from 'xlsx';
 import { ETIQUETAS_ESTADO } from './realData';
+import { descargarArchivo } from './descargaArchivo';
 
 export type ToastFn = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
@@ -252,41 +253,15 @@ export async function exportarExcelMes(
 
     const nombre = `RutaMensual_${built.resumen.prefijo}.xlsx`;
 
-    // ── Compartir (cascada como exportarExcelRuta) ──
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nav = navigator as any;
-    const file = new File([blob], nombre, { type: blob.type });
-    if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
-      try {
-        await nav.share({ files: [file], title: nombre });
-        onShowToast?.(
-          '📅 Excel del mes listo',
-          `${nombreMes}: ${built.resumen.rutas} rutas · S/ ${built.resumen.total.toFixed(2)}`,
-          'success',
-        );
-        return true;
-      } catch (e: unknown) {
-        const esCancel = (e as { name?: string })?.name === 'AbortError';
-        if (esCancel) return false;
-        // Otro error → descarga directa
-      }
-    }
-
-    // Fallback: descarga directa
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nombre;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    onShowToast?.(
-      '📅 Excel del mes descargado',
-      `${nombre} — ${built.resumen.rutas} rutas · S/ ${built.resumen.total.toFixed(2)}`,
-      'success',
+    // ── Guardar/Compartir (APK: Documentos — Fix 2.18) ──
+    const res = await descargarArchivo(
+      blob,
+      nombre,
+      onShowToast,
+      '📅 Excel del mes listo',
+      `${nombreMes}: ${built.resumen.rutas} rutas · S/ ${built.resumen.total.toFixed(2)}`,
     );
-    return true;
+    return res !== null && res !== 'cancelado';
   } catch (e: any) {
     console.error('❌ Error exportando Excel del mes:', e);
     onShowToast?.('Error al exportar', e?.message || 'No se pudo generar el Excel del mes', 'error');

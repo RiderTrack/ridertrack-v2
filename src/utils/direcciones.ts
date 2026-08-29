@@ -83,6 +83,33 @@ export function direccionIncompleta(dir: string, obs?: string): boolean {
 }
 
 /**
+ * 📍 Detecta si un texto ES un par de coordenadas pegado
+ * ("-12.000013,-77.108397"). Fix 2.18 — lo usan:
+ *   - geocodificarDireccion(): vía rápida → la coordenada se usa
+ *     TAL CUAL, exacta, sin llamar a ningún geocoder (el mapa y el
+ *     optimizador clavan el pin donde es).
+ *   - exportarCircuitRuta(): las manda en las columnas Latitude/
+ *     Longitude del Excel — la doc oficial de Circuit/Spoke pide
+ *     coordenadas O dirección, NUNCA ambas — así Circuit ya no
+ *     "manda a Carabayllo" una parada que era del Callao.
+ * Acepta coma o punto y coma, con o sin espacios alrededor.
+ * Rango válido: latitud -90..90, longitud -180..180.
+ */
+export function extraerCoordenadas(texto: string | null | undefined): { lat: number; lng: number } | null {
+  if (!texto) return null;
+  const m = String(texto)
+    .trim()
+    .match(/^(-?\d{1,3}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lng = parseFloat(m[2]);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+/**
  * Mensaje de WhatsApp para pedir la ubicación exacta
  * (mismo espíritu que la v1 enviarMsgDirIA).
  */

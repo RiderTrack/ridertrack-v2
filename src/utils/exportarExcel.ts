@@ -5,18 +5,30 @@
 // dlCircuit() de la v1, para que "Importar desde Excel" en
 // Circuit lo tome sin tocar nada:
 //   Recipient Name | Address Line 1 | City | State | Country |
-//   Zip | Phone | Notes | Order Number   (hoja "Stops")
+//   Zip | Phone | Notes | Order Number | Latitude | Longitude
 // El teléfono va +51XXXXXXXXX y las notas juntan cliente,
 // producto, costo, ⚠️ observación y 📝 nota.
+//
+// Fix 2.18 (reporte del usuario):
+//   • Las coordenadas pegadas como dirección ("-12.000013,
+//     -77.108397") van en las columnas Latitude/Longitude con la
+//     Address VACÍA — la doc oficial de Circuit/Spoke pide
+//     "coordenadas O dirección, no ambas". Antes Circuit intentaba
+//     geocodificar el texto y mandaba la parada a otro distrito
+//     (Callao → Carabayllo).
+//   • El costo va con decimales (S/ 89.90, no S/ 90).
+//   • La descarga usa descargarArchivo(): en el APK guarda en la
+//     carpeta Documentos (el <a download> del WebView no baja NADA
+//     — por eso "no funcionaba" y había que usar la v1).
 // ═══════════════════════════════════════════════════════════
 
-/** Celular → '+51XXXXXXXXX' (como el cTel de la v1) */
-function celCircuit(cel: unknown): string {
-  let d = String(cel || '').replace(/\D/g, '');
-  if (!d) return '';
-  if (d.length === 11 && d.startsWith('51')) d = d.substring(2);
-  return `+51${d}`;
-}
+import * as XLSX from 'xlsx';
+import { RegistroHistorial } from '../services/firestore';
+import { ETIQUETAS_ESTADO } from './realData';
+import { buildCircuitRows } from './circuitExcel';
+import { descargarArchivo } from './descargaArchivo';
+
+export type ToastFn = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
 export async function exportarCircuitRuta(
   clientes: any[],
@@ -28,38 +40,13 @@ export async function exportarCircuitRuta(
   }
 
   try {
-    const rows: (string | number)[][] = [
-      ['Recipient Name', 'Address Line 1', 'City', 'State', 'Country', 'Zip', 'Phone', 'Notes', 'Order Number'],
-    ];
-
-    clientes.forEach((c, i) => {
-      const tel = celCircuit(c.cel);
-      const notas = [
-        `Cliente: ${c.nombre || 'Cliente'}`,
-        `Producto: ${c.prod || '–'}`,
-        `Costo: S/ ${c.cobrar || c.precio || '0'}`,
-        c.obs ? `⚠️ ${c.obs}` : '',
-        c.nota ? `📝 ${c.nota}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      rows.push([
-        c.nombre || 'Cliente',
-        (c.dir || '') + (c.dist ? `, ${c.dist}` : ''),
-        c.dist || 'Lima',
-        'Lima',
-        'Peru',
-        'Lima',
-        tel,
-        notas,
-        String(c.num || i + 1),
-      ]);
-    });
+    const rows = buildCircuitRows(clientes);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [
       { wch: 25 }, { wch: 40 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
       { wch: 8 }, { wch: 15 }, { wch: 60 }, { wch: 8 },
+      { wch: 12 }, { wch: 12 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Stops');
@@ -72,33 +59,15 @@ export async function exportarCircuitRuta(
     const fecha = new Date().toLocaleDateString('es-PE').replace(/\//g, '-');
     const nombre = `Circuit_${fecha}.xlsx`;
 
-    // ── Compartir (cascada como exportarExcelRuta) ──
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nav = navigator as any;
-    const file = new File([blob], nombre, { type: blob.type });
-    if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
-      try {
-        await nav.share({ files: [file], title: `RiderTrack — ${nombre}`, text: 'Exportación Circuit' });
-        onShowToast?.('🛵 Archivo Circuit listo', 'En Circuit: Importar → desde Excel', 'success');
-        return true;
-      } catch (e: unknown) {
-        const esCancel = (e as { name?: string })?.name === 'AbortError';
-        if (esCancel) return false;
-        // Otro error → descarga directa
-      }
-    }
-
-    // Fallback: descarga directa
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nombre;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    onShowToast?.('🛵 Circuit descargado', nombre, 'success');
-    return true;
+    // ── Guardar/Compartir (APK: Documentos — Fix 2.18) ──
+    const res = await descargarArchivo(
+      blob,
+      nombre,
+      onShowToast,
+      '🛵 Circuit listo',
+      'en Circuit: Importar → desde Excel',
+    );
+    return res !== null && res !== 'cancelado';
   } catch (e: any) {
     console.error('❌ Error exportando Circuit:', e);
     onShowToast?.('Error al exportar', e?.message || 'No se pudo generar el archivo Circuit', 'error');
@@ -114,16 +83,9 @@ export async function exportarCircuitRuta(
 //   🏢 EMPRESA (transferencia/POS) → TOTAL EMPRESA
 //   ⏳ FALLIDOS / SIN ATENDER → TOTAL
 //   GRAN TOTAL + RESUMEN DEL DÍA
-// Después lo comparte con el compartir nativo del celular
-// (el usuario elige WhatsApp / Drive / etc.), y si no se puede,
-// lo descarga directo.
+// Después lo guarda/comparte con descargarArchivo (APK:
+// carpeta Documentos — Fix 2.18; web: share → descarga).
 // ═══════════════════════════════════════════════════════════
-
-import * as XLSX from 'xlsx';
-import { RegistroHistorial } from '../services/firestore';
-import { ETIQUETAS_ESTADO } from './realData';
-
-export type ToastFn = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
 /** Métodos que pagan el rider (caja 💚 LO TUYO) */
 const METODOS_RIDER = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'cambio'];
@@ -259,33 +221,9 @@ export async function exportarExcelRuta(
 
     const nombre = nombreArchivo(r.fecha);
 
-    // ── Compartir (cascada como shareQR.ts) ──
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nav = navigator as any;
-    const file = new File([blob], nombre, { type: blob.type });
-    if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
-      try {
-        await nav.share({ files: [file], title: nombre });
-        onShowToast?.('📥 Excel listo', 'Elige WhatsApp o dónde guardarlo', 'success');
-        return true;
-      } catch (e: unknown) {
-        const esCancel = (e as { name?: string })?.name === 'AbortError';
-        if (esCancel) return false;
-        // Otro error → descarga directa
-      }
-    }
-
-    // Fallback: descarga directa
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nombre;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    onShowToast?.('📥 Excel descargado', nombre, 'success');
-    return true;
+    // ── Guardar/Compartir (APK: Documentos — Fix 2.18) ──
+    const res = await descargarArchivo(blob, nombre, onShowToast, '📥 Excel de la ruta listo');
+    return res !== null && res !== 'cancelado';
   } catch (e: any) {
     console.error('❌ Error exportando Excel:', e);
     onShowToast?.('Error al exportar', e?.message || 'No se pudo generar el Excel', 'error');
