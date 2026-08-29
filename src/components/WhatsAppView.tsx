@@ -1,3 +1,11 @@
+// ═════════════════════════════════════════════════════════
+// 💬 WHATSAPP VIEW — Chat API WhatsApp (recuperada Fase 3.3)
+// Esta es la vista original de Mensajería WhatsApp (wa.me) que
+// estaba en desarrollo. La Fase 3.1 la había reemplazado por el
+// Chat Baileys; ahora conviven: el Chat API seguirá creciendo
+// cuando se conecte la API oficial de WhatsApp Cloud.
+// ═════════════════════════════════════════════════════════
+
 import React, { useState } from 'react';
 import {
   MessageSquare,
@@ -29,14 +37,15 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-              Mensajería WhatsApp
-              <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">
-                wa.me
+              Chat API WhatsApp
+              <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500 text-slate-950">
+                EN DESARROLLO
               </span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400">
-              Plantillas rápidas e historial de mensajes despachados desde la app.
-              El bot Rudy atiende los mensajes entrantes.
+              Mensajería directa vía wa.me con plantillas rápidas. Aquí vivirá la API
+              oficial de WhatsApp Cloud cuando se conecte — el bot Rudy sigue
+              atendiendo todo en el Chat Baileys.
             </p>
           </div>
         </div>

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 🤖 CHAT BAILEYS VIEW — RiderTrack V2 (Fase 3.1)
+// 🤖 CHAT BAILEYS VIEW — RiderTrack V2 (Fase 3.1 · 3.3)
 // Mudanza del chat de ClienteTrack v1 → WhatsApp Web profesional
 // manejado 100% por el robot de Baileys (rudy-bot).
 //
@@ -10,6 +10,16 @@
 //   - acciones_bot         → lo que el bot manda por ti (pedido
 //                            de ubicación, avisos, QR Yape...)
 //   - cola_envio/campanas  → los broadcasts masivos 📢
+//                            (+ notas de voz 🎙️ Fase 3.3)
+//
+// FASE 3.3:
+//   ✅ fotos de perfil REALES de WhatsApp por conversación
+//   ✅ fondo del chat personalizable (como WhatsApp)
+//   ✅ notas de voz (grabar → bot → PTT)
+//   ✅ botones rápidos (Gracias con imagen + plantillas conectadas)
+//   ✅ fijar chat / borrar chat
+//   ✅ conversación del Grupo MATE (trabajo)
+//   ✅ cabecera responsive (menú ⋮ — ya no se montan los botones)
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -38,6 +48,13 @@ import {
   MapPinned,
   Phone,
   Radio,
+  Mic,
+  MoreVertical,
+  Pin,
+  Palette,
+  Users,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -47,7 +64,6 @@ import {
   ChatStats,
   colorAvatar,
   horaCorta,
-  horaBurbuja,
   etiquetaDia,
   suscribirChat,
   suscribirCampanas,
@@ -63,7 +79,33 @@ import {
   leerDocumento,
   descargarBase64,
   telCompleto,
+  TEL_GRUPO_MATE,
+  enviarAGrupoMate,
+  iniciarGrabacionAudio,
+  enviarAudioNotaChat,
+  leerAudiosLocales,
+  AudioLocal,
+  leerFijados,
+  toggleFijado,
+  FONDOS_CHAT_PRESET,
+  leerFondoChat,
+  guardarFondoChat,
+  FondoChat,
+  borrarChatCompleto,
 } from '../utils/chatBaileys';
+import {
+  escucharPlantillas,
+  PlantillaMensaje,
+  formatearWhatsAppHTML,
+  procesarBloquesPreview,
+} from '../utils/botControl';
+import {
+  IMG_GRACIAS_MATE_B64,
+  IMG_GRACIAS_MIME,
+  IMG_GRACIAS_NOMBRE,
+  MSG_GRACIAS,
+  IMG_GRACIAS_DATAURL,
+} from '../utils/imagenesRapidas';
 
 interface ChatBaileysViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -71,13 +113,47 @@ interface ChatBaileysViewProps {
 
 const EMOJIS = ['😊', '😂', '👍', '🙏', '❤️', '🎉', '✅', '🔥', '👌', '😅', '🤝', '💪', '🚀', '📍', '📦', '💰', '⏰', '🙌', '😉', '🥳', '😎', '🤗', '☕', '🍀', '⚡', '🎁', '📸', '👏', '🫡', '🤖'];
 
+/** Duración máxima de una nota de voz (segundos) */
+const MAX_SEG_AUDIO = 120;
+
 // ─────────────────────────────────────────────────────────────
 // SUBCOMPONENTES
 // ─────────────────────────────────────────────────────────────
 
-const AvatarChat: React.FC<{ tel: string; nombre: string; grande?: boolean }> = ({ tel, nombre, grande }) => {
-  const c = colorAvatar(tel);
+/** Avatar con FOTO REAL de WhatsApp (si existe) + fallback a inicial */
+const AvatarChat: React.FC<{
+  tel: string;
+  nombre: string;
+  grande?: boolean;
+  foto?: string;
+  grupo?: boolean;
+}> = ({ tel, nombre, grande, foto, grupo }) => {
+  const [rota, setRota] = useState(false);
+  const c = colorAvatar(tel || 'x');
   const inicial = (nombre || '?').charAt(0).toUpperCase();
+
+  if (grupo) {
+    return (
+      <div
+        className={`${grande ? 'w-11 h-11' : 'w-10 h-10'} rounded-full flex items-center justify-center flex-shrink-0 shadow-inner select-none bg-gradient-to-br from-emerald-500 to-teal-600 border border-emerald-400/40`}
+      >
+        <Users className={`${grande ? 'w-5 h-5' : 'w-4.5 h-4.5'} text-white`} />
+      </div>
+    );
+  }
+
+  if (foto && !rota) {
+    return (
+      <img
+        src={foto}
+        alt={nombre}
+        onError={() => setRota(true)}
+        referrerPolicy="no-referrer"
+        className={`${grande ? 'w-11 h-11' : 'w-10 h-10'} rounded-full object-cover flex-shrink-0 shadow-md select-none bg-slate-700`}
+      />
+    );
+  }
+
   return (
     <div
       className={`${grande ? 'w-11 h-11 text-base' : 'w-10 h-10 text-sm'} ${c.bg} ${c.texto} rounded-full flex items-center justify-center font-black flex-shrink-0 shadow-inner select-none`}
@@ -96,7 +172,7 @@ const Ticks: React.FC<{ enviado: boolean | null }> = ({ enviado }) => {
 
 const SeparadorDia: React.FC<{ etiqueta: string }> = ({ etiqueta }) => (
   <div className="flex justify-center my-3">
-    <span className="px-3 py-1 rounded-full bg-slate-900/80 text-[10px] font-bold tracking-widest text-slate-400 border border-slate-700/60">
+    <span className="px-3 py-1 rounded-full bg-slate-950/75 text-[10px] font-bold tracking-widest text-slate-300 border border-slate-700/60 backdrop-blur-sm">
       {etiqueta}
     </span>
   </div>
@@ -126,7 +202,7 @@ const BurbujaUbicacion: React.FC<{ lat?: number | null; lng?: number | null }> =
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center justify-center gap-1.5 py-2 text-xs font-bold text-emerald-300 hover:text-emerald-200 bg-slate-900/70 rounded-b-xl transition-colors"
+        className="flex items-center justify-center gap-1.5 py-2 text-xs font-bold text-emerald-300 hover:text-emerald-200 bg-slate-950/70 rounded-b-xl transition-colors"
       >
         <MapPinned className="w-3.5 h-3.5" /> Abrir en Google Maps
       </a>
@@ -143,7 +219,7 @@ const TarjetaDoc: React.FC<{ nombreArchivo?: string; mimetype?: string; base64?:
     <button
       type="button"
       onClick={() => base64 && descargarBase64(base64, mimetype || 'application/octet-stream', nombreArchivo || 'documento')}
-      className="flex items-center gap-3 w-56 max-w-full p-2.5 rounded-xl bg-slate-900/70 border border-slate-600/40 hover:border-slate-500/60 transition-colors text-left"
+      className="flex items-center gap-3 w-56 max-w-full p-2.5 rounded-xl bg-slate-950/60 border border-slate-600/40 hover:border-slate-500/60 transition-colors text-left"
     >
       <span className="text-2xl flex-shrink-0">{icono}</span>
       <span className="flex flex-col min-w-0 flex-1">
@@ -171,16 +247,18 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
   const esCampana = m.origen === 'campana';
 
   const burbujaBase = esEntrante
-    ? 'bg-slate-800 border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
+    ? 'bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
     : esBot
-      ? 'bg-emerald-800/90 border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
+      ? 'bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
       : esCampana
-        ? 'bg-teal-900/80 border-teal-600/40 text-white rounded-2xl rounded-tr-md'
+        ? 'bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
         : 'bg-emerald-600 text-white rounded-2xl rounded-tr-md';
+
+  const esAudio = m.tipoContenido === 'audio' && (m.base64 || m.audioUrl);
 
   return (
     <div className={`flex ${esEntrante ? 'justify-start' : 'justify-end'} mb-2 group`}>
-      <div className={`relative max-w-[85%] sm:max-w-[70%] px-3 py-2 shadow-md ${burbujaBase}`}>
+      <div className={`relative max-w-[85%] sm:max-w-[70%] px-3 py-2 shadow-lg ${burbujaBase}`}>
         {/* Etiqueta de origen para salientes especiales */}
         {esBot && (
           <div className="flex items-center gap-1 mb-1 text-[10px] font-bold text-emerald-200/90 uppercase tracking-wide">
@@ -220,8 +298,18 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
               <span className="block text-sm whitespace-pre-wrap break-words">{m.texto}</span>
             )}
           </div>
-        ) : m.tipoContenido === 'audio' && m.base64 ? (
-          <audio controls preload="metadata" src={`data:${m.mimetype || 'audio/ogg'};base64,${m.base64}`} className="max-w-[220px] h-9" />
+        ) : esAudio ? (
+          <div className="flex items-center gap-2">
+            <span className="w-8 h-8 rounded-full bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center flex-shrink-0">
+              <Mic className="w-4 h-4" />
+            </span>
+            <audio
+              controls
+              preload="metadata"
+              src={m.audioUrl ? m.audioUrl : `data:${m.mimetype || 'audio/ogg'};base64,${m.base64}`}
+              className="max-w-[200px] h-9"
+            />
+          </div>
         ) : m.tipoContenido === 'documento' && m.base64 ? (
           <TarjetaDoc nombreArchivo={m.nombreArchivo} mimetype={m.mimetype} base64={m.base64} />
         ) : m.tipoContenido === 'yape_qr' ? (
@@ -260,18 +348,35 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
 const ItemConversacion: React.FC<{
   conv: Conversacion;
   activo: boolean;
+  fijado: boolean;
   onAbrir: () => void;
-}> = ({ conv, activo, onAbrir }) => {
+}> = ({ conv, activo, fijado, onAbrir }) => {
   const ultimo = conv.ultimoMensaje;
-  const prefijo = !ultimo ? '' : ultimo.origen === 'rudy' ? 'Tú: ' : ultimo.origen === 'bot' ? '🤖 ' : ultimo.origen === 'campana' ? '📢 ' : '';
+  const prefijo = !ultimo
+    ? ''
+    : ultimo.origen === 'rudy'
+      ? 'Tú: '
+      : ultimo.origen === 'bot'
+        ? '🤖 '
+        : ultimo.origen === 'campana'
+          ? '📢 '
+          : '';
   const preview =
-    !ultimo ? 'Sin mensajes' :
-    ultimo.tipoContenido === 'imagen' ? '📷 Imagen' :
-    ultimo.tipoContenido === 'audio' ? '🎙️ Audio' :
-    ultimo.tipoContenido === 'documento' ? '📄 Documento' :
-    ultimo.tipoContenido === 'ubicacion' ? '📍 Ubicación' :
-    ultimo.tipoContenido === 'yape_qr' ? '💰 QR de Yape' :
-    ultimo.texto;
+    !ultimo
+      ? conv.esGrupo
+        ? 'Aún no hay reportes del bot'
+        : 'Sin mensajes'
+      : ultimo.tipoContenido === 'imagen'
+        ? '📷 Imagen'
+        : ultimo.tipoContenido === 'audio'
+          ? '🎙️ Nota de voz'
+          : ultimo.tipoContenido === 'documento'
+            ? '📄 Documento'
+            : ultimo.tipoContenido === 'ubicacion'
+              ? '📍 Ubicación'
+              : ultimo.tipoContenido === 'yape_qr'
+                ? '💰 QR de Yape'
+                : ultimo.texto;
 
   return (
     <button
@@ -282,7 +387,7 @@ const ItemConversacion: React.FC<{
       }`}
     >
       <div className="relative flex-shrink-0">
-        <AvatarChat tel={conv.tel} nombre={conv.nombre} />
+        <AvatarChat tel={conv.tel} nombre={conv.nombre} foto={conv.foto} grupo={conv.esGrupo} />
         {conv.noLeidos > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-black flex items-center justify-center border-2 border-slate-900">
             {conv.noLeidos > 99 ? '99+' : conv.noLeidos}
@@ -291,13 +396,15 @@ const ItemConversacion: React.FC<{
       </div>
       <div className="flex flex-col min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className={`text-sm truncate ${conv.noLeidos > 0 ? 'font-black text-white' : 'font-semibold text-slate-200'}`}>
-            {conv.nombre}
+          <span className={`text-sm truncate flex items-center gap-1 ${conv.noLeidos > 0 ? 'font-black text-white' : 'font-semibold text-slate-200'}`}>
+            <span className="truncate">{conv.nombre}</span>
+            {fijado && <Pin className="w-3 h-3 text-emerald-400 flex-shrink-0 rotate-45" />}
           </span>
           <span className="text-[10px] text-slate-500 flex-shrink-0">{horaCorta(conv.ultimoTimestamp)}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {conv.silenciado && <BellOff className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+          {conv.esGrupo && <Users className="w-3 h-3 text-emerald-400 flex-shrink-0" />}
           <span className={`text-xs truncate ${conv.noLeidos > 0 ? 'font-semibold text-slate-300' : 'text-slate-500'}`}>
             {prefijo}{preview}
           </span>
@@ -364,8 +471,17 @@ const PanelCampanas: React.FC<{ campanas: CampanaBot[] }> = ({ campanas }) => {
 // VISTA PRINCIPAL
 // ─────────────────────────────────────────────────────────────
 
+/** Llena las variables de una plantilla con los datos del cliente real */
+function llenarVariables(texto: string, nombre: string): string {
+  const ahora = new Date();
+  return texto
+    .split('{nombre}').join(nombre || 'cliente')
+    .split('{hora}').join(ahora.getHours().toString().padStart(2, '0') + ':' + ahora.getMinutes().toString().padStart(2, '0'))
+    .split('{fecha}').join(ahora.toLocaleDateString('es-PE'));
+}
+
 export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast }) => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
 
   const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
   const [stats, setStats] = useState<ChatStats>({ total: 0, noLeidos: 0, mensajesHoy: 0, silenciados: 0 });
@@ -381,9 +497,30 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [reveladas, setReveladas] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<{ base64: string; mimetype: string; nombre: string } | null>(null);
 
+  // ── Fase 3.3 ──
+  const [fijados, setFijados] = useState<Set<string>>(() => leerFijados());
+  const [fondo, setFondo] = useState<FondoChat>(() => leerFondoChat());
+  const [menuChat, setMenuChat] = useState(false);          // menú ⋮ del chat abierto
+  const [panelFondo, setPanelFondo] = useState(false);      // selector de fondo
+  const [confirmBorrar, setConfirmBorrar] = useState(false);// confirmar borrar chat
+  const [borrando, setBorrando] = useState(false);
+  const [plantillas, setPlantillas] = useState<PlantillaMensaje[]>([]);
+  const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'plantilla'; plantilla?: PlantillaMensaje } | null>(null);
+  const [enviandoRapido, setEnviandoRapido] = useState(false);
+
+  // ── Grabación de nota de voz ──
+  const [grabando, setGrabando] = useState(false);
+  const [grabSeg, setGrabSeg] = useState(0);
+  const [enviandoAudio, setEnviandoAudio] = useState(false);
+  const grabadorRef = useRef<{ parar: () => Promise<{ blob: Blob; mimetype: string; duracionSeg: number }>; cancelar: () => void } | null>(null);
+  const timerGrabRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [audiosLocales, setAudiosLocales] = useState<AudioLocal[]>(() => leerAudiosLocales());
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputImgRef = useRef<HTMLInputElement>(null);
   const inputDocRef = useRef<HTMLInputElement>(null);
+  const inputFondoRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // ── Suscripciones en tiempo real ──
   useEffect(() => {
@@ -392,7 +529,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
       setStats(st);
     });
     const unsubCampanas = suscribirCampanas(setCampanas);
-    return () => { sub.cancelar(); unsubCampanas(); };
+    const unsubPlantillas = escucharPlantillas(setPlantillas, (e) =>
+      console.warn('[ChatBaileys] plantillas:', e.message)
+    );
+    return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); };
   }, []);
 
   // ── Marcar leído al abrir un chat ──
@@ -400,17 +540,50 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     if (telActivo) marcarLeidoChat(telActivo);
   }, [telActivo]);
 
+  // ── Cerrar el menú ⋮ al hacer clic fuera ──
+  useEffect(() => {
+    if (!menuChat) return;
+    const cerrar = (ev: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(ev.target as Node)) setMenuChat(false);
+    };
+    document.addEventListener('mousedown', cerrar);
+    document.addEventListener('touchstart', cerrar);
+    return () => {
+      document.removeEventListener('mousedown', cerrar);
+      document.removeEventListener('touchstart', cerrar);
+    };
+  }, [menuChat]);
+
   const convActiva = useMemo(
     () => conversaciones.find((c) => c.tel === telActivo) || null,
     [conversaciones, telActivo]
   );
 
+  // ── Mensajes + historial local de notas de voz (merge) ──
+  const mensajesConv = useMemo(() => {
+    if (!convActiva) return [];
+    const urlsVivas = new Set(convActiva.mensajes.filter((m) => m.audioUrl).map((m) => m.audioUrl));
+    const historial = audiosLocales
+      .filter((a) => a.tel === convActiva.tel && !urlsVivas.has(a.url))
+      .map<MensajeChat>((a) => ({
+        id: 'al_' + a.ts,
+        tel: a.tel,
+        origen: 'rudy',
+        tipoContenido: 'audio',
+        texto: '🎙️ Nota de voz',
+        timestamp: a.ts,
+        leido: true,
+        enviado: true,
+        audioUrl: a.url,
+      }));
+    return [...convActiva.mensajes, ...historial];
+  }, [convActiva, audiosLocales]);
+
   // ── Auto-scroll al último mensaje ──
-  const cantidadMensajes = convActiva?.mensajes.length || 0;
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [cantidadMensajes, telActivo]);
+  }, [mensajesConv.length, telActivo]);
 
   // ── Mapa campaign_id → nombre ──
   const nombreCampana = useMemo(() => {
@@ -419,29 +592,61 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     return m;
   }, [campanas]);
 
-  // ── Filtrado de la lista ──
+  // ── Plantillas conectadas para los botones rápidos ──
+  const plantillasConectadas = useMemo(
+    () => plantillas.filter((p) => p.activa && p.clave).slice(0, 10),
+    [plantillas]
+  );
+
+  // ── Filtrado y orden de la lista (grupo → fijados → resto) ──
   const listaFiltrada = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    return conversaciones.filter((c) => {
+    const filtradas = conversaciones.filter((c) => {
       if (filtro === 'noLeidos' && c.noLeidos === 0) return false;
       if (filtro === 'silenciados' && !c.silenciado) return false;
-      if (q && !c.nombre.toLowerCase().includes(q) && !c.tel.includes(q.replace(/\D/g, ''))) return false;
+      if (q && !c.nombre.toLowerCase().includes(q) && !c.tel.toLowerCase().includes(q.replace(/\D/g, ''))) return false;
       return true;
     });
-  }, [conversaciones, filtro, busqueda]);
+    return filtradas.sort((a, b) => {
+      if (a.esGrupo) return -1;
+      if (b.esGrupo) return 1;
+      const fa = fijados.has(a.tel) ? 1 : 0;
+      const fb = fijados.has(b.tel) ? 1 : 0;
+      if (fa !== fb) return fb - fa;
+      return b.ultimoTimestamp - a.ultimoTimestamp;
+    });
+  }, [conversaciones, filtro, busqueda, fijados]);
 
   // ── Acciones ──
   const toast = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') =>
     onShowToast?.(title, desc, type);
 
-  const abrirChat = (tel: string) => setTelActivo(tel);
+  const abrirChat = (tel: string) => {
+    setTelActivo(tel);
+    setMenuChat(false);
+    setEmojiAbierto(false);
+    setMenuAdjuntos(false);
+    setGrabando(false);
+  };
+
+  const esGrupo = !!convActiva?.esGrupo;
 
   const enviar = async () => {
     const t = texto.trim();
     if (!t || !convActiva || enviando) return;
     setEnviando(true);
     try {
-      await enviarMensajeChat(convActiva.tel, convActiva.nombre, t);
+      if (esGrupo) {
+        // ✍️ Escribir al grupo de trabajo MATE (el bot lo manda)
+        await enviarAGrupoMate(t, {
+          nombre: profile?.nombre || 'Rudy',
+          telefono: profile?.email || '',
+          empresa: 'MATE',
+        });
+        toast('👥 Enviado al grupo', 'El bot está escribiendo tu mensaje al grupo MATE', 'success');
+      } else {
+        await enviarMensajeChat(convActiva.tel, convActiva.nombre, t);
+      }
       setTexto('');
       setEmojiAbierto(false);
     } catch (e: any) {
@@ -452,7 +657,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   };
 
   const pedirUbicacion = async () => {
-    if (!convActiva) return;
+    if (!convActiva || esGrupo) return;
     try {
       await pedirUbicacionBot(convActiva.tel, convActiva.nombre, {
         nombre: profile?.nombre || 'Rudy',
@@ -466,7 +671,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   };
 
   const enviarYape = async () => {
-    if (!convActiva) return;
+    if (!convActiva || esGrupo) return;
     try {
       await enviarYapeQRChat(convActiva.tel, convActiva.nombre);
       toast('💰 QR de Yape', 'El bot enviará el QR de tu ruta activa', 'success');
@@ -476,7 +681,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   };
 
   const toggleSilencio = async () => {
-    if (!convActiva) return;
+    if (!convActiva || esGrupo) return;
     try {
       if (convActiva.silenciado) {
         await reactivarBot(convActiva.tel);
@@ -490,8 +695,35 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     }
   };
 
+  const alternarFijado = () => {
+    if (!convActiva) return;
+    const ahoraFijado = toggleFijado(convActiva.tel);
+    setFijados(leerFijados());
+    setMenuChat(false);
+    toast(
+      ahoraFijado ? '📌 Chat fijado' : '📌 Fijado quitado',
+      ahoraFijado ? 'Esta conversación se queda arriba de la lista' : 'La conversación vuelve a su orden normal',
+      'info'
+    );
+  };
+
+  const borrarChat = async () => {
+    if (!convActiva || esGrupo) return;
+    setBorrando(true);
+    try {
+      const res = await borrarChatCompleto(convActiva.tel);
+      toast('🗑️ Chat borrado', `${res.entrantes + res.salientes} mensajes eliminados — la conversación desapareció de la lista`, 'success');
+      setTelActivo(null);
+      setConfirmBorrar(false);
+    } catch (e: any) {
+      toast('Error al borrar', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setBorrando(false);
+    }
+  };
+
   const manejarArchivo = async (file: File | undefined, tipo: 'imagen' | 'documento') => {
-    if (!file || !convActiva) return;
+    if (!file || !convActiva || esGrupo) return;
     try {
       if (tipo === 'imagen') {
         const { base64, mimetype } = await comprimirImagen(file);
@@ -521,20 +753,170 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     setTexto((t) => t + e);
   };
 
+  // ── Botones rápidos ──
+  const enviarGracias = async () => {
+    if (!convActiva || enviandoRapido) return;
+    setEnviandoRapido(true);
+    try {
+      // 1. La tarjeta de gracias (imagen embebida del bot) — mismo canal
+      //    que los adjuntos de imagen de la v1 (respuestas_manuales).
+      await enviarAdjuntoChat(
+        convActiva.tel, convActiva.nombre, 'imagen',
+        IMG_GRACIAS_MATE_B64, IMG_GRACIAS_MIME, IMG_GRACIAS_NOMBRE, '🙏 Gracias por tu compra'
+      );
+      // 2. El mensajito de cierre — llega como mensaje de texto tuyo.
+      await enviarMensajeChat(convActiva.tel, convActiva.nombre, llenarVariables(MSG_GRACIAS, convActiva.nombre));
+      toast('🙏 Gracias enviada', 'El bot manda la tarjeta y el mensajito en segundos', 'success');
+      setRapidoAbierto(null);
+    } catch (e: any) {
+      toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setEnviandoRapido(false);
+    }
+  };
+
+  const enviarPlantillaRapida = async () => {
+    if (!convActiva || !rapidoAbierto?.plantilla || enviandoRapido) return;
+    setEnviandoRapido(true);
+    try {
+      const mensaje = llenarVariables(procesarBloquesPreview(rapidoAbierto.plantilla.mensaje), convActiva.nombre);
+      await enviarMensajeChat(convActiva.tel, convActiva.nombre, mensaje);
+      toast('⚡ Enviado', `"${rapidoAbierto.plantilla.nombre}" está en cola para el bot`, 'success');
+      setRapidoAbierto(null);
+    } catch (e: any) {
+      toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setEnviandoRapido(false);
+    }
+  };
+
+  // ── Nota de voz ──
+  const empezarGrabacion = async () => {
+    if (!convActiva || esGrupo || grabando) return;
+    try {
+      grabadorRef.current = await iniciarGrabacionAudio();
+      setGrabando(true);
+      setGrabSeg(0);
+      setEmojiAbierto(false);
+      setMenuAdjuntos(false);
+      timerGrabRef.current = setInterval(() => {
+        setGrabSeg((s) => {
+          if (s + 1 >= MAX_SEG_AUDIO) {
+            // tope de seguridad: detener y enviar
+            detenerYEnviarAudio();
+            return MAX_SEG_AUDIO;
+          }
+          return s + 1;
+        });
+      }, 1000);
+    } catch (e: any) {
+      const msg = String(e.message || '');
+      toast(
+        '🎤 Micrófono no disponible',
+        /permission|denied|NotAllowed/i.test(msg)
+          ? 'Activa el permiso de micrófono para RiderTrack en los ajustes del teléfono'
+          : msg || 'No se pudo iniciar la grabación',
+        'error'
+      );
+    }
+  };
+
+  const limpiarTimerGrab = () => {
+    if (timerGrabRef.current) {
+      clearInterval(timerGrabRef.current);
+      timerGrabRef.current = null;
+    }
+  };
+
+  const detenerYEnviarAudio = async () => {
+    const grabador = grabadorRef.current;
+    if (!grabador || !convActiva || !user) return;
+    limpiarTimerGrab();
+    setEnviandoAudio(true);
+    try {
+      const grab = await grabador.parar();
+      grabadorRef.current = null;
+      setGrabando(false);
+      if (grab.blob.size < 1200) {
+        toast('Nota muy corta', 'Mantén presionado y habla un poquito más', 'warning');
+        return;
+      }
+      await enviarAudioNotaChat(user.uid, convActiva.tel, convActiva.nombre, grab);
+      setAudiosLocales(leerAudiosLocales());
+      toast('🎙️ Nota de voz en cola', `${grab.duracionSeg}s — el bot la enviará como nota de voz`, 'success');
+    } catch (e: any) {
+      toast('Error al enviar audio', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setEnviandoAudio(false);
+    }
+  };
+
+  const cancelarGrabacion = () => {
+    limpiarTimerGrab();
+    grabadorRef.current?.cancelar();
+    grabadorRef.current = null;
+    setGrabando(false);
+    setGrabSeg(0);
+  };
+
+  useEffect(() => () => limpiarTimerGrab(), []);
+
+  // ── Fondo personalizado desde la galería ──
+  const usarFotoDeFondo = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const { base64, mimetype } = await comprimirImagen(file);
+      const nuevo: FondoChat = {
+        id: 'personalizada',
+        css: `url("data:${mimetype};base64,${base64}") center/cover fixed no-repeat`,
+        oscuro: true,
+      };
+      guardarFondoChat(nuevo);
+      setFondo(nuevo);
+      setPanelFondo(false);
+      toast('🖼️ Fondo cambiado', 'Tu foto ya es el fondo de todos los chats', 'success');
+    } catch (e: any) {
+      toast('Error con la foto', e.message || 'Intenta con otra imagen', 'error');
+    }
+  };
+
+  const aplicarFondoPreset = (f: FondoChat) => {
+    guardarFondoChat(f);
+    setFondo(f);
+    toast('🖼️ Fondo cambiado', 'Se aplicó a todos tus chats', 'success');
+  };
+
   // Agrupar mensajes por día para los separadores
   const mensajesAgrupados = useMemo(() => {
-    if (!convActiva) return [];
     const grupos: { dia: string; mensajes: MensajeChat[] }[] = [];
-    convActiva.mensajes.forEach((m) => {
+    mensajesConv.forEach((m) => {
       const dia = etiquetaDia(m.timestamp);
       const ultimo = grupos[grupos.length - 1];
       if (ultimo && ultimo.dia === dia) ultimo.mensajes.push(m);
       else grupos.push({ dia, mensajes: [m] });
     });
     return grupos;
-  }, [convActiva]);
+  }, [mensajesConv]);
 
-  const conectado = conversaciones.length > 0 || stats.mensajesHoy > 0;
+  const conectado = conversaciones.length > 1 || stats.mensajesHoy > 0;
+
+  const itemsMenu = convActiva && !esGrupo ? [
+    { id: 'ubicacion', icono: MapPinned, etiqueta: 'Pedir ubicación', color: 'text-sky-300', accion: () => { setMenuChat(false); pedirUbicacion(); } },
+    { id: 'yape', icono: QrCode, etiqueta: 'Enviar QR de Yape', color: 'text-emerald-300', accion: () => { setMenuChat(false); enviarYape(); } },
+    {
+      id: 'silencio',
+      icono: convActiva.silenciado ? BellRing : BellOff,
+      etiqueta: convActiva.silenciado ? 'Reactivar bot' : 'Silenciar bot',
+      color: convActiva.silenciado ? 'text-emerald-300' : 'text-amber-300',
+      accion: () => { setMenuChat(false); toggleSilencio(); },
+    },
+    { id: 'fijar', icono: Pin, etiqueta: fijados.has(convActiva.tel) ? 'Quitar de fijados' : 'Fijar chat', color: 'text-slate-200', accion: alternarFijado },
+    { id: 'fondo', icono: Palette, etiqueta: 'Fondo del chat', color: 'text-violet-300', accion: () => { setMenuChat(false); setPanelFondo(true); } },
+    { id: 'borrar', icono: Trash2, etiqueta: 'Borrar chat', color: 'text-rose-400', accion: () => { setMenuChat(false); setConfirmBorrar(true); } },
+  ] : [
+    { id: 'fijar', icono: Pin, etiqueta: fijados.has(TEL_GRUPO_MATE) ? 'Quitar de fijados' : 'Fijar chat', color: 'text-slate-200', accion: alternarFijado },
+    { id: 'fondo', icono: Palette, etiqueta: 'Fondo del chat', color: 'text-violet-300', accion: () => { setMenuChat(false); setPanelFondo(true); } },
+  ];
 
   return (
     <div className="flex flex-col h-[calc(100dvh-11.5rem)] lg:h-[calc(100dvh-8.5rem)] min-h-[540px] pb-12 gap-3">
@@ -551,7 +933,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
               <span className="hidden sm:inline px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">WhatsApp Web</span>
             </h1>
             <p className="text-[11px] sm:text-xs text-slate-400 truncate">
-              Todo lo que el robot envía y recibe: chats, broadcasts y pedidos de ubicación
+              Chats, broadcasts, pedidos de ubicación, notas de voz y el grupo MATE
             </p>
           </div>
         </div>
@@ -649,6 +1031,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                       key={c.tel}
                       conv={c}
                       activo={c.tel === telActivo}
+                      fijado={fijados.has(c.tel)}
                       onAbrir={() => abrirChat(c.tel)}
                     />
                   ))
@@ -696,73 +1079,128 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
             </div>
           ) : (
             <>
-              {/* Cabecera del chat */}
-              <div className="flex items-center gap-3 px-3 py-2.5 border-b border-slate-700/70 bg-slate-800 flex-shrink-0">
+              {/* Cabecera del chat — ordenada: nombre+estado a la izquierda,
+                  acciones rápidas (sm+) y menú ⋮ a la derecha. Ya nada se monta. */}
+              <div className="flex items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 border-b border-slate-700/70 bg-slate-800 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setTelActivo(null)}
-                  className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700"
+                  className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 flex-shrink-0"
                   title="Volver"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <AvatarChat tel={convActiva.tel} nombre={convActiva.nombre} grande />
-                <div className="flex flex-col min-w-0 flex-1">
+                <AvatarChat tel={convActiva.tel} nombre={convActiva.nombre} grande foto={convActiva.foto} grupo={convActiva.esGrupo} />
+                <div className="flex flex-col min-w-0 flex-1 gap-0.5">
                   <span className="text-sm font-black text-white truncate">{convActiva.nombre}</span>
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <Phone className="w-3 h-3 text-slate-500" />
-                    <span className="text-slate-400 font-mono">+{telCompleto(convActiva.tel)}</span>
-                    {convActiva.silenciado ? (
-                      <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold">
-                        <BellOff className="w-2.5 h-2.5" /> Bot silenciado
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
-                        <Radio className="w-2.5 h-2.5" /> Bot activo
-                      </span>
-                    )}
-                  </div>
+                  {convActiva.esGrupo ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                      <Users className="w-3 h-3 text-emerald-400" />
+                      <span className="truncate">Grupo de trabajo · el bot reporta aquí</span>
+                    </span>
+                  ) : (
+                    <div className="flex items-center gap-2 text-[11px] min-w-0">
+                      <Phone className="w-3 h-3 text-slate-500 flex-shrink-0" />
+                      <span className="text-slate-400 font-mono truncate hidden xs:inline sm:inline">+{telCompleto(convActiva.tel)}</span>
+                      {convActiva.silenciado ? (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold flex-shrink-0">
+                          <BellOff className="w-2.5 h-2.5" /> Silenciado
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold flex-shrink-0">
+                          <Radio className="w-2.5 h-2.5" /> Bot activo
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {/* Acciones rápidas */}
-                <div className="flex items-center gap-1">
+
+                {/* Acciones rápidas (pantallas medianas en adelante) */}
+                {!esGrupo && (
+                  <div className="hidden sm:flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={pedirUbicacion}
+                      className="p-2 rounded-xl bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition-colors"
+                      title="📍 Pedir ubicación (el bot le pide su ubicación al cliente)"
+                    >
+                      <MapPinned className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={enviarYape}
+                      className="p-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors"
+                      title="💰 Enviar QR de Yape"
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleSilencio}
+                      className={`p-2 rounded-xl border transition-colors ${
+                        convActiva.silenciado
+                          ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                          : 'bg-slate-700/40 text-slate-300 border-slate-600 hover:bg-slate-700'
+                      }`}
+                      title={convActiva.silenciado ? '🔔 Reactivar bot para este cliente' : '🔇 Silenciar bot para este cliente'}
+                    >
+                      {convActiva.silenciado ? <BellRing className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                    </button>
+                  </div>
+                )}
+
+                {/* Menú ⋮ (siempre visible — móvil incluido) */}
+                <div className="relative flex-shrink-0" ref={menuRef}>
                   <button
                     type="button"
-                    onClick={pedirUbicacion}
-                    className="p-2 rounded-xl bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition-colors"
-                    title="📍 Pedir ubicación (el bot le pide su ubicación al cliente)"
+                    onClick={() => setMenuChat((v) => !v)}
+                    className={`p-2 rounded-xl border transition-colors ${menuChat ? 'bg-emerald-600 text-white border-emerald-500' : 'text-slate-300 border-slate-600 bg-slate-700/40 hover:bg-slate-700'}`}
+                    title="Más opciones"
                   >
-                    <MapPinned className="w-4 h-4" />
+                    <MoreVertical className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={enviarYape}
-                    className="p-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors"
-                    title="💰 Enviar QR de Yape"
-                  >
-                    <QrCode className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleSilencio}
-                    className={`p-2 rounded-xl border transition-colors ${
-                      convActiva.silenciado
-                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
-                        : 'bg-slate-700/40 text-slate-300 border-slate-600 hover:bg-slate-700'
-                    }`}
-                    title={convActiva.silenciado ? '🔔 Reactivar bot para este cliente' : '🔇 Silenciar bot para este cliente'}
-                  >
-                    {convActiva.silenciado ? <BellRing className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-                  </button>
+                  {menuChat && (
+                    <div className="absolute right-0 top-11 z-50 w-56 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden py-1">
+                      {itemsMenu.map((it) => {
+                        const Icono = it.icono;
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            onClick={it.accion}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800 transition-colors text-left"
+                          >
+                            <Icono className={`w-4 h-4 flex-shrink-0 ${it.color}`} />
+                            {it.etiqueta}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Mensajes */}
-              <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 bg-slate-900/40">
+              {/* Mensajes (con el fondo elegido) */}
+              <div
+                ref={scrollRef}
+                className={`flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 ${fondo.css ? '' : 'bg-slate-900/40'}`}
+                style={fondo.css ? { background: fondo.css } : undefined}
+              >
+                {esGrupo && (
+                  <div className="mx-auto max-w-lg mb-3 p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-200/90 leading-relaxed">
+                    <b className="text-sky-300">👥 Grupo de trabajo MATE.</b> Lo que escribas aquí lo manda el bot
+                    al grupo de WhatsApp de MATE. Ves todos los reportes que el bot envía al grupo; lo que
+                    respondan los compañeros llegará cuando el bot también guarde los mensajes del grupo
+                    (pendiente en su parche).
+                  </div>
+                )}
                 {mensajesAgrupados.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
                     <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
                     <div className="text-sm font-semibold text-slate-400">Sin mensajes aún</div>
-                    <div className="text-xs mt-1">Escribe el primero o pídele su ubicación al cliente</div>
+                    <div className="text-xs mt-1">
+                      {esGrupo ? 'Escribe algo para el grupo de trabajo' : 'Escribe el primero o pídele su ubicación al cliente'}
+                    </div>
                   </div>
                 ) : (
                   mensajesAgrupados.map((g, gi) => (
@@ -775,7 +1213,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                             ...m,
                             nombreCampana: m.nombreCampana ? nombreCampana.get(m.nombreCampana) || m.nombreCampana : undefined,
                           }}
-                          desconocido={convActiva.nombre.startsWith('Cliente ')}
+                          desconocido={!esGrupo && convActiva.nombre.startsWith('Cliente ')}
                           revelado={reveladas.has(m.id)}
                           onRevelar={() => setReveladas((s) => new Set(s).add(m.id))}
                           onVerImagen={(mm) => setLightbox({ base64: mm.base64!, mimetype: mm.mimetype || 'image/jpeg', nombre: mm.nombreArchivo || 'imagen.jpg' })}
@@ -825,61 +1263,349 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                 </div>
               )}
 
-              {/* Barra de escritura */}
-              <div className="flex items-end gap-1.5 p-2.5 border-t border-slate-700/70 bg-slate-800 flex-shrink-0">
-                <input
-                  ref={inputImgRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => { manejarArchivo(e.target.files?.[0], 'imagen'); e.currentTarget.value = ''; }}
-                />
-                <input
-                  ref={inputDocRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => { manejarArchivo(e.target.files?.[0], 'documento'); e.currentTarget.value = ''; }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); }}
-                  className={`p-2.5 rounded-xl transition-colors ${emojiAbierto ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                  title="Emojis"
-                >
-                  <Smile className="w-5 h-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); }}
-                  className={`p-2.5 rounded-xl transition-colors ${menuAdjuntos ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                  title="Adjuntar"
-                >
-                  <Paperclip className="w-5 h-5" />
-                </button>
-                <textarea
-                  value={texto}
-                  onChange={(e) => setTexto(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); }
-                  }}
-                  rows={1}
-                  placeholder="Escribe un mensaje…"
-                  className="flex-1 resize-none px-3.5 py-2.5 rounded-xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/60 max-h-28 custom-scrollbar"
-                />
-                <button
-                  type="button"
-                  onClick={enviar}
-                  disabled={!texto.trim() || enviando}
-                  className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors flex-shrink-0"
-                  title="Enviar"
-                >
-                  {enviando ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                </button>
-              </div>
+              {/* Botones rápidos (plantillas conectadas + gracias) */}
+              {!esGrupo && !grabando && (plantillasConectadas.length > 0 || true) && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-slate-700/70 bg-slate-800/95 flex-shrink-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                  <button
+                    type="button"
+                    onClick={() => setRapidoAbierto({ tipo: 'gracias' })}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-bold hover:bg-amber-500/25 transition-colors"
+                  >
+                    🙏 Gracias
+                  </button>
+                  {plantillasConectadas.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setRapidoAbierto({ tipo: 'plantilla', plantilla: p })}
+                      className="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900/70 text-slate-300 border border-slate-600 text-[11px] font-bold hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
+                      title={p.clave ? `Plantilla conectada: ${p.clave}` : p.nombre}
+                    >
+                      {p.nombre}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Barra de escritura / grabación */}
+              {grabando ? (
+                <div className="flex items-center gap-2 p-2.5 border-t border-slate-700/70 bg-slate-900 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={cancelarGrabacion}
+                    className="p-2.5 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors flex-shrink-0"
+                    title="Cancelar grabación"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                  <div className="flex-1 flex items-center gap-2.5 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse flex-shrink-0" />
+                    <span className="text-sm font-mono font-bold text-rose-300">
+                      {Math.floor(grabSeg / 60)}:{String(grabSeg % 60).padStart(2, '0')}
+                    </span>
+                    <span className="text-[11px] text-rose-200/70 truncate">Grabando nota de voz…</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={detenerYEnviarAudio}
+                    disabled={enviandoAudio}
+                    className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0"
+                    title="Enviar nota de voz"
+                  >
+                    {enviandoAudio ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-end gap-1.5 p-2.5 border-t border-slate-700/70 bg-slate-800 flex-shrink-0">
+                  <input
+                    ref={inputImgRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => { manejarArchivo(e.target.files?.[0], 'imagen'); e.currentTarget.value = ''; }}
+                  />
+                  <input
+                    ref={inputDocRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => { manejarArchivo(e.target.files?.[0], 'documento'); e.currentTarget.value = ''; }}
+                  />
+                  {!esGrupo && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); }}
+                        className={`p-2.5 rounded-xl transition-colors ${emojiAbierto ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        title="Emojis"
+                      >
+                        <Smile className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); }}
+                        className={`p-2.5 rounded-xl transition-colors ${menuAdjuntos ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        title="Adjuntar"
+                      >
+                        <Paperclip className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={empezarGrabacion}
+                        disabled={enviandoAudio}
+                        className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-40 transition-colors flex-shrink-0"
+                        title="🎙️ Grabar nota de voz (la envía el bot)"
+                      >
+                        {enviandoAudio ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}
+                      </button>
+                    </>
+                  )}
+                  <textarea
+                    value={texto}
+                    onChange={(e) => setTexto(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); }
+                    }}
+                    rows={1}
+                    placeholder={esGrupo ? 'Escribe al grupo MATE…' : 'Escribe un mensaje…'}
+                    className="flex-1 resize-none px-3.5 py-2.5 rounded-xl bg-slate-900/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/60 max-h-28 custom-scrollbar"
+                  />
+                  <button
+                    type="button"
+                    onClick={enviar}
+                    disabled={!texto.trim() || enviando}
+                    className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors flex-shrink-0"
+                    title="Enviar"
+                  >
+                    {enviando ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
+
+      {/* ═══ MODAL: vista previa de botón rápido ═══ */}
+      {rapidoAbierto && convActiva && (
+        <div
+          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4"
+          onClick={() => !enviandoRapido && setRapidoAbierto(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/70">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="text-sm font-black text-white">
+                  {rapidoAbierto.tipo === 'gracias' ? '🙏 Gracias por tu compra' : rapidoAbierto.plantilla?.nombre}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRapidoAbierto(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar">
+              {rapidoAbierto.tipo === 'gracias' ? (
+                <>
+                  <img
+                    src={IMG_GRACIAS_DATAURL}
+                    alt="Tarjeta de gracias"
+                    className="w-full rounded-xl border border-slate-700"
+                  />
+                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2 shadow-lg">
+                    <span
+                      className="text-sm whitespace-pre-wrap break-words"
+                      dangerouslySetInnerHTML={{
+                        __html: formatearWhatsAppHTML(llenarVariables(MSG_GRACIAS, convActiva.nombre)),
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    El bot enviará <b className="text-slate-300">2 mensajes</b>: la tarjeta con la imagen y el
+                    mensajito de cierre.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2.5 shadow-lg">
+                    <span
+                      className="text-sm whitespace-pre-wrap break-words"
+                      dangerouslySetInnerHTML={{
+                        __html: formatearWhatsAppHTML(
+                          llenarVariables(procesarBloquesPreview(rapidoAbierto.plantilla?.mensaje || ''), convActiva.nombre)
+                        ),
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Plantilla conectada al bot · clave <code className="text-emerald-400">{rapidoAbierto.plantilla?.clave}</code>
+                    {' '}· las variables se llenan con los datos de <b className="text-slate-300">{convActiva.nombre}</b>.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="flex gap-2 p-4 pt-0">
+              <button
+                type="button"
+                onClick={() => setRapidoAbierto(null)}
+                disabled={enviandoRapido}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-colors disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={rapidoAbierto.tipo === 'gracias' ? enviarGracias : enviarPlantillaRapida}
+                disabled={enviandoRapido}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-colors disabled:opacity-40"
+              >
+                {enviandoRapido ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: fondo del chat ═══ */}
+      {panelFondo && (
+        <div
+          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4"
+          onClick={() => setPanelFondo(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/70">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-violet-400" />
+                <span className="text-sm font-black text-white">Fondo de los chats</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPanelFondo(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4">
+              <input
+                ref={inputFondoRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => { usarFotoDeFondo(e.target.files?.[0]); e.currentTarget.value = ''; }}
+              />
+              <div className="grid grid-cols-3 gap-2.5">
+                {FONDOS_CHAT_PRESET.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => aplicarFondoPreset(f)}
+                    className={`relative h-24 rounded-xl border-2 overflow-hidden transition-all ${
+                      fondo.id === f.id ? 'border-emerald-500 shadow-lg shadow-emerald-500/20' : 'border-slate-700 hover:border-slate-500'
+                    }`}
+                    style={f.css ? { background: f.css } : { background: '#0f172a' }}
+                    title={f.id === 'por_defecto' ? 'Predeterminado' : f.id.replace(/_/g, ' ')}
+                  >
+                    {f.id === 'por_defecto' && (
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Predeterminado
+                      </span>
+                    )}
+                    {fondo.id === f.id && (
+                      <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 border-2 border-slate-900 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-white" />
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {/* Foto propia */}
+                <button
+                  type="button"
+                  onClick={() => inputFondoRef.current?.click()}
+                  className={`relative h-24 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-all ${
+                    fondo.id === 'personalizada' ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-600 hover:border-slate-400 bg-slate-800/60'
+                  }`}
+                  title="Elegir una foto de tu teléfono"
+                >
+                  <ImageIcon className="w-5 h-5 text-slate-300" />
+                  <span className="text-[10px] font-bold text-slate-300">Mi foto</span>
+                  {fondo.id === 'personalizada' && (
+                    <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 border-2 border-slate-900 flex items-center justify-center">
+                      <Check className="w-3 h-3 text-white" />
+                    </span>
+                  )}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">
+                El fondo se aplica a todos tus chats y queda guardado en este teléfono (como el fondo
+                de WhatsApp). Con <b className="text-slate-300">Mi foto</b> eliges cualquier imagen de tu galería.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: confirmar borrar chat ═══ */}
+      {confirmBorrar && convActiva && !esGrupo && (
+        <div
+          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !borrando && setConfirmBorrar(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-slate-900 border border-rose-500/30 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-rose-400" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-black text-white">¿Borrar este chat?</h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Se eliminará el historial de <b className="text-slate-200">{convActiva.nombre}</b> (sus
+                    mensajes y tus respuestas ya enviadas). Es permanente, como borrar un chat de
+                    WhatsApp. Los mensajes que el bot aún tenga en cola NO se tocan.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 px-4 pb-4">
+              <button
+                type="button"
+                onClick={() => setConfirmBorrar(false)}
+                disabled={borrando}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-colors disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={borrarChat}
+                disabled={borrando}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-colors disabled:opacity-40"
+              >
+                {borrando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Borrar chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ LIGHTBOX ═══ */}
       {lightbox && (
@@ -914,3 +1640,4 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     </div>
   );
 };
+

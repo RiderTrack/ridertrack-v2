@@ -26,6 +26,8 @@ import {
   Bot,
   MessageSquareText,
   SlidersHorizontal,
+  MessageSquare,
+  Store,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -119,6 +121,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: chatNoLeidos > 0 ? `${chatNoLeidos}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
+        { id: 'chatapi', label: 'Chat API WhatsApp', icon: MessageSquare },
+        { id: 'catalogo', label: 'Catálogo', icon: Store },
         { id: 'plantillas', label: 'Plantillas del Bot', icon: MessageSquareText },
         { id: 'automatizaciones', label: 'Automatizaciones', icon: SlidersHorizontal },
       ],
