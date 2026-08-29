@@ -24,7 +24,6 @@ import {
   TrendingUp,
   Images,
   Bot,
-  MessageSquareText,
   SlidersHorizontal,
   MessageSquare,
   Store,
@@ -123,8 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         { id: 'chatapi', label: 'Chat API WhatsApp', icon: MessageSquare },
         { id: 'catalogo', label: 'Catálogo', icon: Store },
-        { id: 'plantillas', label: 'Plantillas del Bot', icon: MessageSquareText },
-        { id: 'automatizaciones', label: 'Automatizaciones', icon: SlidersHorizontal },
+        { id: 'plantillas', label: 'Centro del Bot', icon: SlidersHorizontal },
       ],
     },
     {

@@ -114,7 +114,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
-              <span className="font-black text-base sm:text-lg tracking-tight text-white group-hover:text-blue-400 transition-colors">
+              {/* Fase 3.4: en pantallas angostas (<400px) el wordmark se
+                  oculta y queda solo el logo RT — antes el header desbordaba
+                  ~20px y recortaba el avatar (invis. en teléfonos ≥412px). */}
+              <span className="font-black text-base sm:text-lg tracking-tight text-white group-hover:text-blue-400 transition-colors max-[400px]:hidden">
                 RiderTrack
               </span>
               {/* Fase 2.5: oculto en pantallas muy chicas para darle
