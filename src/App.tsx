@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
 import { Cliente } from './services/firestore';
@@ -49,6 +50,83 @@ import {
   ETIQUETAS_ESTADO,
   linkWhatsApp,
 } from './utils/realData';
+
+// ═══════════════════════════════════════════════════════════
+// 🛡️ Fase 3.5: ErrorBoundary de vistas — una sección que falle
+// NUNCA más deja la pantalla en blanco: muestra tarjeta con el
+// error y botón Reintentar. Al cambiar de pestaña se resetea sola
+// (key={activeTab}). El menú y el resto de la app siguen vivos.
+// ═══════════════════════════════════════════════════════════
+const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
+  dashboard: 'Dashboard',
+  ruta: 'Mi Ruta',
+  seguimiento: 'Seguimiento',
+  yape: 'Mi QR Yape',
+  pedidos: 'Pedidos',
+  clientes: 'Clientes',
+  repartidores: 'Mi Perfil Rider',
+  mapa: 'Mapa de Entregas',
+  motorizados: 'GPS del Motorizado',
+  whatsapp: 'Chat Baileys',
+  chatapi: 'Chat API WhatsApp',
+  catalogo: 'Catálogo',
+  plantillas: 'Centro del Bot',
+  broadcast: 'Broadcast',
+  historial: 'Historial',
+  stats: 'Estadísticas',
+  galeria: 'Galería',
+  estadisticas: 'Resumen del día',
+  backups: 'Backups',
+  configuracion: 'Configuración',
+  medios: 'Medios',
+  perfil: 'Perfil',
+};
+
+// Nota: este proyecto no usa @types/react (React se infiere desde JS),
+// por eso el extends va con cast — mismo patrón runtime, sin pelear con tsc.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ReactComponentBase: any = (React as any).Component;
+
+class VistaBoundary extends ReactComponentBase {
+  // Declaraciones de forma (no se inicializan: las llena React)
+  props: { children?: React.ReactNode; nombre?: string };
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    // eslint-disable-next-line no-console
+    console.error('[VistaBoundary] ' + this.props.nombre + ':', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 px-6 text-center rounded-2xl border border-red-500/30 bg-red-500/[0.06]">
+          <AlertTriangle className="w-10 h-10 text-red-400 mb-3" />
+          <div className="text-sm font-black text-white">
+            «{this.props.nombre}» no pudo cargar
+          </div>
+          <p className="text-xs text-slate-400 mt-1.5 max-w-sm leading-relaxed">
+            {String(this.state.error.message || 'Error desconocido').slice(0, 160)}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            El resto de la app sigue funcionando — reintenta o abre otra sección del menú.
+          </p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   // 🔐 Autenticación
@@ -522,6 +600,9 @@ export default function App() {
             isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
           }`}
         >
+          {/* Fase 3.5: boundary por pestaña — un crash de vista no tumba
+              la app ni deja la pantalla en blanco */}
+          <VistaBoundary key={activeTab} nombre={NOMBRES_TAB[activeTab] || String(activeTab)}>
           {activeTab === 'dashboard' && (
             <DashboardView
               orders={orders}
@@ -651,6 +732,7 @@ export default function App() {
           {activeTab === 'medios' && <MediosView />}
 
           {activeTab === 'perfil' && <ProfileView />}
+          </VistaBoundary>
         </main>
       </div>
 
