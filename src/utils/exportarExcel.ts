@@ -27,6 +27,21 @@ import { RegistroHistorial } from '../services/firestore';
 import { ETIQUETAS_ESTADO } from './realData';
 import { buildCircuitRows } from './circuitExcel';
 import { descargarArchivo } from './descargaArchivo';
+import {
+  PALETA_V1 as C,
+  xlsFill,
+  xlsBorde,
+  xlsFB,
+  xlsFN,
+  filaTitulo,
+  filaSeccion,
+  filaEncabezado,
+  filaTotal,
+  autoAjustarColumnas,
+  excelABlob,
+  FMT_SOL,
+  ExcelJS,
+} from './excelEstilo';
 
 export type ToastFn = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
@@ -116,9 +131,173 @@ function nombreArchivo(fecha: string): string {
 }
 
 /**
+ * Construye el libro Excel CON LOS COLORES de la v1 (Fase 3.8).
+ * Función pura (testable en Node) — exportarExcelRuta la envuelve
+ * con el guardar/compartir nativo.
+ */
+export function buildWorkbookRuta(r: RegistroHistorial): ExcelJS.Workbook {
+  const clientes: any[] = r.clientes || [];
+
+  // ── Armar el libro con estilo v1 ──
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'RiderTrack';
+  const ws = wb.addWorksheet('Entregas', { views: [{ state: 'frozen', ySplit: 3 }] });
+
+  const COLS = 13; // como la v1
+  ws.columns = [{ width: 4 }, { width: 22 }, { width: 30 }, { width: 14 }, { width: 13 }, { width: 28 }, { width: 9 }, { width: 10 }, { width: 18 }, { width: 8 }, { width: 25 }, { width: 30 }, { width: 30 }];
+  const HDRS = ['N°', 'NOMBRE CLIENTE', 'DIRECCIÓN', 'DISTRITO', 'CELULAR', 'PRODUCTO', 'PRECIO', 'A COBRAR', 'FORMA DE PAGO', 'HORA', 'NOTA', 'OBSERVACIONES', 'MOTIVO/REPORTE'];
+
+  // Título + encabezado (como la v1)
+  filaTitulo(ws, `RUTA DEL DÍA  —  ${r.fecha}`, COLS);
+  ws.addRow([]).height = 4;
+  filaEncabezado(ws, HDRS);
+  ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: COLS } };
+
+  let loIdx = 0;
+  let falIdx = 0;
+  const addCli = (c: any, monto: number, tipo: 'lo' | 'emp' | 'fal') => {
+    let bg: string;
+    if (tipo === 'lo') { loIdx++; bg = loIdx % 2 === 0 ? C.alt2 : C.alt1; }
+    else if (tipo === 'emp') { bg = C.empRow; }
+    else { falIdx++; bg = falIdx % 2 === 0 ? C.fal2 : C.fal1; }
+    const motivoTxt = c.motivo || c.notaPendiente || '';
+    const row = ws.addRow([
+      c.num ?? '',
+      c.nombre || 'Cliente',
+      c.dir || '',
+      c.dist || '',
+      c.cel || '',
+      c.prod || '',
+      parseFloat(String(c.precio || 0)) || 0,
+      monto,
+      ETIQUETAS_ESTADO[c.st] || c.st || 'Pendiente',
+      c.hora || '–',
+      c.nota || '',
+      c.obs || '',
+      motivoTxt,
+    ]);
+    row.height = 15;
+    row.eachCell({ includeEmpty: true }, (cell, cn) => {
+      cell.fill = xlsFill(bg);
+      cell.border = xlsBorde(C.border);
+      if (cn === 1) {
+        cell.font = { bold: false, color: { argb: 'FF' + C.dark }, size: 9, name: 'Calibri' };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (cn === 8) {
+        cell.font = xlsFB('1B5E20', 10);
+        cell.alignment = { vertical: 'middle' };
+        cell.numFmt = FMT_SOL;
+      } else if (cn === 7) {
+        cell.font = xlsFN(C.dark, 10);
+        cell.alignment = { vertical: 'middle' };
+        cell.numFmt = FMT_SOL;
+      } else {
+        cell.font = xlsFN(C.dark, 10);
+        cell.alignment = { vertical: 'middle', wrapText: cn === 3 || cn === 11 || cn === 12 || cn === 13 };
+      }
+    });
+  };
+
+  // 💚 LO TUYO — Cobros del día
+  const clTuyo = clientes.filter((c) => METODOS_RIDER.includes(c.st));
+  let totTuyo = 0;
+  filaSeccion(ws, '💚  LO TUYO  —  Cobros del día', C.loTuyoBg, COLS);
+  clTuyo.forEach((c) => {
+    const m = montoRider(c);
+    totTuyo += m;
+    addCli(c, m, 'lo');
+  });
+  if (clTuyo.length === 0) {
+    const nr = ws.addRow(['Sin entregas']);
+    nr.getCell(1).font = xlsFN('999999', 10);
+    nr.height = 14;
+  }
+  filaTotal(ws, 'TOTAL LO TUYO', totTuyo, C.totTuyoBg, COLS, 8);
+  ws.addRow([]).height = 6;
+
+  // 🏢 EMPRESA — Transferencia / POS
+  const clEmpresa = clientes.filter((c) => METODOS_EMPRESA.includes(c.st) || (c.st === 'mixto' && parseFloat(String(c.mEmp || 0)) > 0));
+  let totEmpresa = 0;
+  filaSeccion(ws, '🏢  EMPRESA  —  Transferencia / POS', C.empresaBg, COLS);
+  clEmpresa.forEach((c) => {
+    const m = montoEmpresa(c);
+    totEmpresa += m;
+    addCli(c, m, 'emp');
+  });
+  if (clEmpresa.length === 0) {
+    const nr2 = ws.addRow(['Sin entregas de empresa']);
+    nr2.getCell(1).font = xlsFN('999999', 10);
+    nr2.height = 14;
+  }
+  filaTotal(ws, 'TOTAL EMPRESA', totEmpresa, C.empresaBg, COLS, 8);
+  ws.addRow([]).height = 6;
+
+  // ⏳ FALLIDOS / SIN ATENDER — No entregados
+  const clOtros = clientes.filter((c) => !METODOS_RIDER.includes(c.st) && !METODOS_EMPRESA.includes(c.st));
+  let totOtros = 0;
+  if (clOtros.length > 0) {
+    filaSeccion(ws, '⏳  FALLIDOS / SIN ATENDER  —  No entregados', C.fallidoBg, COLS);
+    clOtros.forEach((c) => {
+      const m = parseFloat(String(c.cobrar || 0));
+      totOtros += m;
+      addCli(c, m, 'fal');
+    });
+    filaTotal(ws, 'TOTAL FALLIDOS', totOtros, C.fallidoBg, COLS, 8);
+    ws.addRow([]).height = 6;
+  }
+
+  // GRAN TOTAL (como la v1)
+  const totGen = totTuyo + totEmpresa;
+  const gt = ws.addRow(['GRAN TOTAL DEL DÍA', '', '', '', '', '', '', totGen, '', '', '', '', '']);
+  gt.height = 22;
+  ws.mergeCells(gt.number, 1, gt.number, 7);
+  gt.eachCell({ includeEmpty: true }, (cell, cn) => {
+    cell.fill = xlsFill(C.granTotBg);
+    cell.font = xlsFB(C.fg, 13);
+    cell.border = xlsBorde('000000');
+    cell.alignment = { horizontal: cn === 8 ? 'right' : 'left', vertical: 'middle' };
+    if (cn === 8) cell.numFmt = FMT_SOL;
+  });
+  ws.addRow([]).height = 6;
+
+  // 📊 RESUMEN DEL DÍA (colores por fila, como la v1)
+  filaTitulo(ws, '📊  RESUMEN DEL DÍA', COLS, 20);
+  const entregados = r.entregados || (clTuyo.length + clEmpresa.length);
+  const resum: { l: string; v: number; fmt: string; bg: string; fg: string }[] = [
+    { l: '👥  Clientes totales', v: clientes.length, fmt: '#,##0', bg: 'E8EAF6', fg: '1A237E' },
+    { l: '✅  Entregados', v: entregados, fmt: '#,##0', bg: 'E8F5E9', fg: '1B5E20' },
+    { l: '⏳  Pendientes / Fallidos', v: r.pendientes || r.fallidos || clOtros.length, fmt: '#,##0', bg: 'FFEBEE', fg: 'B71C1C' },
+    { l: '💚  Total lo tuyo', v: totTuyo, fmt: FMT_SOL, bg: 'E8F5E9', fg: '1B5E20' },
+    { l: '🏢  Total empresa', v: totEmpresa, fmt: FMT_SOL, bg: 'E3F2FD', fg: '0D47A1' },
+    { l: '💰  TOTAL COBRADO', v: totGen, fmt: FMT_SOL, bg: '263238', fg: 'FFFFFF' },
+  ];
+  resum.forEach((item) => {
+    const row = ws.addRow([item.l, '', '', '', '', '', '', item.v, '', '', '', '', '']);
+    ws.mergeCells(row.number, 1, row.number, 7);
+    row.height = 18;
+    row.eachCell({ includeEmpty: true }, (cell, cn) => {
+      cell.fill = xlsFill(item.bg);
+      cell.font = xlsFB(item.fg, 11);
+      cell.border = xlsBorde(C.border);
+      cell.alignment = { horizontal: cn === 8 ? 'right' : 'left', vertical: 'middle' };
+      if (cn === 8) cell.numFmt = item.fmt;
+    });
+  });
+
+  // Autoajuste inteligente por columna (como la v1)
+  autoAjustarColumnas(ws, [4, 22, 32, 16, 13, 30, 9, 10, 20, 8, 28, 30, 30]);
+
+  return wb;
+}
+
+/**
  * Genera y comparte el Excel de una ruta del historial.
  * Debe llamarse directo desde el tap del usuario (gesto) para que
  * el compartir nativo funcione.
+ *
+ * FASE 3.8 — con los COLORES de la v1 (ExcelJS): título azul,
+ * secciones 💚/🏢/⏳ con sus totales, filas alternadas, gran total
+ * y resumen del día — igual que el xlsData() de la v1.
  */
 export async function exportarExcelRuta(
   r: RegistroHistorial,
@@ -131,93 +310,9 @@ export async function exportarExcelRuta(
   }
 
   try {
-    // ── Armar la tabla (array de arrays) ──
-    const aoa: (string | number)[][] = [];
-
-    aoa.push([`RUTA DEL DÍA — ${r.fecha}`]);
-    aoa.push([]);
-    aoa.push(['N°', 'NOMBRE CLIENTE', 'DIRECCIÓN', 'DISTRITO', 'CELULAR', 'PRODUCTO', 'A COBRAR', 'FORMA DE PAGO', 'HORA', 'OBSERVACIONES', 'MOTIVO/REPORTE']);
-
-    const filaCliente = (c: any, monto: number): (string | number)[] => [
-      c.num ?? '',
-      c.nombre || 'Cliente',
-      c.dir || '',
-      c.dist || '',
-      c.cel || '',
-      c.prod || '',
-      monto,
-      ETIQUETAS_ESTADO[c.st] || c.st || 'Pendiente',
-      c.hora || '–',
-      c.obs || c.nota || '',
-      c.motivo || '',
-    ];
-
-    // 💚 LO TUYO
-    const clTuyo = clientes.filter((c) => METODOS_RIDER.includes(c.st));
-    let totTuyo = 0;
-    aoa.push(['💚 LO TUYO — Cobros del día']);
-    clTuyo.forEach((c) => {
-      const m = montoRider(c);
-      totTuyo += m;
-      aoa.push(filaCliente(c, m));
-    });
-    if (clTuyo.length === 0) aoa.push(['Sin entregas']);
-    aoa.push(['TOTAL LO TUYO', '', '', '', '', '', totTuyo]);
-    aoa.push([]);
-
-    // 🏢 EMPRESA
-    const clEmpresa = clientes.filter((c) => METODOS_EMPRESA.includes(c.st) || (c.st === 'mixto' && parseFloat(String(c.mEmp || 0)) > 0));
-    let totEmpresa = 0;
-    aoa.push(['🏢 EMPRESA — Transferencia / POS']);
-    clEmpresa.forEach((c) => {
-      const m = montoEmpresa(c);
-      totEmpresa += m;
-      aoa.push(filaCliente(c, m));
-    });
-    if (clEmpresa.length === 0) aoa.push(['Sin entregas de empresa']);
-    aoa.push(['TOTAL EMPRESA', '', '', '', '', '', totEmpresa]);
-    aoa.push([]);
-
-    // ⏳ FALLIDOS / SIN ATENDER
-    const clOtros = clientes.filter((c) => !METODOS_RIDER.includes(c.st) && !METODOS_EMPRESA.includes(c.st));
-    let totOtros = 0;
-    if (clOtros.length > 0) {
-      aoa.push(['⏳ FALLIDOS / SIN ATENDER — No entregados']);
-      clOtros.forEach((c) => {
-        const m = parseFloat(String(c.cobrar || 0));
-        totOtros += m;
-        aoa.push(filaCliente(c, m));
-      });
-      aoa.push(['TOTAL FALLIDOS', '', '', '', '', '', totOtros]);
-      aoa.push([]);
-    }
-
-    // GRAN TOTAL
-    aoa.push(['GRAN TOTAL DEL DÍA', '', '', '', '', '', totTuyo + totEmpresa]);
-    aoa.push([]);
-
-    // RESUMEN
-    aoa.push(['📊 RESUMEN DEL DÍA']);
-    aoa.push(['👥 Clientes totales', clientes.length]);
-    aoa.push(['✅ Entregados', r.entregados || (clTuyo.length + clEmpresa.length)]);
-    aoa.push(['⏳ Sin atender', r.pendientes || 0]);
-    aoa.push(['❌ Fallidos', r.fallidos || 0]);
-    aoa.push(['💚 Total lo tuyo', totTuyo]);
-    aoa.push(['🏢 Total empresa', totEmpresa]);
-    aoa.push(['💰 TOTAL COBRADO', totTuyo + totEmpresa]);
-
-    // ── Generar el .xlsx ──
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [
-      { wch: 4 }, { wch: 22 }, { wch: 30 }, { wch: 14 }, { wch: 12 },
-      { wch: 26 }, { wch: 10 }, { wch: 16 }, { wch: 8 }, { wch: 28 }, { wch: 24 },
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Entregas');
-    const salida = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
-    const blob = new Blob([salida], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
+    const wb = buildWorkbookRuta(r);
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = excelABlob(buffer as ExcelJS.Buffer);
 
     const nombre = nombreArchivo(r.fecha);
 

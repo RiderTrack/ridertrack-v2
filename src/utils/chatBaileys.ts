@@ -44,6 +44,7 @@ import {
   addDoc,
   setDoc,
   deleteDoc,
+  getDoc,
   getDocs,
   writeBatch,
   where,
@@ -737,10 +738,20 @@ export async function eliminarMensajeChat(docId: string): Promise<void> {
 // FASE 3.3 — GRUPO DE TRABAJO MATE
 // ═══════════════════════════════════════════════════════════
 
+/** JID del grupo de trabajo MATE (el MISMO que usaba la v1) */
+export const GRUPO_MATE_JID = '120363128461377751@g.us';
+
 /**
  * ✍️ Escribir al grupo de trabajo MATE desde el chat.
- * Usa la acción 'enviar_grupo_mate' que el bot YA conoce
- * (RutaView la usa para los reportes) con { texto }.
+ * Usa la acción 'enviar_grupo_mate' que el bot YA conoce.
+ *
+ * FASE 3.8 — FIX MENSAJES QUE NO LLEGABAN AL GRUPO:
+ * el payload de la v1 (botOtrosMATEEnviar / botEmpresaEnviarMATE)
+ * SIEMPRE incluía `grupoId` (el JID del grupo) y `estado`; la v2
+ * no los mandaba y el bot marcaba el doc como procesado SIN
+ * enviar nada a WhatsApp (verificado en Firestore: los "Hola" de
+ * prueba quedaron processed=true pero nunca llegaron al grupo).
+ * Ahora el payload es IDÉNTICO al de la v1.
  */
 export async function enviarAGrupoMate(texto: string, rider?: RiderInfo): Promise<void> {
   const t = texto.trim();
@@ -750,11 +761,91 @@ export async function enviarAGrupoMate(texto: string, rider?: RiderInfo): Promis
     clienteId: 'grupo_mate',
     telefono: '',
     nombre: 'Grupo MATE',
-    prod: '',
-    cobrar: 0,
-    dir: '',
-    dist: '',
     texto: t,
+    grupoId: GRUPO_MATE_JID,
+    estado: 'otros',
+    ...(rider ? { rider } : {}),
+    createdAt: new Date().toISOString(),
+    processed: false,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.8 — 🙏 GRACIAS POR TU COMPRA (vía del robot, exacta)
+// ═══════════════════════════════════════════════════════════
+
+/** Datos del cliente que viajan en la acción avisar_entrega (como la v1) */
+export interface DatosClienteGracias {
+  prod?: string;
+  cobrar?: number;
+  dir?: string;
+  dist?: string;
+  st?: string;
+}
+
+/** El mensaje que el bot manda con la tarjeta (idéntico al preview del Control de la v1) */
+export const MENSAJE_GRACIAS_BOT =
+  '✅ ¡Pedido entregado!\n\nGracias por confiar en MATE Pharmacy 🙏\n\n¿Tienes alguna consulta o reclamo?\n📱 WhatsApp: 956 203 893 (Fabiana)\n📞 Llamadas: 956 203 893\n\n¡Estamos para ayudarte! 😊';
+
+/**
+ * Busca los datos del cliente (prod, cobrar, dir, dist) en la ruta
+ * activa para que la acción avisar_entrega lleve la misma info que
+ * cuando se manda desde el Control de la v1. Si no lo encuentra
+ * (cliente que no está en la ruta de hoy) devuelve vacíos — el bot
+ * los tolera porque la v1 también mandaba '' cuando faltaban.
+ */
+async function buscarClienteEnRuta(t9: string): Promise<DatosClienteGracias> {
+  try {
+    const snap = await getDoc(doc(db!, 'ruta_activa', UID_BOT));
+    if (!snap.exists()) return {};
+    const data = snap.data() || {};
+    const lista: any[] = Array.isArray(data.clientes) ? data.clientes : [];
+    const c = lista.find((x) => telKey(x.cel) === t9);
+    if (!c) return {};
+    return {
+      prod: String(c.prod || ''),
+      cobrar: parseFloat(String(c.cobrar || 0)) || 0,
+      dir: String(c.dir || ''),
+      dist: String(c.dist || ''),
+      st: String(c.st || ''),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 🙏 GRACIAS POR TU COMPRA — por la VÍA DEL ROBOT.
+ *
+ * FASE 3.8: la app ya NO manda su propia imagen embebida (llegaba
+ * el logo equivocado — los archivos de imagenes_bot están
+ * intercambiados). Copia EXACTA del Control de la v1
+ * (controlAvisarEntrega): acción `avisar_entrega` con
+ * enviar_imagen / modo_entrega → el bot manda SU tarjeta real
+ * (mate_gracias) + el mensajito con el contacto de Fabiana.
+ * `conImagen: false` = la opción "Solo texto" de la v1.
+ */
+export async function enviarGraciasBot(
+  tel: string,
+  nombre: string,
+  conImagen: boolean,
+  rider?: RiderInfo
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const datos = await buscarClienteEnRuta(t9);
+  await addDoc(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), {
+    tipo: 'avisar_entrega',
+    clienteId: 'chat_' + t9,
+    telefono: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    prod: datos.prod || '',
+    cobrar: datos.cobrar || 0,
+    dir: datos.dir || '',
+    dist: datos.dist || '',
+    st: datos.st || 'entregado',
+    modo_entrega: conImagen ? 'auto_imagen' : 'auto_texto',
+    enviar_imagen: conImagen,
     ...(rider ? { rider } : {}),
     createdAt: new Date().toISOString(),
     processed: false,

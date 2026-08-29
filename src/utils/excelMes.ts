@@ -10,9 +10,21 @@
 // Incluye HOY EN CURSO si la ruta del día está activa (marcado).
 // ═══════════════════════════════════════════════════════════
 
-import * as XLSX from 'xlsx';
 import { ETIQUETAS_ESTADO } from './realData';
 import { descargarArchivo } from './descargaArchivo';
+import {
+  PALETA_V1 as C,
+  xlsFill,
+  xlsBorde,
+  xlsFB,
+  xlsFN,
+  filaTitulo,
+  filaEncabezado,
+  autoAjustarColumnas,
+  excelABlob,
+  FMT_SOL,
+  ExcelJS,
+} from './excelEstilo';
 
 export type ToastFn = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
@@ -210,9 +222,160 @@ export function buildAoaMes(
 }
 
 /**
+ * Construye el libro del MES con los COLORES de la v1 (Fase 3.8).
+ * Función pura (testable en Node) — exportarExcelMes la envuelve
+ * con el guardar/compartir nativo.
+ */
+export function buildWorkbookMes(
+  registros: RegistroMes[],
+  anio: number,
+  mes: number,
+): { wb: ExcelJS.Workbook; resumen: ResumenMes } | null {
+  const built = buildAoaMes(registros, anio, mes);
+  if (!built) return null;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'RiderTrack';
+
+  try {
+    // ═══ HOJA 1: RESUMEN (con colores v1) ═══
+    const wsR = wb.addWorksheet('Resumen', { views: [{ state: 'frozen', ySplit: 3 }] });
+    const CR = 6;
+    wsR.columns = [{ width: 30 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 14 }];
+    filaTitulo(wsR, `📊  MENSUAL  —  ${MESES_ES[mes - 1].toUpperCase()} ${anio}`, CR);
+    wsR.addRow([]).height = 4;
+
+    // KPIs con colores por tipo (estilo resumen de la v1)
+    const kpis: { l: string; v: number | string; fmt: string; bg: string; fg: string }[] = [
+      { l: '🛵  Rutas cerradas', v: built.resumen.rutas, fmt: '#,##0', bg: 'E8EAF6', fg: '1A237E' },
+      { l: '✅  Entregas totales', v: built.resumen.entregados, fmt: '#,##0', bg: 'E8F5E9', fg: '1B5E20' },
+      { l: '❌  Fallidos', v: built.resumen.fallidos, fmt: '#,##0', bg: 'FFEBEE', fg: 'B71C1C' },
+      { l: '💚  Total lo tuyo', v: built.resumen.tuyo, fmt: FMT_SOL, bg: 'E8F5E9', fg: '1B5E20' },
+      { l: '🏢  Total empresa', v: built.resumen.empresa, fmt: FMT_SOL, bg: 'E3F2FD', fg: '0D47A1' },
+      { l: '💰  TOTAL COBRADO', v: built.resumen.total, fmt: FMT_SOL, bg: '263238', fg: 'FFFFFF' },
+      { l: '📅  Días con ruta', v: built.resumen.dias, fmt: '#,##0', bg: 'F3E5F5', fg: '6A1B9A' },
+      { l: '💵  S/ por día (promedio)', v: built.resumen.dias > 0 ? built.resumen.total / built.resumen.dias : 0, fmt: FMT_SOL, bg: 'FFF3E0', fg: 'E65100' },
+      { l: '📦  S/ por entrega (promedio)', v: built.resumen.entregados > 0 ? built.resumen.total / built.resumen.entregados : 0, fmt: FMT_SOL, bg: 'FFF3E0', fg: 'E65100' },
+    ];
+    kpis.forEach((k) => {
+      const row = wsR.addRow([k.l, '', '', '', '', k.v]);
+      wsR.mergeCells(row.number, 1, row.number, 5);
+      row.height = 18;
+      row.eachCell({ includeEmpty: true }, (cell, cn) => {
+        cell.fill = xlsFill(k.bg);
+        cell.font = xlsFB(k.fg, 11);
+        cell.border = xlsBorde(C.border);
+        cell.alignment = { horizontal: cn === CR ? 'right' : 'left', vertical: 'middle' };
+        if (cn === CR && k.fmt !== '@') cell.numFmt = k.fmt;
+      });
+    });
+    wsR.addRow([]).height = 6;
+
+    // Tabla DÍA POR DÍA
+    filaTitulo(wsR, '📅  DÍA POR DÍA', CR, 20);
+    filaEncabezado(wsR, ['FECHA', 'ENTREGAS', 'FALLIDOS', '💚 TUYO', '🏢 EMPRESA', '💰 TOTAL']);
+    let idxDia = 0;
+    built.aoaResumen.forEach((fila) => {
+      if (fila.length < 6) return; // saltar títulos/vacíos
+      const esTotal = String(fila[0]).includes('TOTAL DEL MES');
+      if (String(fila[0]) === 'FECHA') return; // header ya puesto
+      const row = wsR.addRow(fila);
+      row.height = 15;
+      if (esTotal) {
+        row.eachCell({ includeEmpty: true }, (cell, cn) => {
+          cell.fill = xlsFill(C.granTotBg);
+          cell.font = xlsFB(C.fg, 11);
+          cell.border = xlsBorde('000000');
+          cell.alignment = { horizontal: cn >= 2 ? 'center' : 'left', vertical: 'middle' };
+          if (cn >= 4) cell.numFmt = FMT_SOL;
+        });
+      } else {
+        idxDia++;
+        const bg = idxDia % 2 === 0 ? 'E8EAF6' : 'FFFFFF';
+        row.eachCell({ includeEmpty: true }, (cell, cn) => {
+          cell.fill = xlsFill(bg);
+          cell.font = xlsFN(C.dark, 10);
+          cell.border = xlsBorde(C.border);
+          cell.alignment = { horizontal: cn >= 2 ? 'center' : 'left', vertical: 'middle' };
+          if (cn === 2) cell.font = xlsFB('1B5E20', 10);
+          if (cn === 3) cell.font = xlsFB('B71C1C', 10);
+          if (cn >= 4) cell.numFmt = FMT_SOL;
+        });
+      }
+    });
+
+    // ═══ HOJA 2: DETALLE (coloreado por caja, como el diario) ═══
+    const wsD = wb.addWorksheet('Detalle', { views: [{ state: 'frozen', ySplit: 3 }] });
+    const CD = 13;
+    wsD.columns = [{ width: 12 }, { width: 5 }, { width: 24 }, { width: 32 }, { width: 14 }, { width: 12 }, { width: 28 }, { width: 10 }, { width: 14 }, { width: 16 }, { width: 8 }, { width: 30 }, { width: 24 }];
+    filaTitulo(wsD, `📋  DETALLE DE CLIENTES  —  ${MESES_ES[mes - 1].toUpperCase()} ${anio}`, CD);
+    wsD.addRow([]).height = 4;
+    filaEncabezado(wsD, ['FECHA', 'N°', 'CLIENTE', 'DIRECCIÓN', 'DISTRITO', 'CELULAR', 'PRODUCTO', 'MONTO', 'CAJA', 'FORMA DE PAGO', 'HORA', 'OBSERVACIONES', 'MOTIVO/REPORTE']);
+
+    let idxDet = 0;
+    built.aoaDetalle.forEach((fila) => {
+      if (fila.length < 8) return; // saltar título/vacíos (la fila TOTAL tiene 8)
+      if (String(fila[0]) === 'FECHA') return;
+      const caja = String(fila[8] || '');
+      const esTotal = String(fila[0]).includes('TOTAL COBRADO DEL MES');
+      const row = wsD.addRow(fila);
+      row.height = 15;
+
+      if (esTotal) {
+        row.eachCell({ includeEmpty: true }, (cell, cn) => {
+          cell.fill = xlsFill(C.granTotBg);
+          cell.font = xlsFB(C.fg, 12);
+          cell.border = xlsBorde('000000');
+          cell.alignment = { horizontal: cn === 8 ? 'right' : 'left', vertical: 'middle' };
+          if (cn === 8) cell.numFmt = FMT_SOL;
+        });
+        return;
+      }
+
+      idxDet++;
+      let bg: string;
+      if (caja.includes('Mixto')) bg = idxDet % 2 === 0 ? 'F3E5F5' : 'EDE2F4';
+      else if (caja.includes('💚')) bg = idxDet % 2 === 0 ? C.alt2 : C.alt1;
+      else if (caja.includes('🏢')) bg = C.empRow;
+      else bg = idxDet % 2 === 0 ? C.fal2 : C.fal1;
+
+      row.eachCell({ includeEmpty: true }, (cell, cn) => {
+        cell.fill = xlsFill(bg);
+        cell.border = xlsBorde(C.border);
+        if (cn === 2) {
+          cell.font = { bold: false, color: { argb: 'FF' + C.dark }, size: 9, name: 'Calibri' };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else if (cn === 8) {
+          const entregado = !caja.includes('⏳');
+          cell.font = xlsFB(entregado ? '1B5E20' : 'B71C1C', 10);
+          cell.alignment = { vertical: 'middle' };
+          cell.numFmt = FMT_SOL;
+        } else {
+          cell.font = xlsFN(C.dark, 10);
+          cell.alignment = { vertical: 'middle', wrapText: cn === 4 || cn === 12 || cn === 13 };
+        }
+      });
+    });
+
+    autoAjustarColumnas(wsR, [30, 12, 12, 14, 14, 14]);
+    autoAjustarColumnas(wsD, [12, 5, 24, 32, 16, 13, 30, 10, 14, 20, 8, 30, 24]);
+
+    return { wb, resumen: built.resumen };
+  } catch (e: any) {
+    console.error('❌ Error construyendo Excel del mes:', e);
+    return null;
+  }
+}
+
+/**
  * Genera y comparte el Excel del MES EN CURSO (Resumen + Detalle).
  * Debe llamarse directo desde el tap del usuario (gesto) para que
  * el compartir nativo funcione.
+ *
+ * FASE 3.8 — con los COLORES de la v1 (ExcelJS): misma paleta del
+ * Excel diario (títulos azules, KPIs con colores por tipo, tabla
+ * día por día con filas alternadas y detalle coloreado por caja
+ * 💚/🏢/⏳). La lógica de datos sigue siendo buildAoaMes (testada).
  */
 export async function exportarExcelMes(
   registros: RegistroMes[],
@@ -223,33 +386,15 @@ export async function exportarExcelMes(
   const mes = ahora.getMonth() + 1;
   const nombreMes = `${MESES_ES[mes - 1]} ${anio}`;
 
-  const built = buildAoaMes(registros, anio, mes);
-  if (!built) {
-    onShowToast?.('📅 Sin datos este mes', `No hay rutas guardadas en ${nombreMes} todavía`, 'warning');
-    return false;
-  }
-
   try {
-    // ── Hoja Resumen ──
-    const wsResumen = XLSX.utils.aoa_to_sheet(built.aoaResumen);
-    wsResumen['!cols'] = [
-      { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
-    ];
+    const built = buildWorkbookMes(registros, anio, mes);
+    if (!built) {
+      onShowToast?.('📅 Sin datos este mes', `No hay rutas guardadas en ${nombreMes} todavía`, 'warning');
+      return false;
+    }
 
-    // ── Hoja Detalle ──
-    const wsDetalle = XLSX.utils.aoa_to_sheet(built.aoaDetalle);
-    wsDetalle['!cols'] = [
-      { wch: 12 }, { wch: 5 }, { wch: 24 }, { wch: 32 }, { wch: 14 }, { wch: 12 },
-      { wch: 28 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 8 }, { wch: 30 }, { wch: 24 },
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
-    XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
-    const salida = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
-    const blob = new Blob([salida], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
+    const buffer = await built.wb.xlsx.writeBuffer();
+    const blob = excelABlob(buffer as ExcelJS.Buffer);
 
     const nombre = `RutaMensual_${built.resumen.prefijo}.xlsx`;
 

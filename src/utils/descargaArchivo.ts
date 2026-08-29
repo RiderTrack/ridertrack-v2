@@ -197,3 +197,122 @@ export async function descargarArchivo(
   onShowToast?.(tituloExito, `${nombre} · descargado${extra}`, 'success');
   return 'web';
 }
+
+// ═══════════════════════════════════════════════════════════
+// 📲 COMPARTIR ARCHIVO + MENSAJITO — Fase 3.8
+//
+// Reporte del usuario: al compartir una foto de la galería de
+// entregas le llegaba una PÁGINA (URL de Firestore) en vez de la
+// imagen. Este helper comparte el ARCHIVO real + un mensajito
+// (en WhatsApp el texto viaja como caption/acompañante):
+//   APK:  Filesystem (Cache) + Share.share({ files, text })
+//   WEB:  navigator.share({ files, text })
+// Si compartir con archivo falla → comparte SOLO el texto por
+// wa.me (y avisa que la foto está en Descargas/Documentos).
+// ═══════════════════════════════════════════════════════════
+
+export async function compartirArchivoConTexto(
+  blob: Blob,
+  nombre: string,
+  texto: string,
+  onShowToast?: ToastDescargaFn,
+  tituloExito = '📷 Foto compartida',
+  telefonoWhatsApp?: string,
+): Promise<'compartido' | 'soloTexto' | 'cancelado' | null> {
+  // ── APK: hoja nativa de compartir CON el archivo y el texto ──
+  let esApk = false;
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    esApk = Capacitor.isNativePlatform();
+  } catch {
+    esApk = false;
+  }
+
+  if (esApk) {
+    try {
+      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      const b64 = await blobABase64(blob);
+      const res = await Filesystem.writeFile({
+        path: nombre,
+        data: b64,
+        directory: Directory.Cache,
+        recursive: true,
+      });
+      try {
+        const { Share } = await import('@capacitor/share');
+        await Share.share({
+          title: nombre,
+          text: texto,
+          dialogTitle: `Enviar ${nombre}`,
+          files: [res.uri],
+        });
+        onShowToast?.(tituloExito, 'La foto salió como IMAGEN con tu mensajito', 'success');
+        return 'compartido';
+      } catch (e: unknown) {
+        const msg = String((e as { message?: string })?.message || '');
+        if (/cancel/i.test(msg) || (e as { name?: string })?.name === 'AbortError') return 'cancelado';
+        // El share falló → intentar guardar en Documentos y mandar el texto por wa.me
+        throw e;
+      }
+    } catch (e: any) {
+      console.warn('⚠️ compartirArchivoConTexto (APK):', e?.message || e);
+      // Respaldo: guardar la foto en Documentos + abrir WhatsApp con el texto
+      try {
+        const { Filesystem, Directory } = await import('@capacitor/filesystem');
+        const b64 = await blobABase64(blob);
+        await Filesystem.writeFile({
+          path: nombre,
+          data: b64,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+        if (telefonoWhatsApp) {
+          const wa = 'https://wa.me/' + telefonoWhatsApp.replace(/\D/g, '') + '?text=' + encodeURIComponent(texto);
+          window.open(wa, '_blank');
+          onShowToast?.('📲 Mensaje listo', 'La foto quedó en Documentos — adjúntala en el chat', 'info');
+        } else {
+          onShowToast?.('📷 Foto guardada', 'En Documentos — adjúntala en WhatsApp', 'info');
+        }
+        return 'soloTexto';
+      } catch (e2: any) {
+        onShowToast?.('❌ No se pudo compartir', e2?.message || nombre, 'error');
+        return null;
+      }
+    }
+  }
+
+  // ── WEB: navigator.share con archivo + texto ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = navigator as any;
+  try {
+    const file = new File([blob], nombre, { type: blob.type });
+    if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
+      try {
+        await nav.share({ files: [file], title: nombre, text: texto });
+        onShowToast?.(tituloExito, 'La foto salió como IMAGEN con tu mensajito', 'success');
+        return 'compartido';
+      } catch (e: unknown) {
+        const esCancel = (e as { name?: string })?.name === 'AbortError';
+        if (esCancel) return 'cancelado';
+      }
+    }
+  } catch {
+    // sin File/share → caer al respaldo
+  }
+
+  // Respaldo web: descargar la imagen + abrir WhatsApp con el texto
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  if (telefonoWhatsApp) {
+    const wa = 'https://wa.me/' + telefonoWhatsApp.replace(/\D/g, '') + '?text=' + encodeURIComponent(texto);
+    window.open(wa, '_blank');
+  }
+  onShowToast?.('📷 Foto descargada', telefonoWhatsApp ? 'y WhatsApp abierto con tu mensajito — adjunta la foto' : 'adjúntala en WhatsApp', 'info');
+  return 'soloTexto';
+}
