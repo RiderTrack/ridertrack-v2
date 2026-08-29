@@ -381,6 +381,10 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
       hora: c.hora || '',
       obs: c.obs || '',
       nota: c.nota || '',
+      // 📸 Fase 2.16: la foto de evidencia viaja al historial — así la
+      // Galería de Entregas puede mostrar las fotos de rutas cerradas
+      // (antes el snapshot la omitía y la foto quedaba huérfana en Storage)
+      fotoUrl: c.fotoUrl,
       // ✅ el check de verificación con la empresa viaja al historial
       webReg: c.webReg === true,
     }));
