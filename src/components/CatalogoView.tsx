@@ -23,6 +23,7 @@ import {
   Star,
   Package,
   Loader2,
+  RefreshCw,
   X,
   Trash2,
   Pencil,
@@ -686,6 +687,10 @@ export const CatalogoView: React.FC<CatalogoViewProps> = ({ onShowToast }) => {
   const [productos, setProductos] = useState<ProductoCatalogo[]>([]);
   const [tienda, setTienda] = useState<ConfigTienda>(TIENDA_DEFAULT);
   const [cargando, setCargando] = useState(true);
+  // Fase 3.5: si Firestore falla (permisos/red), se muestra tarjeta de
+  // error con Reintentar — antes el spinner quedaba girando para siempre
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  const [reintento, setReintento] = useState(0);
   const [busqueda, setBusqueda] = useState('');
   const [filtroCat, setFiltroCat] = useState<string>('todas');
   const [soloOfertas, setSoloOfertas] = useState(false);
@@ -700,13 +705,24 @@ export const CatalogoView: React.FC<CatalogoViewProps> = ({ onShowToast }) => {
 
   // ── Suscripciones ──
   useEffect(() => {
-    const unsub = escucharProductos((lista) => {
-      setProductos(lista);
-      setCargando(false);
-    });
-    cargarTienda().then(setTienda);
+    setCargando(true);
+    setErrorCarga(null);
+    const unsub = escucharProductos(
+      (lista) => {
+        setProductos(lista);
+        setCargando(false);
+      },
+      (e) => {
+        // Permiso denegado o sin conexión: lista congelada + aviso claro
+        setCargando(false);
+        setErrorCarga(e.message || 'No se pudo leer el catálogo');
+      }
+    );
+    cargarTienda()
+      .then(setTienda)
+      .catch(() => undefined); // la tienda ya tiene fallback local
     return unsub;
-  }, []);
+  }, [reintento]);
 
   useEffect(() => {
     // Clientes para el envío: los de la ruta de hoy + los registrados
@@ -896,7 +912,20 @@ export const CatalogoView: React.FC<CatalogoViewProps> = ({ onShowToast }) => {
       </div>
 
       {/* ═══ GRID DE PRODUCTOS ═══ */}
-      {cargando ? (
+      {errorCarga ? (
+        <div className="flex flex-col items-center justify-center py-16 px-6 text-center rounded-2xl border border-red-500/30 bg-red-500/[0.06]">
+          <Loader2 className="w-10 h-10 text-red-400 mb-3" />
+          <div className="text-sm font-black text-white">No se pudo leer el catálogo</div>
+          <p className="text-xs text-slate-400 mt-1.5 max-w-sm leading-relaxed">{errorCarga}</p>
+          <button
+            type="button"
+            onClick={() => setReintento((n) => n + 1)}
+            className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+          </button>
+        </div>
+      ) : cargando ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400">
           <Loader2 className="w-8 h-8 animate-spin mb-3 text-emerald-400" />
           <span className="text-sm font-semibold">Cargando catálogo…</span>

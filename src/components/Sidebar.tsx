@@ -169,9 +169,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
-      {/* Mobile drawer header */}
+      {/* Mobile drawer header — Fase 3.5: número de fase visible para
+          saber SIEMPRE qué build se está probando en el teléfono */}
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
-        <span className="font-bold text-white text-base">RiderTrack V2</span>
+        <div className="flex flex-col">
+          <span className="font-bold text-white text-base">RiderTrack V2</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.5</span>
+        </div>
         <button
           onClick={onCloseMobile}
           className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
