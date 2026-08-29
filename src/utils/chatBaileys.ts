@@ -87,6 +87,8 @@ export interface MensajeChat {
   nombreArchivo?: string;
   /** nota de voz: URL en Storage para reproducirla */
   audioUrl?: string;
+  /** imagen propia enviada por el chat: URL en Storage (Fase 3.7) */
+  imageUrl?: string;
   /** ubicación */
   lat?: number | null;
   lng?: number | null;
@@ -403,14 +405,15 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   );
 
   // 4. Campañas masivas (cola_envio con estado por destinatario)
-  //    Los docs es_chat=true son NOTAS DE VOZ tuyas (Fase 3.3): se
-  //    renderizan como mensaje tuyo con audio, no como campaña.
+  //    Los docs es_chat=true son envíos TUYOS del chat (Fase 3.3 notas de
+  //    voz, Fase 3.7 imágenes): se renderizan como mensaje tuyo con
+  //    audio/imagen, no como campaña.
   unsubs.push(
     onSnapshot(
       query(collection(db!, 'cola_envio'), limit(80)),
       (snap: QuerySnapshot<DocumentData>) => {
         convs.forEach((c) => {
-          c.mensajes = c.mensajes.filter((m) => m.origen !== 'campana' && !(m.origen === 'rudy' && m.audioUrl));
+          c.mensajes = c.mensajes.filter((m) => m.origen !== 'campana' && !(m.origen === 'rudy' && m.audioUrl) && !(m.origen === 'rudy' && m.imageUrl));
         });
         snap.forEach((d) => {
           const m = d.data();
@@ -423,6 +426,28 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
               : m.creada_en
                 ? Date.parse(m.creada_en)
                 : 0;
+
+          // 🖼️ Imagen del chat (Fase 3.7) — Gracias con imagen, etc.
+          // Vía VERIFICADA: cola_envio + multimedia {tipo:'imagen'} + es_chat
+          // → el bot la descarga de Storage y la manda con caption
+          // (campanas_bot.js). Las imágenes de CAMPAÑAS (sin es_chat) siguen
+          // su camino normal de campaña más abajo.
+          if (m.es_chat === true && m.multimedia?.tipo === 'imagen' && (m.imagen_url || m.multimedia?.url)) {
+            const conv = asegurarConv(tel, m.nombre);
+            conv.mensajes.push({
+              id: 'ce_' + d.id,
+              tel,
+              origen: 'rudy',
+              tipoContenido: 'imagen',
+              texto: m.mensaje || '📷 Imagen',
+              timestamp: ts,
+              leido: true,
+              enviado: m.status === 'enviado',
+              imageUrl: m.imagen_url || m.multimedia?.url,
+              nombre: m.nombre,
+            });
+            return;
+          }
 
           // Nota de voz del chat (enviada por esta app)
           if (m.es_chat === true) {
@@ -857,6 +882,99 @@ export async function enviarAudioNotaChat(
   });
 
   registrarAudioLocal({ tel: t9, ts: Date.now(), url, seg: grab.duracionSeg });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.7 — IMÁGENES RÁPIDAS POR EL CHAT (Gracias con imagen)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 🖼️ Subir una imagen rápida a Storage (misma familia que los audios).
+ */
+async function subirImagenRapidaStorage(
+  uid: string,
+  tel: string,
+  base64: string,
+  mimetype: string,
+  nombreArchivo: string
+): Promise<string> {
+  if (!storage) throw new Error('Storage no disponible');
+  const ext = mimetype.includes('png') ? 'png' : 'jpg';
+  const ruta = `campanas/chat_imagenes/${uid}/${tel}_${Date.now()}.${ext}`;
+  const ref = storageRef(storage, ruta);
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  await uploadBytes(ref, bytes, {
+    contentType: mimetype,
+    customMetadata: { uid, tel, tipo: 'imagen_rapida_chat', nombre: nombreArchivo },
+  });
+  return getDownloadURL(ref);
+}
+
+/**
+ * 🖼️ Enviar una imagen por el chat (ej. la tarjeta de Gracias).
+ * Vía VERIFICADA del bot (campanas_bot.js FASE 1): doc en cola_envio
+ * con multimedia {tipo:'imagen', url} + mensaje como CAPTION → el bot
+ * descarga la imagen de Storage y la manda con el texto encima.
+ * Las imágenes por respuestas_manuales + base64 NO funcionan (el bot
+ * principal solo manda el texto — por eso el Gracias salía sin foto).
+ * También queda en el historial local del teléfono.
+ */
+export async function enviarImagenChat(
+  uid: string,
+  tel: string,
+  nombre: string,
+  base64: string,
+  mimetype: string,
+  nombreArchivo: string,
+  caption: string
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const url = await subirImagenRapidaStorage(uid, t9, base64, mimetype, nombreArchivo);
+
+  await setDoc(doc(db!, 'cola_envio', `${telCompleto(t9)}_chat_img_${Date.now()}`), {
+    celular: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    mensaje: caption,
+    multimedia: { tipo: 'imagen', url, nombre: nombreArchivo },
+    imagen_url: url,
+    es_chat: true,
+    velocidad: 8,
+    status: 'pendiente',
+    creada_en: new Date().toISOString(),
+    intentos: 0,
+  });
+
+  registrarImagenLocal({ tel: t9, ts: Date.now(), url, texto: caption });
+}
+
+// ── Historial local de imágenes rápidas (para que no "desaparezcan"
+//    cuando el bot borra el doc de cola_envio al enviarlo) ──
+
+export interface ImagenLocal {
+  tel: string;
+  ts: number;
+  url: string;
+  texto: string;
+}
+
+const KEY_IMAGENES = 'rt_chat_imagenes_v1';
+
+export function leerImagenesLocales(): ImagenLocal[] {
+  try {
+    const lista = JSON.parse(localStorage.getItem(KEY_IMAGENES) || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function registrarImagenLocal(img: ImagenLocal): void {
+  try {
+    const lista = leerImagenesLocales().filter((x) => x.url !== img.url);
+    lista.unshift(img);
+    localStorage.setItem(KEY_IMAGENES, JSON.stringify(lista.slice(0, 100)));
+  } catch { /* sin espacio */ }
 }
 
 // ── Historial local de notas de voz (para que no "desaparezcan"
