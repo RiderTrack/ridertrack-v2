@@ -12,6 +12,15 @@
 //   - cola_envio/campanas  → los broadcasts masivos 📢
 //                            (+ notas de voz 🎙️ Fase 3.3)
 //
+// FASE 3.8:
+//   ✅ Gracias por tu compra por la VÍA DEL ROBOT (avisar_entrega
+//      con enviar_imagen — igual que el Control de la v1): el bot
+//      manda SU tarjeta real con imagen + el mensajito de Fabiana.
+//      Antes la app mandaba su propia imagen embebida y llegaba el
+//      logo equivocado. También la opción "solo texto" de la v1.
+//   ✅ FIX grupo MATE: payload con grupoId + estado (idéntico a la
+//      v1) — antes el bot marcaba el doc como procesado sin enviar.
+//
 // FASE 3.6:
 //   ✅ botones rápidos en MENÚ DESGLOSABLE — una pastilla "⚡ Rápido"
 //      abre un menú flotante (mismo estilo que el ⋮ de la cabecera)
@@ -88,9 +97,10 @@ import {
   telCompleto,
   TEL_GRUPO_MATE,
   enviarAGrupoMate,
+  enviarGraciasBot,
+  MENSAJE_GRACIAS_BOT,
   iniciarGrabacionAudio,
   enviarAudioNotaChat,
-  enviarImagenChat,
   leerAudiosLocales,
   leerImagenesLocales,
   AudioLocal,
@@ -109,13 +119,6 @@ import {
   formatearWhatsAppHTML,
   procesarBloquesPreview,
 } from '../utils/botControl';
-import {
-  IMG_GRACIAS_MATE_B64,
-  IMG_GRACIAS_MIME,
-  IMG_GRACIAS_NOMBRE,
-  MSG_GRACIAS,
-  IMG_GRACIAS_DATAURL,
-} from '../utils/imagenesRapidas';
 
 interface ChatBaileysViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -515,7 +518,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [confirmBorrar, setConfirmBorrar] = useState(false);// confirmar borrar chat
   const [borrando, setBorrando] = useState(false);
   const [plantillas, setPlantillas] = useState<PlantillaMensaje[]>([]);
-  const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'plantilla' | 'eta' | 'posicion' | 'afuera'; plantilla?: PlantillaMensaje } | null>(null);
+  const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'gracias_texto' | 'plantilla' | 'eta' | 'posicion' | 'afuera'; plantilla?: PlantillaMensaje } | null>(null);
   const [enviandoRapido, setEnviandoRapido] = useState(false);
   const [menuRapidos, setMenuRapidos] = useState(false);  // menú desglosable ⚡ (Fase 3.6)
   const [rapidoMinutos, setRapidoMinutos] = useState(15);  // ETA editable (Fase 3.7)
@@ -797,24 +800,28 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   };
 
   // ── Botones rápidos ──
-  // Fase 3.7: la imagen del Gracias YA NO va por respuestas_manuales con
-  // base64 (el bot principal solo manda el texto). Va por la vía VERIFICADA
-  // de campanas_bot.js: cola_envio + multimedia {tipo:'imagen', url} con
-  // Storage → el bot la descarga y la manda con el caption encima.
+  // Fase 3.8: el Gracias YA NO manda una imagen embebida de la app
+  // (llegaba el logo equivocado — los archivos de imagenes_bot están
+  // intercambiados). Copia EXACTA del Control de la v1: acción
+  // avisar_entrega con enviar_imagen/modo_entrega → el ROBOT manda su
+  // tarjeta real (mate_gracias) + el mensajito con contacto de Fabiana.
   const enviarGracias = async () => {
     if (!convActiva || enviandoRapido) return;
+    const conImagen = rapidoAbierto?.tipo !== 'gracias_texto';
     setEnviandoRapido(true);
     try {
-      // 1. La tarjeta de gracias (imagen) — vía cola_envio con Storage
-      await enviarImagenChat(
-        user.uid, convActiva.tel, convActiva.nombre,
-        IMG_GRACIAS_MATE_B64, IMG_GRACIAS_MIME, IMG_GRACIAS_NOMBRE,
-        '🙏 Gracias por tu compra'
+      await enviarGraciasBot(convActiva.tel, convActiva.nombre, conImagen, {
+        nombre: profile?.nombre || 'Rudy',
+        telefono: profile?.email || '',
+        empresa: 'MATE',
+      });
+      toast(
+        '🙏 Gracias enviada',
+        conImagen
+          ? 'El robot manda su tarjeta con imagen + el mensajito (como el Control de la v1)'
+          : 'El robot manda el mensajito de gracias (solo texto)',
+        'success'
       );
-      setImagenesLocales(leerImagenesLocales());
-      // 2. El mensajito de cierre — llega como mensaje de texto tuyo.
-      await enviarMensajeChat(convActiva.tel, convActiva.nombre, llenarVariables(MSG_GRACIAS, convActiva.nombre));
-      toast('🙏 Gracias enviada', 'El bot manda la tarjeta con imagen y el mensajito', 'success');
       setRapidoAbierto(null);
     } catch (e: any) {
       toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
@@ -1421,7 +1428,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           ⚡ Rápidos del rider
                         </div>
 
-                        {/* Gracias — destacada, con imagen */}
+                        {/* Gracias CON imagen — la tarjeta del robot (v1) */}
                         <button
                           type="button"
                           onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'gracias' }); }}
@@ -1430,7 +1437,20 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           <span className="w-7 h-7 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-sm flex-shrink-0">🙏</span>
                           <span className="flex flex-col min-w-0 flex-1">
                             <span className="text-sm font-bold text-amber-200 truncate">Gracias por tu compra</span>
-                            <span className="text-[10px] text-slate-500 truncate">Tarjeta con imagen + mensajito · 2 envíos</span>
+                            <span className="text-[10px] text-slate-500 truncate">Con imagen — la tarjeta del robot + mensajito</span>
+                          </span>
+                        </button>
+
+                        {/* Gracias SOLO TEXTO — la otra opción del Control v1 */}
+                        <button
+                          type="button"
+                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'gracias_texto' }); }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                        >
+                          <span className="w-7 h-7 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-sm flex-shrink-0">💬</span>
+                          <span className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-semibold text-amber-100/90 truncate">Gracias — solo texto</span>
+                            <span className="text-[10px] text-slate-500 truncate">Sin imagen — solo el mensajito del robot</span>
                           </span>
                         </button>
 
@@ -1628,8 +1648,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 <span className="text-sm font-black text-white">
                   {rapidoAbierto.tipo === 'gracias'
-                    ? '🙏 Gracias por tu compra'
-                    : rapidoAbierto.tipo === 'eta'
+                    ? '🙏 Gracias por tu compra — con imagen'
+                    : rapidoAbierto.tipo === 'gracias_texto'
+                      ? '💬 Gracias — solo texto'
+                      : rapidoAbierto.tipo === 'eta'
                       ? '⏱️ Voy en camino'
                       : rapidoAbierto.tipo === 'posicion'
                         ? '📍 Mi posición de hoy'
@@ -1648,24 +1670,31 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
             </div>
 
             <div className="p-4 space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar">
-              {rapidoAbierto.tipo === 'gracias' ? (
+              {rapidoAbierto.tipo === 'gracias' || rapidoAbierto.tipo === 'gracias_texto' ? (
                 <>
-                  <img
-                    src={IMG_GRACIAS_DATAURL}
-                    alt="Tarjeta de gracias"
-                    className="w-full rounded-xl border border-slate-700"
-                  />
-                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2 shadow-lg">
+                  {rapidoAbierto.tipo === 'gracias' && (
+                    <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-3">
+                      <span className="w-11 h-11 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-2xl flex-shrink-0">🖼️</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-emerald-200">Tarjeta con imagen del robot</div>
+                        <div className="text-[10px] text-slate-400 leading-relaxed mt-0.5">
+                          La MISMA tarjeta "¡Gracias por tu compra!" que manda el Control de la v1 — con la imagen real de MATE.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2.5 shadow-lg">
                     <span
                       className="text-sm whitespace-pre-wrap break-words"
-                      dangerouslySetInnerHTML={{
-                        __html: formatearWhatsAppHTML(llenarVariables(MSG_GRACIAS, convActiva.nombre)),
-                      }}
+                      dangerouslySetInnerHTML={{ __html: formatearWhatsAppHTML(MENSAJE_GRACIAS_BOT) }}
                     />
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    El bot enviará <b className="text-slate-300">2 mensajes</b>: la tarjeta con la imagen y el
-                    mensajito de cierre.
+                    {rapidoAbierto.tipo === 'gracias' ? (
+                      <>El robot manda <b className="text-slate-300">su tarjeta con imagen</b> y este mensajito — idéntico al botón <b className="text-slate-300">Control → Con imagen</b> de la v1.</>
+                    ) : (
+                      <>Solo el mensajito, sin imagen — igual al botón <b className="text-slate-300">Control → Solo texto</b> de la v1.</>
+                    )}
                   </p>
                 </>
               ) : rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion' || rapidoAbierto.tipo === 'afuera' ? (
@@ -1731,7 +1760,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
               <button
                 type="button"
                 onClick={
-                  rapidoAbierto.tipo === 'gracias'
+                  rapidoAbierto.tipo === 'gracias' || rapidoAbierto.tipo === 'gracias_texto'
                     ? enviarGracias
                     : rapidoAbierto.tipo === 'plantilla'
                       ? enviarPlantillaRapida

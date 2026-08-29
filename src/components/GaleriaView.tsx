@@ -9,6 +9,13 @@
 //     guarda fotoUrl desde esta versión) agrupadas por fecha.
 //   · Al cerrar la ruta la foto ya viaja al historial (fix
 //     finalizarRuta: el snapshot ahora incluye fotoUrl).
+//
+// FASE 3.8 — 📲 ENVIAR POR WHATSAPP COMO IMAGEN:
+//   El "Compartir" viejo a veces terminaba abriendo la PÁGINA de
+//   Firestore (URL) en vez de mandar la imagen. Ahora hay un botón
+//   WhatsApp que comparte la FOTO REAL (archivo) + un mensajito de
+//   verificación editable — para cuando un cliente dice "no me
+//   entregaste": buscas la foto y la mandas de frente.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -24,6 +31,8 @@ import {
   Package,
   ChevronDown,
   ChevronUp,
+  MessageCircle,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
@@ -31,7 +40,7 @@ import { leerHistorial, RegistroHistorial, Cliente } from '../services/firestore
 import { FotoEntregaModal } from './FotoEntregaModal';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
 import { partirHoy, fotosDeHistorial, FotoHistorial } from '../utils/stats';
-import { descargarArchivo } from '../utils/descargaArchivo';
+import { descargarArchivo, compartirArchivoConTexto } from '../utils/descargaArchivo';
 
 interface GaleriaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -55,6 +64,45 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
   const [lightbox, setLightbox] = useState<FotoHistorial | null>(null);
   const [clienteAFotografiar, setClienteAFotografiar] = useState<Cliente | null>(null);
   const [seccionesAbiertas, setSeccionesAbiertas] = useState<Record<string, boolean>>({});
+
+  // ── Fase 3.8: enviar por WhatsApp como IMAGEN + mensajito ──
+  const [waPanel, setWaPanel] = useState(false);
+  const [waMensaje, setWaMensaje] = useState('');
+  const [waEnviando, setWaEnviando] = useState(false);
+
+  /** Mensajito de verificación pre-llenado (editable) */
+  const mensajeVerificacion = (foto: FotoHistorial): string =>
+    `📷 *Verificación de entrega*\n\nHola ${foto.nombre}, te comparto la foto de tu pedido entregado ✅${foto.prod ? `\n📦 ${foto.prod}` : ''}\n\n¡Gracias por tu compra! 🙏`;
+
+  const abrirWhatsApp = (foto: FotoHistorial) => {
+    setWaMensaje(mensajeVerificacion(foto));
+    setWaPanel(true);
+  };
+
+  const enviarPorWhatsApp = async (foto: FotoHistorial) => {
+    if (waEnviando) return;
+    setWaEnviando(true);
+    try {
+      const blob = await fotoABlob(foto);
+      await compartirArchivoConTexto(
+        blob,
+        nombreFoto(foto),
+        waMensaje.trim() || mensajeVerificacion(foto),
+        onShowToast,
+        '📲 Foto + mensajito listos',
+      );
+      setWaPanel(false);
+    } catch {
+      // último recurso: compartir la foto sola
+      try {
+        await compartirFoto(foto);
+      } catch {
+        onShowToast?.('❌ No se pudo enviar', 'Intenta con Descargar y adjuntarla en WhatsApp', 'error');
+      }
+    } finally {
+      setWaEnviando(false);
+    }
+  };
 
   const cargarHistorial = useCallback(async (silencioso = false) => {
     if (!user?.uid) return;
@@ -378,7 +426,7 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
       {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm"
-          onClick={() => setLightbox(null)}
+          onClick={() => { setLightbox(null); setWaPanel(false); }}
         >
           <div
             className="w-full max-w-md max-h-[92vh] flex flex-col gap-3 overflow-y-auto no-scrollbar"
@@ -421,6 +469,41 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
                   Compartir
                 </button>
               </div>
+
+              {/* 📲 Fase 3.8: enviar por WhatsApp como IMAGEN + mensajito */}
+              <button
+                onClick={() => (waPanel ? setWaPanel(false) : abrirWhatsApp(lightbox))}
+                className="w-full mt-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 text-white text-xs font-black hover:from-emerald-500 hover:to-green-500 transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/40"
+              >
+                <MessageCircle className="w-4 h-4" />
+                {waPanel ? 'Cerrar mensajito' : '📲 Enviar por WhatsApp'}
+              </button>
+
+              {waPanel && (
+                <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                    Mensajito que acompaña a la foto
+                  </div>
+                  <textarea
+                    value={waMensaje}
+                    onChange={(e) => setWaMensaje(e.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-600 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-500/60 resize-none"
+                    placeholder="Escribe el mensajito…"
+                  />
+                  <button
+                    onClick={() => enviarPorWhatsApp(lightbox)}
+                    disabled={waEnviando}
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-black transition-colors flex items-center justify-center gap-2"
+                  >
+                    {waEnviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                    {waEnviando ? 'Preparando…' : 'Enviar foto + mensajito'}
+                  </button>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    La foto sale como <b className="text-slate-300">imagen de frente</b> (no como enlace) — elige el chat del cliente en la hoja de compartir.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Botón cerrar */}

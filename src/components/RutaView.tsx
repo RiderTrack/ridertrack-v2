@@ -44,6 +44,8 @@ import { Flag, MapPinned, ClipboardList, Copy, Check, Bike } from 'lucide-react'
 import { exportarCircuitRuta } from '../utils/exportarExcel';
 // Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
 import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
+// Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
+import { GRUPO_MATE_JID } from '../utils/chatBaileys';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -2280,9 +2282,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 onClick={async () => {
                                   onShowToast?.('📤 MATE', 'Enviando reporte al grupo MATE...', 'info');
                                   // 📌 Usamos 'enviar_grupo_mate' que el bot YA conoce
-                                  // No necesitamos tocar el bot Baileys
+                                  // Fase 3.8: con grupoId + estado (payload idéntico a la
+                                  // v1) — sin grupoId el bot marcaba el doc como procesado
+                                  // pero NO enviaba nada al grupo de WhatsApp.
                                   await enviarAccionBot(c, 'enviar_grupo_mate', {
                                     texto: mensajeFinal,
+                                    grupoId: GRUPO_MATE_JID,
+                                    estado: mateEstadoSel || 'otros',
                                   });
                                   if (mateEstadoSel) {
                                     const mapeoEstado: Record<string, string> = { pendiente: 'pendiente', entregado: 'efectivo', fallido: 'fallida', reprogramar: 'pendiente', ausente: 'ausente', rechazo: 'rechazado', no_contesta: 'no-contesta', en_camino: 'pendiente', devolucion: 'cambio', cancelado: 'cancelado' };
