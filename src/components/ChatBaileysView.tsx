@@ -12,6 +12,11 @@
 //   - cola_envio/campanas  → los broadcasts masivos 📢
 //                            (+ notas de voz 🎙️ Fase 3.3)
 //
+// FASE 3.6:
+//   ✅ botones rápidos en MENÚ DESGLOSABLE — una pastilla "⚡ Rápido"
+//      abre un menú flotante (mismo estilo que el ⋮ de la cabecera)
+//      con Gracias + plantillas conectadas. Antes: tira de chips.
+//
 // FASE 3.3:
 //   ✅ fotos de perfil REALES de WhatsApp por conversación
 //   ✅ fondo del chat personalizable (como WhatsApp)
@@ -55,6 +60,8 @@ import {
   Users,
   Sparkles,
   Check,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -507,6 +514,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [plantillas, setPlantillas] = useState<PlantillaMensaje[]>([]);
   const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'plantilla'; plantilla?: PlantillaMensaje } | null>(null);
   const [enviandoRapido, setEnviandoRapido] = useState(false);
+  const [menuRapidos, setMenuRapidos] = useState(false);  // menú desglosable ⚡ (Fase 3.6)
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -521,6 +529,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const inputDocRef = useRef<HTMLInputElement>(null);
   const inputFondoRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuRapidosRef = useRef<HTMLDivElement>(null);
 
   // ── Suscripciones en tiempo real ──
   useEffect(() => {
@@ -535,9 +544,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); };
   }, []);
 
-  // ── Marcar leído al abrir un chat ──
+  // ── Marcar leído al abrir un chat (y cerrar el menú de rápidos) ──
   useEffect(() => {
     if (telActivo) marcarLeidoChat(telActivo);
+    setMenuRapidos(false);
   }, [telActivo]);
 
   // ── Cerrar el menú ⋮ al hacer clic fuera ──
@@ -553,6 +563,20 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
       document.removeEventListener('touchstart', cerrar);
     };
   }, [menuChat]);
+
+  // ── Cerrar el menú de rápidos al hacer clic fuera (Fase 3.6) ──
+  useEffect(() => {
+    if (!menuRapidos) return;
+    const cerrar = (ev: MouseEvent) => {
+      if (menuRapidosRef.current && !menuRapidosRef.current.contains(ev.target as Node)) setMenuRapidos(false);
+    };
+    document.addEventListener('mousedown', cerrar);
+    document.addEventListener('touchstart', cerrar);
+    return () => {
+      document.removeEventListener('mousedown', cerrar);
+      document.removeEventListener('touchstart', cerrar);
+    };
+  }, [menuRapidos]);
 
   const convActiva = useMemo(
     () => conversaciones.find((c) => c.tel === telActivo) || null,
@@ -799,6 +823,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
       setGrabSeg(0);
       setEmojiAbierto(false);
       setMenuAdjuntos(false);
+      setMenuRapidos(false);
       timerGrabRef.current = setInterval(() => {
         setGrabSeg((s) => {
           if (s + 1 >= MAX_SEG_AUDIO) {
@@ -1263,28 +1288,89 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                 </div>
               )}
 
-              {/* Botones rápidos (plantillas conectadas + gracias) */}
-              {!esGrupo && !grabando && (plantillasConectadas.length > 0 || true) && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-slate-700/70 bg-slate-800/95 flex-shrink-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                  <button
-                    type="button"
-                    onClick={() => setRapidoAbierto({ tipo: 'gracias' })}
-                    className="flex-shrink-0 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-bold hover:bg-amber-500/25 transition-colors"
-                  >
-                    🙏 Gracias
-                  </button>
-                  {plantillasConectadas.map((p) => (
+              {/* Botones rápidos DESGLOSABLES (Fase 3.6) — una pastilla
+                  "⚡ Rápido" abre el menú flotante con Gracias + plantillas
+                  conectadas (mismo estilo que el ⋮ de la cabecera). */}
+              {!esGrupo && !grabando && (
+                <div className="px-2.5 py-1.5 border-t border-slate-700/70 bg-slate-800/95 flex-shrink-0">
+                  <div className="relative inline-block" ref={menuRapidosRef}>
                     <button
-                      key={p.id}
                       type="button"
-                      onClick={() => setRapidoAbierto({ tipo: 'plantilla', plantilla: p })}
-                      className="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900/70 text-slate-300 border border-slate-600 text-[11px] font-bold hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
-                      title={p.clave ? `Plantilla conectada: ${p.clave}` : p.nombre}
+                      onClick={() => {
+                        setMenuRapidos((v) => !v);
+                        setEmojiAbierto(false);
+                        setMenuAdjuntos(false);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-bold transition-colors ${
+                        menuRapidos
+                          ? 'bg-amber-500/25 text-amber-200 border-amber-400/60'
+                          : 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                      }`}
+                      title="Respuestas rápidas: Gracias y plantillas conectadas del bot"
                     >
-                      {p.nombre}
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Rápido
+                      {menuRapidos ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </button>
-                  ))}
+                    <span className="hidden sm:inline ml-2 text-[10px] text-slate-500">
+                      gracias y plantillas — las envía el bot
+                    </span>
+
+                    {/* Menú flotante (mismo patrón que el ⋮ de la cabecera) */}
+                    {menuRapidos && (
+                      <div className="absolute left-0 bottom-full mb-1.5 z-50 w-72 max-h-[55vh] overflow-y-auto custom-scrollbar rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1">
+                        <div className="px-3.5 pt-1.5 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          ⚡ Respuestas rápidas
+                        </div>
+
+                        {/* Gracias — destacada */}
+                        <button
+                          type="button"
+                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'gracias' }); }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                        >
+                          <span className="w-7 h-7 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-sm flex-shrink-0">🙏</span>
+                          <span className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-bold text-amber-200 truncate">Gracias por tu compra</span>
+                            <span className="text-[10px] text-slate-500 truncate">Tarjeta con imagen + mensajito · 2 envíos</span>
+                          </span>
+                        </button>
+
+                        <div className="my-1 mx-3 border-t border-slate-700/70" />
+
+                        {/* Plantillas conectadas */}
+                        {plantillasConectadas.length > 0 ? (
+                          <>
+                            <div className="px-3.5 pt-1 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                              Plantillas conectadas
+                            </div>
+                            {plantillasConectadas.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'plantilla', plantilla: p }); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                              >
+                                <span className="w-7 h-7 rounded-xl bg-slate-800 border border-slate-600 flex items-center justify-center flex-shrink-0">
+                                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                                </span>
+                                <span className="flex flex-col min-w-0 flex-1">
+                                  <span className="text-sm font-semibold text-slate-200 truncate">{p.nombre}</span>
+                                  <span className="text-[10px] text-slate-500 truncate">
+                                    Clave <span className="text-emerald-400 font-mono">{p.clave}</span>
+                                  </span>
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        ) : (
+                          <div className="px-3.5 py-2 text-[10px] text-slate-500 leading-relaxed">
+                            Conecta plantillas en el <b className="text-slate-400">Centro del Bot</b> para tenerlas aquí a un toque.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1335,7 +1421,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                     <>
                       <button
                         type="button"
-                        onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); }}
+                        onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); setMenuRapidos(false); }}
                         className={`p-2.5 rounded-xl transition-colors ${emojiAbierto ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
                         title="Emojis"
                       >
@@ -1343,7 +1429,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); }}
+                        onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); setMenuRapidos(false); }}
                         className={`p-2.5 rounded-xl transition-colors ${menuAdjuntos ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
                         title="Adjuntar"
                       >
