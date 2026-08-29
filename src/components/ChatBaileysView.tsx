@@ -90,8 +90,11 @@ import {
   enviarAGrupoMate,
   iniciarGrabacionAudio,
   enviarAudioNotaChat,
+  enviarImagenChat,
   leerAudiosLocales,
+  leerImagenesLocales,
   AudioLocal,
+  ImagenLocal,
   leerFijados,
   toggleFijado,
   FONDOS_CHAT_PRESET,
@@ -285,11 +288,11 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
         {/* Contenido */}
         {m.tipoContenido === 'ubicacion' ? (
           <BurbujaUbicacion lat={m.lat} lng={m.lng} />
-        ) : m.tipoContenido === 'imagen' && m.base64 ? (
+        ) : m.tipoContenido === 'imagen' && (m.base64 || m.imageUrl) ? (
           <div className="space-y-1.5">
             <div className="relative">
               <img
-                src={`data:${m.mimetype || 'image/jpeg'};base64,${m.base64}`}
+                src={m.base64 ? `data:${m.mimetype || 'image/jpeg'};base64,${m.base64}` : m.imageUrl}
                 alt="Imagen"
                 className={`rounded-xl max-w-full cursor-pointer transition-all ${desconocido && !revelado ? 'blur-md' : ''}`}
                 style={{ maxHeight: 240 }}
@@ -502,7 +505,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [emojiAbierto, setEmojiAbierto] = useState(false);
   const [menuAdjuntos, setMenuAdjuntos] = useState(false);
   const [reveladas, setReveladas] = useState<Set<string>>(new Set());
-  const [lightbox, setLightbox] = useState<{ base64: string; mimetype: string; nombre: string } | null>(null);
+  const [lightbox, setLightbox] = useState<{ base64?: string; mimetype?: string; nombre: string; url?: string } | null>(null);
 
   // ── Fase 3.3 ──
   const [fijados, setFijados] = useState<Set<string>>(() => leerFijados());
@@ -512,9 +515,11 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [confirmBorrar, setConfirmBorrar] = useState(false);// confirmar borrar chat
   const [borrando, setBorrando] = useState(false);
   const [plantillas, setPlantillas] = useState<PlantillaMensaje[]>([]);
-  const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'plantilla'; plantilla?: PlantillaMensaje } | null>(null);
+  const [rapidoAbierto, setRapidoAbierto] = useState<{ tipo: 'gracias' | 'plantilla' | 'eta' | 'posicion' | 'afuera'; plantilla?: PlantillaMensaje } | null>(null);
   const [enviandoRapido, setEnviandoRapido] = useState(false);
   const [menuRapidos, setMenuRapidos] = useState(false);  // menú desglosable ⚡ (Fase 3.6)
+  const [rapidoMinutos, setRapidoMinutos] = useState(15);  // ETA editable (Fase 3.7)
+  const [rapidoPosicion, setRapidoPosicion] = useState(3); // posición editable (Fase 3.7)
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -523,6 +528,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const grabadorRef = useRef<{ parar: () => Promise<{ blob: Blob; mimetype: string; duracionSeg: number }>; cancelar: () => void } | null>(null);
   const timerGrabRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [audiosLocales, setAudiosLocales] = useState<AudioLocal[]>(() => leerAudiosLocales());
+  const [imagenesLocales, setImagenesLocales] = useState<ImagenLocal[]>(() => leerImagenesLocales());
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputImgRef = useRef<HTMLInputElement>(null);
@@ -583,10 +589,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     [conversaciones, telActivo]
   );
 
-  // ── Mensajes + historial local de notas de voz (merge) ──
+  // ── Mensajes + historial local de notas de voz e imágenes (merge) ──
   const mensajesConv = useMemo(() => {
     if (!convActiva) return [];
-    const urlsVivas = new Set(convActiva.mensajes.filter((m) => m.audioUrl).map((m) => m.audioUrl));
+    const urlsVivas = new Set(convActiva.mensajes.filter((m) => m.audioUrl || m.imageUrl).map((m) => m.audioUrl || m.imageUrl));
     const historial = audiosLocales
       .filter((a) => a.tel === convActiva.tel && !urlsVivas.has(a.url))
       .map<MensajeChat>((a) => ({
@@ -600,8 +606,21 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
         enviado: true,
         audioUrl: a.url,
       }));
-    return [...convActiva.mensajes, ...historial];
-  }, [convActiva, audiosLocales]);
+    const historialImg = imagenesLocales
+      .filter((a) => a.tel === convActiva.tel && !urlsVivas.has(a.url))
+      .map<MensajeChat>((a) => ({
+        id: 'il_' + a.ts,
+        tel: a.tel,
+        origen: 'rudy',
+        tipoContenido: 'imagen',
+        texto: a.texto || '📷 Imagen',
+        timestamp: a.ts,
+        leido: true,
+        enviado: true,
+        imageUrl: a.url,
+      }));
+    return [...convActiva.mensajes, ...historial, ...historialImg];
+  }, [convActiva, audiosLocales, imagenesLocales]);
 
   // ── Auto-scroll al último mensaje ──
   useEffect(() => {
@@ -778,24 +797,80 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   };
 
   // ── Botones rápidos ──
+  // Fase 3.7: la imagen del Gracias YA NO va por respuestas_manuales con
+  // base64 (el bot principal solo manda el texto). Va por la vía VERIFICADA
+  // de campanas_bot.js: cola_envio + multimedia {tipo:'imagen', url} con
+  // Storage → el bot la descarga y la manda con el caption encima.
   const enviarGracias = async () => {
     if (!convActiva || enviandoRapido) return;
     setEnviandoRapido(true);
     try {
-      // 1. La tarjeta de gracias (imagen embebida del bot) — mismo canal
-      //    que los adjuntos de imagen de la v1 (respuestas_manuales).
-      await enviarAdjuntoChat(
-        convActiva.tel, convActiva.nombre, 'imagen',
-        IMG_GRACIAS_MATE_B64, IMG_GRACIAS_MIME, IMG_GRACIAS_NOMBRE, '🙏 Gracias por tu compra'
+      // 1. La tarjeta de gracias (imagen) — vía cola_envio con Storage
+      await enviarImagenChat(
+        user.uid, convActiva.tel, convActiva.nombre,
+        IMG_GRACIAS_MATE_B64, IMG_GRACIAS_MIME, IMG_GRACIAS_NOMBRE,
+        '🙏 Gracias por tu compra'
       );
+      setImagenesLocales(leerImagenesLocales());
       // 2. El mensajito de cierre — llega como mensaje de texto tuyo.
       await enviarMensajeChat(convActiva.tel, convActiva.nombre, llenarVariables(MSG_GRACIAS, convActiva.nombre));
-      toast('🙏 Gracias enviada', 'El bot manda la tarjeta y el mensajito en segundos', 'success');
+      toast('🙏 Gracias enviada', 'El bot manda la tarjeta con imagen y el mensajito', 'success');
       setRapidoAbierto(null);
     } catch (e: any) {
       toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
     } finally {
       setEnviandoRapido(false);
+    }
+  };
+
+  // Fase 3.7 — mensajes del rider con dato editable (ETA y posición)
+  const textoRapidoRider = (): string => {
+    if (!convActiva) return '';
+    if (rapidoAbierto?.tipo === 'eta') {
+      return `Hola ${convActiva.nombre} 👋 Ya salí con tu pedido 🛵\nLlego a tu domicilio en aprox. *${rapidoMinutos} minutos*.`;
+    }
+    if (rapidoAbierto?.tipo === 'posicion') {
+      return `Hola ${convActiva.nombre} 📍 Voy en la *posición ${rapidoPosicion}* de mis entregas de hoy 📦\nEn cuanto sea tu turno te aviso 😉`;
+    }
+    if (rapidoAbierto?.tipo === 'afuera') {
+      return `Hola ${convActiva.nombre} 🏁 *Ya llegué a tu domicilio* 🏠\nEstoy afuera, acércate cuando puedas 🙏`;
+    }
+    return '';
+  };
+
+  const enviarRapidoRider = async () => {
+    if (!convActiva || enviandoRapido) return;
+    setEnviandoRapido(true);
+    try {
+      await enviarMensajeChat(convActiva.tel, convActiva.nombre, textoRapidoRider());
+      toast('⚡ Enviado', 'El bot manda tu mensaje en segundos', 'success');
+      setRapidoAbierto(null);
+    } catch (e: any) {
+      toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setEnviandoRapido(false);
+    }
+  };
+
+  // Fase 3.7 — REPORTES al grupo MATE (directo, sin preview)
+  const REPORTES_GRUPO: { id: string; emoji: string; etiqueta: string; texto: string }[] = [
+    { id: 'entrega', emoji: '✅', etiqueta: 'Entrega realizada', texto: '✅ *Entrega realizada* — sin novedades' },
+    { id: 'noresponde', emoji: '📵', etiqueta: 'Cliente no responde', texto: '📵 *Cliente no responde* — intentaré más tarde' },
+    { id: 'cobrado', emoji: '💰', etiqueta: 'Pago cobrado', texto: '💰 *Pago cobrado* ✅' },
+    { id: 'reprogramado', emoji: '🔁', etiqueta: 'Entrega reprogramada', texto: '🔁 *Entrega reprogramada* — el cliente pidió otro horario' },
+  ];
+
+  const enviarReporteGrupo = async (texto: string, etiqueta: string) => {
+    try {
+      await enviarAGrupoMate(texto, {
+        nombre: profile?.nombre || 'Rudy',
+        telefono: profile?.email || '',
+        empresa: 'MATE',
+      });
+      setMenuRapidos(false);
+      toast('👥 Reporte al grupo', `"${etiqueta}" enviado al grupo MATE`, 'success');
+    } catch (e: any) {
+      toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
     }
   };
 
@@ -1241,7 +1316,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           desconocido={!esGrupo && convActiva.nombre.startsWith('Cliente ')}
                           revelado={reveladas.has(m.id)}
                           onRevelar={() => setReveladas((s) => new Set(s).add(m.id))}
-                          onVerImagen={(mm) => setLightbox({ base64: mm.base64!, mimetype: mm.mimetype || 'image/jpeg', nombre: mm.nombreArchivo || 'imagen.jpg' })}
+                          onVerImagen={(mm) => setLightbox(mm.base64 ? { base64: mm.base64, mimetype: mm.mimetype || 'image/jpeg', nombre: mm.nombreArchivo || 'imagen.jpg' } : { nombre: mm.nombreArchivo || 'imagen.jpg', url: mm.imageUrl })}
                           onEliminar={() => m.borrableDocId && borrarMensaje(m.borrableDocId)}
                         />
                       ))}
@@ -1288,10 +1363,11 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                 </div>
               )}
 
-              {/* Botones rápidos DESGLOSABLES (Fase 3.6) — una pastilla
-                  "⚡ Rápido" abre el menú flotante con Gracias + plantillas
-                  conectadas (mismo estilo que el ⋮ de la cabecera). */}
-              {!esGrupo && !grabando && (
+              {/* Botones rápidos DESGLOSABLES (Fase 3.6 + 3.7):
+                  - chats de CLIENTE → Rápidos del rider (Gracias con imagen,
+                    ETA, posición, ya llegué) + Plantillas conectadas
+                  - GRUPO MATE → Reportes al grupo (directo, vía acciones_bot) */}
+              {!grabando && (
                 <div className="px-2.5 py-1.5 border-t border-slate-700/70 bg-slate-800/95 flex-shrink-0">
                   <div className="relative inline-block" ref={menuRapidosRef}>
                     <button
@@ -1306,24 +1382,46 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           ? 'bg-amber-500/25 text-amber-200 border-amber-400/60'
                           : 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
                       }`}
-                      title="Respuestas rápidas: Gracias y plantillas conectadas del bot"
+                      title={esGrupo ? 'Reportes rápidos al grupo de trabajo' : 'Respuestas rápidas: Gracias con imagen, ETA, posición y plantillas'}
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      Rápido
+                      {esGrupo ? 'Reporte' : 'Rápido'}
                       {menuRapidos ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </button>
                     <span className="hidden sm:inline ml-2 text-[10px] text-slate-500">
-                      gracias y plantillas — las envía el bot
+                      {esGrupo ? 'reportes al grupo MATE — los manda el bot' : 'gracias con imagen, ETA y plantillas — las envía el bot'}
                     </span>
 
                     {/* Menú flotante (mismo patrón que el ⋮ de la cabecera) */}
-                    {menuRapidos && (
-                      <div className="absolute left-0 bottom-full mb-1.5 z-50 w-72 max-h-[55vh] overflow-y-auto custom-scrollbar rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1">
+                    {menuRapidos && esGrupo ? (
+                      /* ── GRUPO: reportes directos ── */
+                      <div className="absolute left-0 bottom-full mb-1.5 z-50 w-72 max-h-[min(60vh,17rem)] overflow-y-auto custom-scrollbar rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1">
                         <div className="px-3.5 pt-1.5 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                          ⚡ Respuestas rápidas
+                          👥 Reportes al grupo MATE
+                        </div>
+                        {REPORTES_GRUPO.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => enviarReporteGrupo(r.texto, r.etiqueta)}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                          >
+                            <span className="w-7 h-7 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-sm flex-shrink-0">{r.emoji}</span>
+                            <span className="flex flex-col min-w-0 flex-1">
+                              <span className="text-sm font-bold text-slate-200 truncate">{r.etiqueta}</span>
+                              <span className="text-[10px] text-slate-500 truncate">Se envía directo al grupo</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : menuRapidos ? (
+                      /* ── CLIENTE: rápidos del rider + plantillas ── */
+                      <div className="absolute left-0 bottom-full mb-1.5 z-50 w-72 max-h-[min(60vh,17rem)] overflow-y-auto custom-scrollbar rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1">
+                        <div className="px-3.5 pt-1.5 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          ⚡ Rápidos del rider
                         </div>
 
-                        {/* Gracias — destacada */}
+                        {/* Gracias — destacada, con imagen */}
                         <button
                           type="button"
                           onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'gracias' }); }}
@@ -1333,6 +1431,45 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           <span className="flex flex-col min-w-0 flex-1">
                             <span className="text-sm font-bold text-amber-200 truncate">Gracias por tu compra</span>
                             <span className="text-[10px] text-slate-500 truncate">Tarjeta con imagen + mensajito · 2 envíos</span>
+                          </span>
+                        </button>
+
+                        {/* ETA — minutos editable */}
+                        <button
+                          type="button"
+                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'eta' }); }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                        >
+                          <span className="w-7 h-7 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sm flex-shrink-0">⏱️</span>
+                          <span className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-bold text-sky-200 truncate">Voy en camino</span>
+                            <span className="text-[10px] text-slate-500 truncate">Llego en X minutos — editable</span>
+                          </span>
+                        </button>
+
+                        {/* Posición en la cola */}
+                        <button
+                          type="button"
+                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'posicion' }); }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                        >
+                          <span className="w-7 h-7 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-sm flex-shrink-0">📍</span>
+                          <span className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-bold text-violet-200 truncate">Mi posición de hoy</span>
+                            <span className="text-[10px] text-slate-500 truncate">Voy en la posición X — editable</span>
+                          </span>
+                        </button>
+
+                        {/* Ya estoy afuera */}
+                        <button
+                          type="button"
+                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'afuera' }); }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
+                        >
+                          <span className="w-7 h-7 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-sm flex-shrink-0">🏁</span>
+                          <span className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-bold text-emerald-200 truncate">Ya llegué a tu domicilio</span>
+                            <span className="text-[10px] text-slate-500 truncate">Estoy afuera, acércate 🙏</span>
                           </span>
                         </button>
 
@@ -1369,7 +1506,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           </div>
                         )}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -1417,16 +1554,20 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                     className="hidden"
                     onChange={(e) => { manejarArchivo(e.target.files?.[0], 'documento'); e.currentTarget.value = ''; }}
                   />
+                  {/* Fase 3.7: emojis TAMBIÉN en el grupo (antes el grupo era
+                      el único chat sin herramientas). Mic/adjuntos siguen
+                      solo para clientes: el bot no puede resolver el JID de
+                      un grupo desde cola_envio (resolverJid espera un número). */}
+                  <button
+                    type="button"
+                    onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); setMenuRapidos(false); }}
+                    className={`p-2.5 rounded-xl transition-colors ${emojiAbierto ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                    title="Emojis"
+                  >
+                    <Smile className="w-5 h-5" />
+                  </button>
                   {!esGrupo && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => { setEmojiAbierto((v) => !v); setMenuAdjuntos(false); setMenuRapidos(false); }}
-                        className={`p-2.5 rounded-xl transition-colors ${emojiAbierto ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                        title="Emojis"
-                      >
-                        <Smile className="w-5 h-5" />
-                      </button>
                       <button
                         type="button"
                         onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); setMenuRapidos(false); }}
@@ -1486,7 +1627,15 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 <span className="text-sm font-black text-white">
-                  {rapidoAbierto.tipo === 'gracias' ? '🙏 Gracias por tu compra' : rapidoAbierto.plantilla?.nombre}
+                  {rapidoAbierto.tipo === 'gracias'
+                    ? '🙏 Gracias por tu compra'
+                    : rapidoAbierto.tipo === 'eta'
+                      ? '⏱️ Voy en camino'
+                      : rapidoAbierto.tipo === 'posicion'
+                        ? '📍 Mi posición de hoy'
+                        : rapidoAbierto.tipo === 'afuera'
+                          ? '🏁 Ya llegué a tu domicilio'
+                          : rapidoAbierto.plantilla?.nombre}
                 </span>
               </div>
               <button
@@ -1517,6 +1666,37 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                   <p className="text-[11px] text-slate-400">
                     El bot enviará <b className="text-slate-300">2 mensajes</b>: la tarjeta con la imagen y el
                     mensajito de cierre.
+                  </p>
+                </>
+              ) : rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion' || rapidoAbierto.tipo === 'afuera' ? (
+                <>
+                  {(rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion') && (
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs font-bold text-slate-300 flex-shrink-0">
+                        {rapidoAbierto.tipo === 'eta' ? '⏱️ Minutos:' : '📍 Posición:'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={rapidoAbierto.tipo === 'eta' ? 180 : 50}
+                        value={rapidoAbierto.tipo === 'eta' ? rapidoMinutos : rapidoPosicion}
+                        onChange={(e) => {
+                          const v = Math.max(1, Number(e.target.value) || 1);
+                          if (rapidoAbierto.tipo === 'eta') setRapidoMinutos(v);
+                          else setRapidoPosicion(v);
+                        }}
+                        className="w-24 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-600 text-sm font-bold text-white focus:outline-none focus:border-emerald-500/60"
+                      />
+                    </div>
+                  )}
+                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2.5 shadow-lg">
+                    <span
+                      className="text-sm whitespace-pre-wrap break-words"
+                      dangerouslySetInnerHTML={{ __html: formatearWhatsAppHTML(textoRapidoRider()) }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Lo manda el bot a <b className="text-slate-300">{convActiva.nombre}</b> como mensaje tuyo.
                   </p>
                 </>
               ) : (
@@ -1550,7 +1730,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
               </button>
               <button
                 type="button"
-                onClick={rapidoAbierto.tipo === 'gracias' ? enviarGracias : enviarPlantillaRapida}
+                onClick={
+                  rapidoAbierto.tipo === 'gracias'
+                    ? enviarGracias
+                    : rapidoAbierto.tipo === 'plantilla'
+                      ? enviarPlantillaRapida
+                      : enviarRapidoRider
+                }
                 disabled={enviandoRapido}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-colors disabled:opacity-40"
               >
@@ -1700,7 +1886,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
           onClick={() => setLightbox(null)}
         >
           <img
-            src={`data:${lightbox.mimetype};base64,${lightbox.base64}`}
+            src={lightbox.base64 ? `data:${lightbox.mimetype};base64,${lightbox.base64}` : lightbox.url}
             alt={lightbox.nombre}
             className="max-w-full max-h-[80vh] rounded-xl shadow-2xl object-contain"
             onClick={(e) => e.stopPropagation()}
@@ -1708,10 +1894,14 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
           <div className="flex items-center gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
-              onClick={() => descargarBase64(lightbox.base64, lightbox.mimetype, lightbox.nombre)}
+              onClick={() =>
+                lightbox.base64
+                  ? descargarBase64(lightbox.base64, lightbox.mimetype || 'image/jpeg', lightbox.nombre)
+                  : window.open(lightbox.url, '_blank')
+              }
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-colors"
             >
-              <Download className="w-4 h-4" /> Descargar
+              <Download className="w-4 h-4" /> {lightbox.base64 ? 'Descargar' : 'Abrir'}
             </button>
             <button
               type="button"
