@@ -29,6 +29,8 @@ import { YapeQRView } from './components/YapeQRView';
 import { HistorialView } from './components/HistorialView';
 import { BroadcastView } from './components/BroadcastView';
 import { BackupsView } from './components/BackupsView';
+import { EstadisticasView } from './components/EstadisticasView';
+import { GaleriaView } from './components/GaleriaView';
 import { guardarAvatarRider } from './services/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
 import {
@@ -591,6 +593,12 @@ export default function App() {
 
           {/* Fase 2.5: 💾 Backups en la nube */}
           {activeTab === 'backups' && <BackupsView onShowToast={showToast} />}
+
+          {/* Fase 2.16: 📊 Estadísticas estilo Circuit (datos reales del historial) */}
+          {activeTab === 'stats' && <EstadisticasView onShowToast={showToast} />}
+
+          {/* Fase 2.16: 📸 Galería de evidencias (hoy + histórico) */}
+          {activeTab === 'galeria' && <GaleriaView onShowToast={showToast} />}
 
           {activeTab === 'estadisticas' && <ResumenView />}
 

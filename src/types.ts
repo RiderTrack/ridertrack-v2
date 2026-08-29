@@ -11,6 +11,8 @@ export type NavigationTab =
   | 'whatsapp'
   | 'broadcast'
   | 'historial'
+  | 'stats'
+  | 'galeria'
   | 'backups'
   | 'reportes'
   | 'estadisticas'
