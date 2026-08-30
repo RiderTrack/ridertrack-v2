@@ -347,3 +347,166 @@ export function leerPlantillasRapidas(): PlantillaRapida[] {
 export function guardarPlantillasRapidas(plantillas: PlantillaRapida[]): void {
   lsGuardar(LS_KEY.PLANTILLAS, JSON.stringify(plantillas));
 }
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.16 — CHATS FIJADOS (como el Chat Baileys / WhatsApp)
+// Llaves PROPIAS del Rider Chat: fijar aquí no toca el chat del
+// bot Rudy (cada chat guarda sus fijados por su lado).
+// ═══════════════════════════════════════════════════════════
+
+const KEY_FIJADOS_RIDER = 'rt_riderchat_fijados_v1';
+
+/** Set de teléfonos fijados por el rider (persistido en el teléfono) */
+export function leerFijadosRider(): Set<string> {
+  try {
+    const lista = JSON.parse(lsLeer(KEY_FIJADOS_RIDER) || '[]');
+    return new Set(Array.isArray(lista) ? lista : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Fija / desfija un chat. Devuelve el nuevo estado (true = fijado) */
+export function toggleFijadoRider(tel: string): boolean {
+  const fijados = leerFijadosRider();
+  if (fijados.has(tel)) fijados.delete(tel);
+  else fijados.add(tel);
+  lsGuardar(KEY_FIJADOS_RIDER, JSON.stringify(Array.from(fijados)));
+  return fijados.has(tel);
+}
+
+/**
+ * Ordena la lista como WhatsApp: fijados arriba (por su hora) y
+ * el resto debajo (por su hora). No muta el array original.
+ */
+export function ordenarChatsConFijados(chats: ChatRider[], fijados: Set<string>): ChatRider[] {
+  return [...chats].sort((a, b) => {
+    const fa = fijados.has(a.clientPhone) ? 1 : 0;
+    const fb = fijados.has(b.clientPhone) ? 1 : 0;
+    if (fa !== fb) return fb - fa;
+    return (b.lastMessageTime || 0) - (a.lastMessageTime || 0);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.16 — FONDO DEL CHAT (como WhatsApp / Chat Baileys)
+// Se aplica al área de mensajes de TODOS los chats del Rider
+// Chat y queda guardado en este teléfono.
+// ═══════════════════════════════════════════════════════════
+
+export interface FondoChatRider {
+  /** id del preset o 'personalizada' */
+  id: string;
+  /** css background completo (imagen/gradiente/color) */
+  css: string;
+  /** true si el fondo es oscuro (para que las burbujas respiren) */
+  oscuro: boolean;
+}
+
+export const FONDOS_RIDERCHAT_PRESET: FondoChatRider[] = [
+  { id: 'por_defecto', css: '', oscuro: true },
+  {
+    id: 'doodle_oscuro',
+    css:
+      `radial-gradient(circle at 12% 20%, rgba(16,185,129,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 80% 15%, rgba(56,189,248,.08) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 40% 70%, rgba(52,211,153,.09) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 90% 80%, rgba(251,191,36,.07) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 20% 85%, rgba(167,139,250,.08) 0 2px, transparent 3px),` +
+      `#0b141a`,
+    oscuro: true,
+  },
+  {
+    id: 'doodle_claro',
+    css:
+      `radial-gradient(circle at 15% 25%, rgba(5,150,105,.12) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 70% 10%, rgba(2,132,199,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 35% 60%, rgba(22,163,74,.10) 0 2px, transparent 3px),` +
+      `radial-gradient(circle at 85% 75%, rgba(217,119,6,.10) 0 2px, transparent 3px),` +
+      `#e7ded3`,
+    oscuro: false,
+  },
+  { id: 'papel', css: 'linear-gradient(160deg, #1c2530 0%, #101820 100%)', oscuro: true },
+  { id: 'bosque', css: 'linear-gradient(160deg, #0f2a1e 0%, #06120c 100%)', oscuro: true },
+  { id: 'noche', css: 'linear-gradient(160deg, #141426 0%, #07070f 100%)', oscuro: true },
+  { id: 'carbon', css: 'linear-gradient(160deg, #1f2937 0%, #0d1117 100%)', oscuro: true },
+  { id: 'vino', css: 'linear-gradient(160deg, #2a1220 0%, #120810 100%)', oscuro: true },
+];
+
+const KEY_FONDO_RIDER = 'rt_riderchat_fondo_v1';
+
+export function leerFondoChatRider(): FondoChatRider {
+  try {
+    const f = JSON.parse(lsLeer(KEY_FONDO_RIDER) || 'null');
+    if (f && f.id && typeof f.css === 'string') return f as FondoChatRider;
+  } catch {
+    // nada
+  }
+  return FONDOS_RIDERCHAT_PRESET[0];
+}
+
+export function guardarFondoChatRider(f: FondoChatRider): void {
+  lsGuardar(KEY_FONDO_RIDER, JSON.stringify(f));
+}
+
+/**
+ * Comprime una foto de la galería para usarla de fondo sin
+ * reventar el localStorage (máx 1080px, JPEG 80%). Canvas puro,
+ * sin dependencias nuevas.
+ */
+export function comprimirImagenFondo(file: File): Promise<{ base64: string; mimetype: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagen no válida'));
+      img.onload = () => {
+        try {
+          const MAX = 1080;
+          const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * escala));
+          canvas.height = Math.max(1, Math.round(img.height * escala));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas no disponible');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve({ base64: canvas.toDataURL('image/jpeg', 0.8).split(',')[1], mimetype: 'image/jpeg' });
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error('Error comprimiendo'));
+        }
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.16 — PANEL DE MENSAJES RÁPIDOS PLEGABLE
+// Recuerda si lo dejaste abierto o cerrado (por defecto cerrado,
+// para que la ventana del chat respire como WhatsApp Web).
+// ═══════════════════════════════════════════════════════════
+
+const KEY_RAPIDO_ABIERTO = 'rt_riderchat_rapido_v1';
+
+export function leerRapidoAbierto(): boolean {
+  return lsLeer(KEY_RAPIDO_ABIERTO) === '1';
+}
+
+export function guardarRapidoAbierto(abierto: boolean): void {
+  lsGuardar(KEY_RAPIDO_ABIERTO, abierto ? '1' : '0');
+}
+
+/**
+ * ¿Hace más de 24 h que el cliente no escribe? (ventana de Meta)
+ * Fuera de la ventana solo se pueden mandar PLANTILLAS aprobadas —
+ * se usa para el aviso profesional dentro del chat.
+ */
+export function ventana24hCerrada(messages: MensajeRider[]): boolean {
+  const ultimoRecibido = [...messages]
+    .filter((m) => m.direction === 'received')
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
+  if (!ultimoRecibido) return true; // nunca escribió → fuera de ventana
+  return Date.now() - new Date(ultimoRecibido.timestamp).getTime() > 24 * 3600 * 1000;
+}
