@@ -569,7 +569,7 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2 flex-wrap">
               Rider Chat — WhatsApp Oficial
               <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">
-                FASE 3.17
+                FASE 3.18
               </span>
             </h1>
             <p className="text-xs text-slate-400">
