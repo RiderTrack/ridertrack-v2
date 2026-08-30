@@ -436,6 +436,17 @@ export const NavegacionGpsModal: React.FC<NavegacionGpsModalProps> = ({
     rumboRef.current = null;
     setModoRecta(esRecta);
 
+    // Que nunca más sea silencioso: si Google no dio ruta, decílo
+    // claro (antes solo cambiaba un chip chiquito y uno navegaba
+    // en línea recta sin saber por qué).
+    if (esRecta) {
+      onShowToast?.(
+        '⚠️ Modo básico (línea recta)',
+        'Google no pudo dar la ruta por calles. Revisa tu internet; si sigue, puedes escapar a Waze con el botón de abajo.',
+        'warning'
+      );
+    }
+
     dibujarRuta(ruta);
     dibujarParada(paradaDestino);
 
