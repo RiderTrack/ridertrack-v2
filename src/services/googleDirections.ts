@@ -26,9 +26,25 @@
 // Si Google falla (sin internet, API deshabilitada, cuota): el
 // llamador cae al optimizador local de routeOptimizer.ts — la
 // app NUNCA se queda sin ruta.
+//
+// ── Fase 3.13: FIX DEL TRANSPORTE (CORS) ─────────────────────
+// El endpoint REST de Directions NO manda cabeceras CORS
+// (Geocoding y Places SÍ las mandan — verificado). Llamado con
+// fetch() desde el WebView del APK (origen http://localhost) el
+// navegador BLOQUEA la respuesta → la navegación GPS, los mapas
+// y la optimización caían SIEMPRE al respaldo (línea recta /
+// optimizador local) aunque Google hubiera contestado bien.
+// Ahora directionsFetch usa, en orden:
+//   1. APK  → CapacitorHttp (HTTP nativo OkHttp, NO pasa por el
+//             navegador → sin CORS; viene registrado de fábrica
+//             en el bridge de Capacitor 6, sin configurar nada)
+//   2. Web  → fetch directo (mantine los mocks de los tests)
+//   3. Web  → Maps JavaScript API DirectionsService (el SDK
+//             oficial de Google para navegadores — sin CORS)
 // ═══════════════════════════════════════════════════════════
 
-import { getGoogleApiKey, decodificarPolyline } from './googleMaps';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { getGoogleApiKey, decodificarPolyline, cargarGoogleMaps } from './googleMaps';
 import { haversineKm } from './routeOptimizer';
 
 const DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
@@ -61,6 +77,123 @@ export interface ResultadoDirectionsOrden<T extends PuntoGeoSimple> {
   puntos: Array<{ lat: number; lng: number }>;
 }
 
+// ── Transporte del request (Fase 3.13: fix CORS del WebView) ─
+
+/** ¿Estamos dentro del APK? (WebView de Capacitor) */
+function esNativoDefault(): boolean {
+  try {
+    return Capacitor.isNativePlatform() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GET nativo (APK). CapacitorHttp corre en Java (OkHttp), fuera
+ * del WebView → CORS no aplica. Devuelve el JSON de Google o
+ * null si falló la red. En errores HTTP (400 clave mala…)
+ * devuelve igual el cuerpo: trae status/error_message y así el
+ * warn de directionsFetch explica el motivo real.
+ */
+async function httpNativoDefault(url: string): Promise<any | null> {
+  try {
+    const resp = await CapacitorHttp.get({
+      url,
+      connectTimeout: TIMEOUT_MS,
+      readTimeout: TIMEOUT_MS,
+    });
+    // resp = { status, headers, data } — data ya viene parseado (JSON)
+    if (resp && resp.status >= 200 && resp.status < 300) return resp.data ?? null;
+    return resp?.data ?? null;
+  } catch {
+    return null; // sin internet / timeout — el llamador cae al respaldo
+  }
+}
+
+/**
+ * fetch del navegador. Devuelve el JSON si el navegador dejó
+ * leer la respuesta (aunque el status HTTP sea error, Google
+ * responde un JSON con status/error_message), o null si la red,
+ * el timeout o CORS bloquearon la lectura.
+ */
+async function fetchDirecto(url: string): Promise<any | null> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return await res.json();
+  } catch {
+    return null; // CORS bloqueado (Directions no manda ACAO), sin internet, timeout
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** "12.046374,-77.042793" → { lat, lng } (o tal cual si no es punto) */
+function paramALugar(s: string): { lat: number; lng: number } | string {
+  const [lat, lng] = String(s).split(',').map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : s;
+}
+
+/**
+ * Directions vía Maps JavaScript API (fallback de WEB). El SDK
+ * se carga por <script> y sus requests van por el canal oficial
+ * — sin CORS. Traduce los params REST (origin/destination/
+ * waypoints "optimize:true|…") al formato del SDK y normaliza la
+ * respuesta a la misma forma del REST ({ status, routes }).
+ */
+async function directionsViaSdk(params: Record<string, string>): Promise<any | null> {
+  try {
+    const gmaps = await cargarGoogleMaps();
+    if (!gmaps?.DirectionsService) return null;
+
+    const req: any = { travelMode: gmaps.TravelMode?.DRIVING ?? 'DRIVING' };
+    if (params.origin) req.origin = paramALugar(params.origin);
+    if (params.destination) req.destination = paramALugar(params.destination);
+    if (params.waypoints) {
+      const partes = String(params.waypoints).split('|');
+      const optimizar = partes[0] === 'optimize:true';
+      const lista = (optimizar ? partes.slice(1) : partes).filter(Boolean);
+      req.waypoints = lista.map((w) => ({ location: paramALugar(w), stopover: true }));
+      req.optimizeWaypoints = optimizar;
+    }
+
+    return await new Promise<any | null>((resolve) => {
+      const reloj = setTimeout(() => resolve(null), TIMEOUT_MS);
+      new gmaps.DirectionsService().route(req, (respuesta: any, estado: string) => {
+        clearTimeout(reloj);
+        if (estado === 'OK' && respuesta?.routes?.length) {
+          // Misma forma que el REST: los consumidores solo leen
+          // routes[0] (legs/steps/polyline/waypoint_order), que el
+          // SDK entrega idéntico.
+          resolve({ status: 'OK', routes: respuesta.routes });
+        } else {
+          console.warn('[Directions SDK] estado:', estado);
+          resolve(null);
+        }
+      });
+    });
+  } catch {
+    return null; // sin DOM (tests en Node), clave sin JS API, sin internet…
+  }
+}
+
+// Inyectables para los tests (scripts/test-fase-3-13.ts)
+let _esNativo: () => boolean = esNativoDefault;
+let _httpNativo: (url: string) => Promise<any | null> = httpNativoDefault;
+export const _transporteTests = {
+  setEsNativo(fn: () => boolean) {
+    _esNativo = fn;
+  },
+  setHttpNativo(fn: (url: string) => Promise<any | null>) {
+    _httpNativo = fn;
+  },
+  restaurar() {
+    _esNativo = esNativoDefault;
+    _httpNativo = httpNativoDefault;
+  },
+};
+
 // ── Fetch con timeout ──────────────────────────────────────
 
 async function directionsFetch(params: Record<string, string>): Promise<any | null> {
@@ -75,24 +208,25 @@ async function directionsFetch(params: Record<string, string>): Promise<any | nu
   url.searchParams.set('mode', 'driving');
   url.searchParams.set('language', 'es');
 
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url.toString(), { signal: controller.signal });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.status !== 'OK' || !Array.isArray(data.routes) || data.routes.length === 0) {
-      if (data?.status && data.status !== 'ZERO_RESULTS') {
-        console.warn('[Directions] estado:', data.status, data?.error_message || '');
-      }
-      return null;
-    }
-    return data;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(t);
+  let data: any = null;
+
+  if (_esNativo()) {
+    // APK: HTTP nativo (sin CORS); si no se pudo, el SDK
+    data = await _httpNativo(url.toString());
+    if (!data) data = await directionsViaSdk(params);
+  } else {
+    // Web: fetch directo y, si CORS lo bloqueó, el SDK oficial
+    data = await fetchDirecto(url.toString());
+    if (!data) data = await directionsViaSdk(params);
   }
+
+  if (data?.status !== 'OK' || !Array.isArray(data.routes) || data.routes.length === 0) {
+    if (data?.status && data.status !== 'ZERO_RESULTS') {
+      console.warn('[Directions] estado:', data.status, data?.error_message || '');
+    }
+    return null;
+  }
+  return data;
 }
 
 const wp = (p: PuntoGeoSimple) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
