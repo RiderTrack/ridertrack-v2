@@ -62,7 +62,7 @@ export const UID_BOT = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
 // TIPOS
 // ─────────────────────────────────────────────────────────────
 
-export type OrigenMensaje = 'cliente' | 'rudy' | 'bot' | 'campana';
+export type OrigenMensaje = 'cliente' | 'rudy' | 'rudyAuto' | 'bot' | 'campana';
 export type TipoContenido = 'texto' | 'imagen' | 'audio' | 'documento' | 'ubicacion' | 'yape_qr';
 
 /** Mensaje unificado de la línea de tiempo */
@@ -78,6 +78,11 @@ export interface MensajeChat {
   leido: boolean;
   /** saliente: null = n/a, false = pendiente, true = enviado */
   enviado: boolean | null;
+  /** Fase 3.18 — estado REAL de WhatsApp del mensaje saliente:
+   *  undefined/null = solo se envió al servidor · 'delivered' = entregado
+   *  al teléfono · 'read' = lo leyeron (checks azules). Lo actualiza el
+   *  parche estado_mensajes.js del bot con los receipts de Baileys. */
+  estadoWa?: 'delivered' | 'read' | null;
   /** etiqueta de la acción del bot (avisar_entrega, solicitar_ubicacion...) */
   accionBot?: string;
   /** estado de campaña (cola_envio) */
@@ -191,6 +196,56 @@ interface SuscripcionesChat {
 }
 
 /**
+ * Fase 3.18 — ¿es un mensaje saliente del bot (espejo en
+ * mensajes_clientes)? El bot guarda AHÍ también lo que responde
+ * (tus manuales y sus auto-replies) → sin este filtro tus propios
+ * mensajes aparecerían DOS veces (una como tuyos con ticks y otra
+ * como si el cliente te hubiera escrito).
+ */
+export function esEspejoSaliente(m: { tipo?: string; origen?: string }): boolean {
+  return m.tipo === 'saliente' || m.origen === 'rudy';
+}
+
+/**
+ * Fase 3.18 — ¿el espejo saliente corresponde a una respuesta manual
+ * tuya (ya pintada desde respuestas_manuales con ticks)? Match por
+ * mismo teléfono + mismo texto en una ventana de ±20s.
+ */
+export function esDuplicadoManual(
+  m: { telefono?: unknown; texto?: string; timestamp?: unknown },
+  manuales: { tel: string; texto: string; timestamp: number }[]
+): boolean {
+  const tel = telKey(m.telefono);
+  const texto = String(m.texto || '').trim();
+  if (!tel || !texto) return false;
+  const ts = Number(m.timestamp) || 0;
+  return manuales.some(
+    (x) => x.tel === tel && x.texto === texto && Math.abs(x.timestamp - ts) <= 20_000
+  );
+}
+
+/**
+ * Fase 3.18 — Ticks estilo WhatsApp (lógica pura, testeable):
+ *   null        → no aplica (entrantes, auto-replies, campañas)
+ *   'pendiente'  → ⏳ el bot aún no lo manda
+ *   'enviado'   → ✓ llegó al servidor de WhatsApp
+ *   'entregado' → ✓✓ sonó en el teléfono del cliente
+ *   'leido'     → ✓✓ AZUL — lo leyeron
+ * El estado delivered/read lo escribe el parche estado_mensajes.js
+ * del bot en respuestas_manuales.estadoWa (receipts de Baileys).
+ */
+export function estadoTicks(
+  enviado: boolean | null,
+  estadoWa?: 'delivered' | 'read' | null
+): 'pendiente' | 'enviado' | 'entregado' | 'leido' | null {
+  if (enviado === null) return null;
+  if (!enviado) return 'pendiente';
+  if (estadoWa === 'read') return 'leido';
+  if (estadoWa === 'delivered') return 'entregado';
+  return 'enviado';
+}
+
+/**
  * Suscripción combinada a las fuentes de la línea de tiempo.
  * Devuelve las conversaciones ordenadas por última actividad.
  * (Incluye la conversación sintética "Grupo MATE · Trabajo" y las
@@ -216,6 +271,11 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   };
   convs.set(TEL_GRUPO_MATE, convGrupo);
 
+  // Fase 3.18 — registro en vivo de tus respuestas manuales (tel,
+  // texto, ts) para poder deduplicar los espejos salientes que el
+  // bot guarda en mensajes_clientes (ver listener 1).
+  let manualesVivas: { tel: string; texto: string; timestamp: number }[] = [];
+
   const emitir = () => {
     // recontar no leídos + silencio + fotos
     let noLeidos = 0;
@@ -223,7 +283,13 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     const inicioHoy = new Date();
     inicioHoy.setHours(0, 0, 0, 0);
 
-    const lista = Array.from(convs.values());
+    // 🐛 FIX Fase 3.18 ("tengo que salir del chat para ver si se mandó"):
+    // antes se emitían los MISMOS objetos mutados en sitio → los useMemo
+    // de la vista veían la misma referencia y NUNCA recalculaban la lista
+    // de mensajes mientras el chat estaba abierto. Ahora cada emisión
+    // entrega copias nuevas (la conversación y su array de mensajes):
+    // mensajes, ticks ⏳→✓→✓✓→azul y fotos se pintan EN VIVO.
+    const lista = Array.from(convs.values()).map((c) => ({ ...c, mensajes: [...c.mensajes] }));
     lista.forEach((c) => {
       c.noLeidos = c.mensajes.filter((m) => m.origen === 'cliente' && !m.leido).length;
       c.mensajes.sort((a, b) => a.timestamp - b.timestamp);
@@ -281,9 +347,14 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     onSnapshot(
       query(collection(db!, 'mensajes_clientes'), orderBy('timestamp', 'desc'), limit(300)),
       (snap: QuerySnapshot<DocumentData>) => {
-        // Reconstruir mensajes entrantes (los salientes NO se loggean aquí)
+        // Reconstruir mensajes entrantes. Fase 3.18: también se
+        // reconstruyen los espejos SALIENTES del bot (sus auto-replies)
+        // como burbujas tuyas — antes se pintaban como si el CLIENTE
+        // hubiera dicho "Hola Verónica, ya voy en camino...". Y los
+        // espejos de TUS manuales se descartan (ya viven con ticks en
+        // respuestas_manuales → listener 2).
         convs.forEach((c) => {
-          c.mensajes = c.mensajes.filter((m) => m.origen !== 'cliente');
+          c.mensajes = c.mensajes.filter((m) => m.origen !== 'cliente' && m.origen !== 'rudyAuto');
         });
         snap.forEach((d) => {
           const m = d.data();
@@ -307,6 +378,29 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
           }
           const tel = telKey(m.telefono);
           if (!tel) return;
+
+          // ── Fase 3.18: espejo SALIENTE del bot en mensajes_clientes ──
+          if (esEspejoSaliente(m)) {
+            // ¿Es el espejo de una respuesta manual tuya? → ya está
+            // pintada (con ticks) desde respuestas_manuales: saltar.
+            if (esDuplicadoManual(m, manualesVivas)) return;
+            // Es un AUTO-REPLY del bot (IA / plantillas): burbuja tuya,
+            // del lado derecho como en WhatsApp.
+            const convAuto = asegurarConv(tel, m.nombre);
+            convAuto.mensajes.push({
+              id: 'mc_' + d.id,
+              tel,
+              origen: 'rudyAuto',
+              tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+              texto: m.texto || '',
+              timestamp: Number(m.timestamp) || 0,
+              leido: true,
+              enviado: null,
+              nombre: 'Bot',
+            });
+            return;
+          }
+
           const conv = asegurarConv(tel, m.nombre);
           conv.mensajes.push({
             id: 'mc_' + d.id,
@@ -344,10 +438,15 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
         convs.forEach((c) => {
           c.mensajes = c.mensajes.filter((m) => m.origen !== 'rudy');
         });
+        // Fase 3.18 — registro vivo para el dedupe de espejos salientes
+        manualesVivas = [];
         snap.forEach((d) => {
           const m = d.data();
           const tel = telKey(m.telefono);
           if (!tel) return;
+          const texto = String(m.texto || '').trim();
+          const ts = Number(m.timestamp) || 0;
+          if (texto) manualesVivas.push({ tel, texto, timestamp: ts });
           const conv = asegurarConv(tel, m.nombre);
           conv.mensajes.push({
             id: 'rm_' + d.id,
@@ -355,9 +454,13 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
             origen: 'rudy',
             tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
             texto: m.texto || '',
-            timestamp: Number(m.timestamp) || 0,
+            timestamp: ts,
             leido: true,
             enviado: !!m.enviado,
+            // Fase 3.18 — estado real de WhatsApp (checks azules): lo
+            // escribe el parche estado_mensajes.js del bot con los
+            // receipts de Baileys (delivered = ✓✓ gris, read = ✓✓ azul).
+            estadoWa: m.estadoWa === 'delivered' || m.estadoWa === 'read' ? m.estadoWa : null,
             base64: m.base64 || undefined,
             mimetype: m.mimetype || undefined,
             nombreArchivo: m.nombreArchivo || undefined,
