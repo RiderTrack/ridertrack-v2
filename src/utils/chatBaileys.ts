@@ -44,6 +44,7 @@ import {
   addDoc,
   setDoc,
   deleteDoc,
+  updateDoc,
   getDoc,
   getDocs,
   writeBatch,
@@ -286,6 +287,24 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
         });
         snap.forEach((d) => {
           const m = d.data();
+          // FASE 3.9 — mensajes que llegan AL GRUPO MATE (los guarda el
+          // parche grupo_mate.js del bot en mensajes_clientes con
+          // telefono='GRUPO_MATE'). Van a la conversación del grupo
+          // como burbujas de la izquierda (con el nombre de quien escribió).
+          if (String(m.telefono || '') === TEL_GRUPO_MATE || m.esGrupo === true) {
+            convGrupo.mensajes.push({
+              id: 'mc_' + d.id,
+              tel: TEL_GRUPO_MATE,
+              origen: 'cliente',
+              tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+              texto: m.texto || '',
+              timestamp: Number(m.timestamp) || 0,
+              leido: !!m.leido,
+              enviado: null,
+              nombre: m.nombre || 'Grupo',
+            });
+            return;
+          }
           const tel = telKey(m.telefono);
           if (!tel) return;
           const conv = asegurarConv(tel, m.nombre);
@@ -354,6 +373,9 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   // 3. Acciones del bot (avisos, ubicación, yape, broadcast inicio)
   //    Las acciones dirigidas al GRUPO MATE van a la conversación
   //    sintética del grupo (como WhatsApp: el mensaje vive en el grupo).
+  //    FASE 3.9: ya NO se borran los demás mensajes del grupo — solo
+  //    las burbujas 'bot' (los entrantes 'cliente' los reconstruye el
+  //    listener 1 y deben sobrevivir a este snapshot).
   unsubs.push(
     onSnapshot(
       query(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), orderBy('createdAt', 'desc'), limit(80)),
@@ -361,7 +383,7 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
         convs.forEach((c) => {
           c.mensajes = c.mensajes.filter((m) => m.origen !== 'bot');
         });
-        convGrupo.mensajes = [];
+        convGrupo.mensajes = convGrupo.mensajes.filter((m) => m.origen !== 'bot');
         snap.forEach((d) => {
           const m = d.data();
           const ts = m.createdAt ? Date.parse(m.createdAt) : 0;
@@ -771,8 +793,269 @@ export async function enviarAGrupoMate(texto: string, rider?: RiderInfo): Promis
 }
 
 // ═══════════════════════════════════════════════════════════
-// FASE 3.8 — 🙏 GRACIAS POR TU COMPRA (vía del robot, exacta)
+// FASE 3.9 — RÁPIDOS CON LAS PLANTILLAS DEL ROBOT
+// (voy en camino / mi posición — con imagen, como la v1)
 // ═══════════════════════════════════════════════════════════
+
+/** Posición de un cliente dentro de la ruta activa (cálculo v1) */
+export interface PosicionRuta {
+  miPosicion: number;
+  totalRuta: number;
+  entregados: number;
+  faltanAntes: number;
+}
+
+/**
+ * Calcula la posición de un cliente en la ruta activa con la MISMA
+ * lógica de la v1 (botAvisarPosicion): "abierto" = sin estado o
+ * 'pendiente'; los demás cuentan como entregados. Devuelve null si
+ * el cliente no está en la ruta de hoy.
+ */
+export async function calcularPosicionRuta(t9: string): Promise<PosicionRuta | null> {
+  try {
+    const snap = await getDoc(doc(db!, 'ruta_activa', UID_BOT));
+    if (!snap.exists()) return null;
+    const data = snap.data() || {};
+    const lista: any[] = Array.isArray(data.clientes) ? data.clientes : [];
+    const idx = lista.findIndex((x) => telKey(x.cel) === t9);
+    if (idx === -1) return null;
+    const abierto = (x: any) => !x.st || x.st === 'pendiente';
+    return {
+      miPosicion: idx + 1,
+      totalRuta: lista.length,
+      entregados: lista.filter((x) => !abierto(x)).length,
+      faltanAntes: lista.filter((x, i) => i < idx && abierto(x)).length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 🚀 VOY EN CAMINO — plantilla del ROBOT con imagen.
+ *
+ * FASE 3.9: antes esto salía como texto plano tuyo (respuestas_manuales);
+ * el usuario pidió que use la MISMA plantilla del robot (la del botón 🤖
+ * de cada cliente en la v1) con su imagen llegando_pronto.jpg. Copia
+ * EXACTA del payload v1 (botAvisarSiguiente): acción `avisar_siguiente`
+ * con minutos + datos del cliente de la ruta activa. También actualiza
+ * clienteActualIdx en ruta_activa (como la v1) para que el bot sepa
+ * quién es tu cliente actual.
+ */
+export async function avisarSiguienteBot(
+  tel: string,
+  nombre: string,
+  minutos: number,
+  rider?: RiderInfo
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const datos = await buscarClienteEnRuta(t9);
+
+  // La v1 también apuntaba al cliente actual en ruta_activa (merge)
+  try {
+    const snap = await getDoc(doc(db!, 'ruta_activa', UID_BOT));
+    if (snap.exists()) {
+      const lista: any[] = Array.isArray(snap.data()?.clientes) ? snap.data().clientes : [];
+      const idx = lista.findIndex((x) => telKey(x.cel) === t9);
+      if (idx !== -1) {
+        await updateDoc(doc(db!, 'ruta_activa', UID_BOT), {
+          clienteActualIdx: idx,
+          clienteActualId: lista[idx]?.id ?? '',
+          actualizadaAt: new Date().toISOString(),
+        });
+      }
+    }
+  } catch { /* no bloquear el envío si falla el puntero */ }
+
+  await addDoc(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), {
+    tipo: 'avisar_siguiente',
+    clienteId: 'chat_' + t9,
+    telefono: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    prod: datos.prod || '',
+    cobrar: datos.cobrar || 0,
+    dir: datos.dir || '',
+    dist: datos.dist || '',
+    minutos: Math.max(1, parseInt(String(minutos), 10) || 15),
+    ...(rider ? { rider } : {}),
+    createdAt: new Date().toISOString(),
+    processed: false,
+  });
+}
+
+/**
+ * ⏰ MI POSICIÓN DE HOY — plantilla del ROBOT con imagen.
+ *
+ * FASE 3.9: copia EXACTA del payload v1 (botAvisarPosicion): acción
+ * `avisar_posicion` con miPosicion / totalRuta / entregados /
+ * faltanAntes. Si el cliente está en la ruta de hoy se calcula solo;
+ * si no (o si pasas `forzarPos`), se usa el número que editó el rider.
+ */
+export async function avisarPosicionBot(
+  tel: string,
+  nombre: string,
+  forzarPos: number | null,
+  rider?: RiderInfo
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  const datos = await buscarClienteEnRuta(t9);
+  const pos = await calcularPosicionRuta(t9);
+  const miPosicion = pos ? pos.miPosicion : Math.max(1, parseInt(String(forzarPos), 10) || 1);
+
+  await addDoc(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), {
+    tipo: 'avisar_posicion',
+    clienteId: 'chat_' + t9,
+    telefono: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    prod: datos.prod || '',
+    cobrar: datos.cobrar || 0,
+    dir: datos.dir || '',
+    dist: datos.dist || '',
+    miPosicion,
+    totalRuta: pos ? pos.totalRuta : 0,
+    entregados: pos ? pos.entregados : 0,
+    faltanAntes: pos ? pos.faltanAntes : 0,
+    ...(rider ? { rider } : {}),
+    createdAt: new Date().toISOString(),
+    processed: false,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.9 — GALERÍA: FOTO + MENSAJITO POR EL BOT
+// (elige destino: cliente directo o grupo MATE)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 📲 Enviar una foto de la galería AL CLIENTE por WhatsApp.
+ * Vía VERIFICADA (campanas_bot.js): doc en cola_envio con multimedia
+ * {tipo:'imagen'} — el bot descarga la foto de Storage y la manda
+ * como IMAGEN con el mensajito de caption. La foto ya está en Storage
+ * (la subió el flujo de entrega), así que NO hay subida ni CORS.
+ */
+export async function enviarFotoGaleriaCliente(
+  tel: string,
+  nombre: string,
+  fotoUrl: string,
+  mensajito: string
+): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  if (!fotoUrl) throw new Error('La foto no tiene URL');
+  await setDoc(doc(db!, 'cola_envio', `${telCompleto(t9)}_galeria_${Date.now()}`), {
+    celular: telCompleto(t9),
+    nombre: nombre || 'Cliente',
+    mensaje: mensajito,
+    multimedia: { tipo: 'imagen', url: fotoUrl, nombre: 'entrega.jpg' },
+    imagen_url: fotoUrl,
+    es_chat: true,
+    velocidad: 8,
+    status: 'pendiente',
+    creada_en: new Date().toISOString(),
+    intentos: 0,
+  });
+}
+
+/** Datos de la foto de entrega que viajan al grupo MATE (como la v1) */
+export interface DatosFotoGaleria {
+  nombre: string;
+  prod?: string;
+  cobrar?: number;
+  dir?: string;
+  distrito?: string;
+}
+
+/**
+ * 📤 Enviar una foto de la galería AL GRUPO MATE.
+ * Acción `enviar_foto_grupo_mate` — la MISMA que usaba la v1 en
+ * "Reportar pago con foto", con la diferencia de que la imagen viaja
+ * por URL (imagenUrl) en vez de base64: el parche grupo_mate.js del
+ * bot la descarga desde el servidor (sin límite de 1MB por doc ni
+ * CORS del WebView). El payload mantiene los campos v1 (distrito,
+ * titulo, comentario, tipoFoto, tipoLabel, grupoId) para que el
+ * parche también sirva si el bot viejo volviera a levantarlo.
+ */
+export async function enviarFotoGaleriaGrupo(
+  foto: DatosFotoGaleria,
+  fotoUrl: string,
+  titulo: string,
+  comentario: string,
+  rider?: RiderInfo
+): Promise<void> {
+  if (!fotoUrl) throw new Error('La foto no tiene URL');
+  const tituloFinal = (titulo || '').trim() || 'VERIFICACIÓN DE ENTREGA';
+  await addDoc(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), {
+    tipo: 'enviar_foto_grupo_mate',
+    clienteId: 'galeria',
+    nombre: foto.nombre || '',
+    prod: foto.prod || '',
+    cobrar: foto.cobrar || 0,
+    dir: foto.dir || '',
+    distrito: foto.distrito || '',
+    imagenBase64: '',
+    imagenUrl: fotoUrl,
+    titulo: tituloFinal,
+    comentario: (comentario || '').trim(),
+    tipoFoto: 'entregado',
+    tipoLabel: 'Verificación de entrega',
+    grupoId: GRUPO_MATE_JID,
+    // para la burbuja del chat del grupo:
+    texto: `${tituloFinal}\n${(comentario || '').trim()}`.trim(),
+    ...(rider ? { rider } : {}),
+    createdAt: new Date().toISOString(),
+    processed: false,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.9 — ESTADO DEL GRUPO (heartbeat del parche del bot)
+// ═══════════════════════════════════════════════════════════
+
+/** Estado que el parche grupo_mate.js escribe en sistema/estado_grupo */
+export interface EstadoGrupo {
+  ok: boolean;
+  jid?: string;
+  nombre?: string;
+  participantes?: number;
+  ts?: number;
+  version?: string;
+  error?: string;
+}
+
+/** El estado se considera vivo si el bot latió hace menos de 15 min */
+export function estadoGrupoVivo(e: EstadoGrupo | null): boolean {
+  if (!e || !e.ok) return false;
+  const ts = Number(e.ts) || 0;
+  return ts > 0 && Date.now() - ts < 15 * 60 * 1000;
+}
+
+/** Suscripción en vivo al estado del grupo (null = sin parche aún) */
+export function suscribirEstadoGrupo(cb: (e: EstadoGrupo | null) => void): () => void {
+  try {
+    return onSnapshot(
+      doc(db!, 'sistema', 'estado_grupo'),
+      (snap) => {
+        if (!snap.exists()) return cb(null);
+        const d = snap.data() || {};
+        cb({
+          ok: !!d.ok,
+          jid: d.jid || '',
+          nombre: d.nombre || '',
+          participantes: Number(d.participantes) || 0,
+          ts: Number(d.ts) || 0,
+          version: d.version || '',
+          error: d.error || '',
+        });
+      },
+      () => cb(null)
+    );
+  } catch {
+    cb(null);
+    return () => undefined;
+  }
+}
 
 /** Datos del cliente que viajan en la acción avisar_entrega (como la v1) */
 export interface DatosClienteGracias {

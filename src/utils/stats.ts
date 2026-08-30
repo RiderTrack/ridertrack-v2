@@ -78,6 +78,8 @@ export interface FotoHistorial {
   hora: string;
   dist: string;
   fecha: string; // YYYY-MM-DD
+  /** celular del cliente (Fase 3.9 — enviar la foto por el bot) */
+  cel?: string;
 }
 
 // ─── Fechas ───
@@ -269,6 +271,7 @@ export function partirHoy(clientes: any[]): FotoHoy {
       hora: c.hora || '',
       dist: c.dist || '',
       fecha: hoyISO(),
+      cel: c.cel || '',
     };
     if (c.fotoUrl) conFoto.push({ ...base, url: c.fotoUrl });
     else sinFoto.push(c);
@@ -299,6 +302,7 @@ export function fotosDeHistorial(
         hora: c.hora || '',
         dist: c.dist || '',
         fecha: r.fecha,
+        cel: c.cel || '',
       });
       grupos.set(r.fecha, lista);
     }
