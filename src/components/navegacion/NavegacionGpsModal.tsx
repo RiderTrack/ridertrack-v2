@@ -70,6 +70,7 @@ import {
   fraseSiguiente,
   fraseFin,
   IconoManiobra,
+  leerPreferenciasNav,
 } from '../../services/navegacionGps';
 
 interface NavegacionGpsModalProps {
@@ -205,6 +206,11 @@ export const NavegacionGpsModal: React.FC<NavegacionGpsModalProps> = ({
   const detenerWatchRef = useRef<(() => void) | null>(null);
   const recalculandoRef = useRef(false);
   const vivoRef = useRef(true);
+  // Reglas de Despacho (F3.14): se leen al ABRIR el modal — si el
+  // rider cambia la config con la navegación cerrada, aplica ya.
+  const prefNavRef = useRef(leerPreferenciasNav());
+  const llegadaMRef = useRef(prefNavRef.current.llegadaM || UMBRAL_LLEGADA_M);
+  const autoRecalcRef = useRef(prefNavRef.current.autoRecalcular);
 
   const parada = paradas.length > 0 ? paradas[Math.min(idxParada, paradas.length - 1)] : undefined;
 
@@ -375,8 +381,9 @@ export const NavegacionGpsModal: React.FC<NavegacionGpsModalProps> = ({
     if (faseRef.current !== 'navegando' && faseRef.current !== 'recalculando') return;
 
     // ¿Llegaste a la parada? (línea recta: más fiable que la ruta)
+    // El umbral viene de Configuración → Reglas de Despacho (F3.14)
     const distParada = distanciaMetros(pos, { lat: paradaActual.lat, lng: paradaActual.lng });
-    if (distParada <= UMBRAL_LLEGADA_M) {
+    if (distParada <= llegadaMRef.current) {
       setFaseNav('llegada');
       motorVozRef.current.silenciar();
       decir(fraseLlegada(paradaActual.nombre, paradaActual.num), true);
@@ -385,8 +392,9 @@ export const NavegacionGpsModal: React.FC<NavegacionGpsModalProps> = ({
       return;
     }
 
-    // ¿Desviado? → recalcular
-    if (detectorRef.current.reportar(proy?.distMetros ?? null)) {
+    // ¿Desviado? → recalcular (salvo que el rider lo haya apagado
+    // en Configuración → Reglas de Despacho — F3.14)
+    if (autoRecalcRef.current && detectorRef.current.reportar(proy?.distMetros ?? null)) {
       recalcular(pos);
     }
   };
