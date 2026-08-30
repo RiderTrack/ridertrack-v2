@@ -45,6 +45,20 @@ export function fotoDeCliente(tel: unknown): string | undefined {
   return k ? fotosActuales.get(k) : undefined;
 }
 
+/**
+ * F3.19 — Elige la mejor foto de un doc de clientes_registrados:
+ * prefiere foto_perfil_data (base64 PERMANENTE que escribe el bot
+ * directamente en Firestore) sobre foto_perfil (URL de WhatsApp que
+ * expira en horas o URL de Storage si llegó a subirse).
+ */
+export function elegirFotoPerfil(data: any): string | undefined {
+  const b64 = data?.foto_perfil_data;
+  if (typeof b64 === 'string' && b64.startsWith('data:image')) return b64;
+  const url = data?.foto_perfil;
+  if (typeof url === 'string' && url) return url;
+  return undefined;
+}
+
 /** El mapa completo (copiado, para render sin sorpresas) */
 export function mapaFotos(): Map<string, string> {
   return new Map(fotosActuales);
@@ -66,7 +80,8 @@ export function suscribirFotosPerfil(
         (snap: QuerySnapshot<DocumentData>) => {
           const nuevo = new Map<string, string>();
           snap.forEach((d) => {
-            const url = d.data()?.foto_perfil;
+            // F3.19: base64 permanente > URL (ver elegirFotoPerfil)
+            const url = elegirFotoPerfil(d.data());
             if (!url) return;
             const tel = normalizarTelFoto(d.id) || normalizarTelFoto(d.data()?.telefono);
             if (tel) nuevo.set(tel, String(url));
