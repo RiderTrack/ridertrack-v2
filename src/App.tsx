@@ -15,7 +15,9 @@ import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppModal } from './components/WhatsAppModal';
 // Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
 import { ChatBaileysView } from './components/ChatBaileysView';
-import { WhatsAppView } from './components/WhatsAppView';
+// Fase 3.15: RiderChat (WhatsApp Oficial Meta) acoplado al panel —
+// la app RiderChat V2 completa ahora vive en la pestaña chatapi
+import { RiderChatView } from './components/riderchat/RiderChatView';
 import { CatalogoView } from './components/CatalogoView';
 import { BotControlView } from './components/BotControlView';
 import { ResumenView } from './components/ResumenView';
@@ -71,7 +73,7 @@ const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
   mapa: 'Mapa de Entregas',
   motorizados: 'GPS del Motorizado',
   whatsapp: 'Chat Baileys',
-  chatapi: 'Chat API WhatsApp',
+  chatapi: 'Rider Chat Oficial',
   catalogo: 'Catálogo',
   plantillas: 'Centro del Bot',
   broadcast: 'Broadcast',
@@ -179,6 +181,9 @@ export default function App() {
     );
     return () => unsub();
   }, []);
+
+  // Fase 3.15: no leídos del Rider Chat (WhatsApp Oficial) → badge del menú
+  const [riderChatNoLeidos, setRiderChatNoLeidos] = useState(0);
 
   // Actividades en vivo (eventos de esta sesión, se fusionan con las derivadas)
   const [liveActivities, setLiveActivities] = useState<ActivityItem[]>([]);
@@ -592,6 +597,7 @@ export default function App() {
           activeOrdersCount={pendientesCount}
           activeDriversCount={1}
           chatNoLeidos={chatNoLeidos}
+          riderChatNoLeidos={riderChatNoLeidos}
           riderName={riderName}
           riderAvatar={avatarEfectivo}
           onSeleccionarAvatar={handleSeleccionarAvatar}
@@ -689,13 +695,16 @@ export default function App() {
               fijar/borrar chat, fondos y el Grupo MATE de trabajo. */}
           {activeTab === 'whatsapp' && <ChatBaileysView onShowToast={showToast} />}
 
-          {/* Fase 3.3: 💬 Chat API WhatsApp (recuperada) — la vista original de
-              mensajería wa.me que seguía en desarrollo; aquí vivirá la API
-              oficial de WhatsApp Cloud cuando se conecte. */}
+          {/* Fase 3.15: 💬 RiderChat OFICIAL acoplado al panel — la app
+              RiderChat V2 completa (lista, chat, plantillas aprobadas de
+              Meta, broadcast a la ruta) corriendo con la MISMA credencial
+              de ⚙️ Configuración → WhatsApp Oficial. Sin credencial arranca
+              en MODO DEMO (envíos simulados). */}
           {activeTab === 'chatapi' && (
-            <WhatsAppView
-              messages={whatsAppMessages}
-              onOpenWhatsAppModal={handleOpenWhatsAppModal}
+            <RiderChatView
+              onShowToast={showToast}
+              clientes={clientes}
+              onUnreadChange={setRiderChatNoLeidos}
             />
           )}
 
