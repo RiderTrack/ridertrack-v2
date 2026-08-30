@@ -99,6 +99,12 @@ import {
   enviarAGrupoMate,
   enviarGraciasBot,
   MENSAJE_GRACIAS_BOT,
+  avisarSiguienteBot,
+  avisarPosicionBot,
+  calcularPosicionRuta,
+  suscribirEstadoGrupo,
+  estadoGrupoVivo,
+  EstadoGrupo,
   iniciarGrabacionAudio,
   enviarAudioNotaChat,
   leerAudiosLocales,
@@ -523,6 +529,8 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
   const [menuRapidos, setMenuRapidos] = useState(false);  // menú desglosable ⚡ (Fase 3.6)
   const [rapidoMinutos, setRapidoMinutos] = useState(15);  // ETA editable (Fase 3.7)
   const [rapidoPosicion, setRapidoPosicion] = useState(3); // posición editable (Fase 3.7)
+  // Fase 3.9 — estado del grupo MATE (heartbeat del parche del bot)
+  const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -550,7 +558,8 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     const unsubPlantillas = escucharPlantillas(setPlantillas, (e) =>
       console.warn('[ChatBaileys] plantillas:', e.message)
     );
-    return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); };
+    const unsubEstadoGrupo = suscribirEstadoGrupo(setEstadoGrupo);
+    return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); unsubEstadoGrupo(); };
   }, []);
 
   // ── Marcar leído al abrir un chat (y cerrar el menú de rápidos) ──
@@ -689,7 +698,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
           telefono: profile?.email || '',
           empresa: 'MATE',
         });
-        toast('👥 Enviado al grupo', 'El bot está escribiendo tu mensaje al grupo MATE', 'success');
+        toast(
+          '👥 Enviado al grupo',
+          estadoGrupoVivo(estadoGrupo)
+            ? 'El bot está escribiendo tu mensaje al grupo MATE'
+            : 'En cola — el bot necesita el parche grupo_mate.js para escribir en el grupo',
+          estadoGrupoVivo(estadoGrupo) ? 'success' : 'warning'
+        );
       } else {
         await enviarMensajeChat(convActiva.tel, convActiva.nombre, t);
       }
@@ -845,12 +860,29 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     return '';
   };
 
+  // Fase 3.9 — Voy en camino y Mi posición usan las PLANTILLAS DEL ROBOT
+  // (acciones avisar_siguiente / avisar_posicion con imagen, copia exacta
+  // del botón 🤖 de cada cliente de la v1). "Ya llegué" sigue siendo texto
+  // tuyo (no hay plantilla del robot para esa).
   const enviarRapidoRider = async () => {
     if (!convActiva || enviandoRapido) return;
     setEnviandoRapido(true);
     try {
-      await enviarMensajeChat(convActiva.tel, convActiva.nombre, textoRapidoRider());
-      toast('⚡ Enviado', 'El bot manda tu mensaje en segundos', 'success');
+      const rider = {
+        nombre: profile?.nombre || 'Rudy',
+        telefono: profile?.email || '',
+        empresa: 'MATE',
+      };
+      if (rapidoAbierto?.tipo === 'eta') {
+        await avisarSiguienteBot(convActiva.tel, convActiva.nombre, rapidoMinutos, rider);
+        toast('🚀 Voy en camino', `El robot manda su tarjeta con imagen + tus ${rapidoMinutos} minutos a ${convActiva.nombre}`, 'success');
+      } else if (rapidoAbierto?.tipo === 'posicion') {
+        await avisarPosicionBot(convActiva.tel, convActiva.nombre, rapidoPosicion, rider);
+        toast('⏰ Posición avisada', `El robot manda su plantilla con imagen a ${convActiva.nombre}`, 'success');
+      } else {
+        await enviarMensajeChat(convActiva.tel, convActiva.nombre, textoRapidoRider());
+        toast('⚡ Enviado', 'El bot manda tu mensaje en segundos', 'success');
+      }
       setRapidoAbierto(null);
     } catch (e: any) {
       toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
@@ -875,7 +907,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
         empresa: 'MATE',
       });
       setMenuRapidos(false);
-      toast('👥 Reporte al grupo', `"${etiqueta}" enviado al grupo MATE`, 'success');
+      toast(
+        '👥 Reporte al grupo',
+        estadoGrupoVivo(estadoGrupo)
+          ? `"${etiqueta}" enviado al grupo MATE`
+          : `"${etiqueta}" en cola — el bot necesita el parche grupo_mate.js para escribir en el grupo`,
+        estadoGrupoVivo(estadoGrupo) ? 'success' : 'warning'
+      );
     } catch (e: any) {
       toast('Error al enviar', e.message || 'Intenta de nuevo', 'error');
     }
@@ -1203,7 +1241,16 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                   {convActiva.esGrupo ? (
                     <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
                       <Users className="w-3 h-3 text-emerald-400" />
-                      <span className="truncate">Grupo de trabajo · el bot reporta aquí</span>
+                      <span className="truncate">
+                        Grupo de trabajo ·{' '}
+                        {estadoGrupoVivo(estadoGrupo) ? (
+                          <span className="text-emerald-300 font-bold">bot conectado ✓</span>
+                        ) : (
+                          <span className="text-red-300 font-bold" title="Instala el parche grupo_mate.js en el bot (fase 3.9)">
+                            bot sin parche del grupo
+                          </span>
+                        )}
+                      </span>
                     </span>
                   ) : (
                     <div className="flex items-center gap-2 text-[11px] min-w-0">
@@ -1454,7 +1501,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           </span>
                         </button>
 
-                        {/* ETA — minutos editable */}
+                        {/* ETA — plantilla del robot con imagen */}
                         <button
                           type="button"
                           onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'eta' }); }}
@@ -1463,20 +1510,31 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                           <span className="w-7 h-7 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sm flex-shrink-0">⏱️</span>
                           <span className="flex flex-col min-w-0 flex-1">
                             <span className="text-sm font-bold text-sky-200 truncate">Voy en camino</span>
-                            <span className="text-[10px] text-slate-500 truncate">Llego en X minutos — editable</span>
+                            <span className="text-[10px] text-slate-500 truncate">Plantilla del robot con imagen — minutos editable</span>
                           </span>
                         </button>
 
-                        {/* Posición en la cola */}
+                        {/* Posición en la cola — plantilla del robot con imagen */}
                         <button
                           type="button"
-                          onClick={() => { setMenuRapidos(false); setRapidoAbierto({ tipo: 'posicion' }); }}
+                          onClick={() => {
+                            setMenuRapidos(false);
+                            setRapidoAbierto({ tipo: 'posicion' });
+                            // Fase 3.9: pre-calcular la posición REAL desde la
+                            // ruta activa (misma lógica v1); si no está en la ruta
+                            // se queda el último valor del rider.
+                            if (convActiva) {
+                              calcularPosicionRuta(convActiva.tel).then((pos) => {
+                                if (pos) setRapidoPosicion(pos.miPosicion);
+                              });
+                            }
+                          }}
                           className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
                         >
                           <span className="w-7 h-7 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-sm flex-shrink-0">📍</span>
                           <span className="flex flex-col min-w-0 flex-1">
                             <span className="text-sm font-bold text-violet-200 truncate">Mi posición de hoy</span>
-                            <span className="text-[10px] text-slate-500 truncate">Voy en la posición X — editable</span>
+                            <span className="text-[10px] text-slate-500 truncate">Plantilla del robot con imagen — posición real de la ruta</span>
                           </span>
                         </button>
 
@@ -1700,6 +1758,17 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
               ) : rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion' || rapidoAbierto.tipo === 'afuera' ? (
                 <>
                   {(rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion') && (
+                    <div className="flex items-center gap-3 rounded-2xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-3">
+                      <span className="w-11 h-11 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-2xl flex-shrink-0">🤖</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-sky-200">Plantilla del robot con imagen</div>
+                        <div className="text-[10px] text-slate-400 leading-relaxed mt-0.5">
+                          La MISMA tarjeta que manda el botón 🤖 de la v1 — con su imagen oficial. No es un texto plano tuyo.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {(rapidoAbierto.tipo === 'eta' || rapidoAbierto.tipo === 'posicion') && (
                     <div className="flex items-center gap-3">
                       <label className="text-xs font-bold text-slate-300 flex-shrink-0">
                         {rapidoAbierto.tipo === 'eta' ? '⏱️ Minutos:' : '📍 Posición:'}
@@ -1716,17 +1785,32 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
                         }}
                         className="w-24 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-600 text-sm font-bold text-white focus:outline-none focus:border-emerald-500/60"
                       />
+                      {rapidoAbierto.tipo === 'posicion' && (
+                        <span className="text-[10px] text-slate-500 leading-tight">calculada de tu ruta de hoy</span>
+                      )}
                     </div>
                   )}
-                  <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2.5 shadow-lg">
-                    <span
-                      className="text-sm whitespace-pre-wrap break-words"
-                      dangerouslySetInnerHTML={{ __html: formatearWhatsAppHTML(textoRapidoRider()) }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Lo manda el bot a <b className="text-slate-300">{convActiva.nombre}</b> como mensaje tuyo.
-                  </p>
+                  {rapidoAbierto.tipo === 'afuera' ? (
+                    <>
+                      <div className="rounded-2xl rounded-tr-md bg-emerald-600/90 text-white px-3 py-2.5 shadow-lg">
+                        <span
+                          className="text-sm whitespace-pre-wrap break-words"
+                          dangerouslySetInnerHTML={{ __html: formatearWhatsAppHTML(textoRapidoRider()) }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Lo manda el bot a <b className="text-slate-300">{convActiva.nombre}</b> como mensaje tuyo.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      {rapidoAbierto.tipo === 'eta' ? (
+                        <>El robot le avisa a <b className="text-slate-300">{convActiva.nombre}</b> que vas en camino con su <b className="text-slate-300">tarjeta con imagen</b> y tus <b className="text-slate-300">{rapidoMinutos} minutos</b> — idéntico al botón 🤖 de la v1.</>
+                      ) : (
+                        <>El robot le avisa a <b className="text-slate-300">{convActiva.nombre}</b> su <b className="text-slate-300">posición en la ruta de hoy</b> con la plantilla con imagen del botón 🤖 de la v1.</>
+                      )}
+                    </p>
+                  )}
                 </>
               ) : (
                 <>

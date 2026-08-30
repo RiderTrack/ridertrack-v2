@@ -40,7 +40,14 @@ import { leerHistorial, RegistroHistorial, Cliente } from '../services/firestore
 import { FotoEntregaModal } from './FotoEntregaModal';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
 import { partirHoy, fotosDeHistorial, FotoHistorial } from '../utils/stats';
-import { descargarArchivo, compartirArchivoConTexto } from '../utils/descargaArchivo';
+import { descargarArchivo } from '../utils/descargaArchivo';
+import {
+  enviarFotoGaleriaCliente,
+  enviarFotoGaleriaGrupo,
+  suscribirEstadoGrupo,
+  estadoGrupoVivo,
+  EstadoGrupo,
+} from '../utils/chatBaileys';
 
 interface GaleriaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -65,40 +72,72 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
   const [clienteAFotografiar, setClienteAFotografiar] = useState<Cliente | null>(null);
   const [seccionesAbiertas, setSeccionesAbiertas] = useState<Record<string, boolean>>({});
 
-  // ── Fase 3.8: enviar por WhatsApp como IMAGEN + mensajito ──
+  // ── Fase 3.9: enviar por WhatsApp con SELECTOR DE DESTINO ──
+  // El botón nativo de compartir (hoja de Android) no funcionaba en el
+  // APK — ahora la foto la manda el BOT por WhatsApp: eliges si va al
+  // CLIENTE (cola_envio + imagen, vía verificada) o al GRUPO MATE
+  // (acción enviar_foto_grupo_mate, la misma de "Reportar pago con
+  // foto" de la v1).
   const [waPanel, setWaPanel] = useState(false);
   const [waMensaje, setWaMensaje] = useState('');
+  const [waDestino, setWaDestino] = useState<'cliente' | 'grupo'>('cliente');
+  const [waEditado, setWaEditado] = useState(false);
   const [waEnviando, setWaEnviando] = useState(false);
+  const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
 
-  /** Mensajito de verificación pre-llenado (editable) */
-  const mensajeVerificacion = (foto: FotoHistorial): string =>
-    `📷 *Verificación de entrega*\n\nHola ${foto.nombre}, te comparto la foto de tu pedido entregado ✅${foto.prod ? `\n📦 ${foto.prod}` : ''}\n\n¡Gracias por tu compra! 🙏`;
+  useEffect(() => suscribirEstadoGrupo(setEstadoGrupo), []);
+
+  /** Mensajito pre-llenado según el destino (editable) */
+  const mensajeDestino = (foto: FotoHistorial, destino: 'cliente' | 'grupo'): string =>
+    destino === 'cliente'
+      ? `📷 *Verificación de entrega*\n\nHola ${foto.nombre}, te comparto la foto de tu pedido entregado ✅${foto.prod ? `\n📦 ${foto.prod}` : ''}\n\n¡Gracias por tu compra! 🙏`
+      : `✅ *VERIFICACIÓN DE ENTREGA*\n👤 Cliente: ${foto.nombre}${foto.prod ? `\n📦 Producto: ${foto.prod}` : ''}\n💵 Monto: S/ ${foto.cobrar.toFixed(2)}${foto.dist ? `\n🏘️ Distrito: ${foto.dist}` : ''}${foto.hora ? `\n🕐 Hora: ${foto.hora}` : ''}\n\n📷 Foto adjunta — yo sí he entregado ✅`;
 
   const abrirWhatsApp = (foto: FotoHistorial) => {
-    setWaMensaje(mensajeVerificacion(foto));
+    const destino: 'cliente' | 'grupo' = foto.cel ? 'cliente' : 'grupo';
+    setWaDestino(destino);
+    setWaMensaje(mensajeDestino(foto, destino));
+    setWaEditado(false);
     setWaPanel(true);
+  };
+
+  const cambiarDestino = (foto: FotoHistorial, destino: 'cliente' | 'grupo') => {
+    if (destino === 'cliente' && !foto.cel) return; // sin celular no se puede
+    setWaDestino(destino);
+    if (!waEditado) setWaMensaje(mensajeDestino(foto, destino));
   };
 
   const enviarPorWhatsApp = async (foto: FotoHistorial) => {
     if (waEnviando) return;
+    const mensajito = (waMensaje.trim() || mensajeDestino(foto, waDestino));
     setWaEnviando(true);
     try {
-      const blob = await fotoABlob(foto);
-      await compartirArchivoConTexto(
-        blob,
-        nombreFoto(foto),
-        waMensaje.trim() || mensajeVerificacion(foto),
-        onShowToast,
-        '📲 Foto + mensajito listos',
-      );
-      setWaPanel(false);
-    } catch {
-      // último recurso: compartir la foto sola
-      try {
-        await compartirFoto(foto);
-      } catch {
-        onShowToast?.('❌ No se pudo enviar', 'Intenta con Descargar y adjuntarla en WhatsApp', 'error');
+      if (waDestino === 'cliente') {
+        await enviarFotoGaleriaCliente(foto.cel || '', foto.nombre, foto.url, mensajito);
+        onShowToast?.(
+          '📲 Enviado al cliente',
+          `El bot manda la foto + mensajito a ${foto.nombre} en segundos`,
+          'success'
+        );
+      } else {
+        await enviarFotoGaleriaGrupo(
+          { nombre: foto.nombre, prod: foto.prod, cobrar: foto.cobrar, distrito: foto.dist },
+          foto.url,
+          'VERIFICACIÓN DE ENTREGA',
+          mensajito,
+          { nombre: 'Rudy', telefono: '', empresa: 'MATE' }
+        );
+        onShowToast?.(
+          estadoGrupoVivo(estadoGrupo) ? '📤 Enviado al grupo MATE' : '📤 En cola para el grupo',
+          estadoGrupoVivo(estadoGrupo)
+            ? 'El bot manda la foto + mensajito al grupo en segundos'
+            : 'El bot necesita el parche grupo_mate.js para escribir en el grupo',
+          estadoGrupoVivo(estadoGrupo) ? 'success' : 'warning'
+        );
       }
+      setWaPanel(false);
+    } catch (e: any) {
+      onShowToast?.('❌ No se pudo enviar', e?.message || 'Intenta de nuevo', 'error');
     } finally {
       setWaEnviando(false);
     }
@@ -470,7 +509,7 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
                 </button>
               </div>
 
-              {/* 📲 Fase 3.8: enviar por WhatsApp como IMAGEN + mensajito */}
+              {/* 📲 Fase 3.9: enviar por WhatsApp — elegir destino */}
               <button
                 onClick={() => (waPanel ? setWaPanel(false) : abrirWhatsApp(lightbox))}
                 className="w-full mt-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 text-white text-xs font-black hover:from-emerald-500 hover:to-green-500 transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/40"
@@ -481,26 +520,76 @@ export const GaleriaView: React.FC<GaleriaViewProps> = ({ onShowToast }) => {
 
               {waPanel && (
                 <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+                  {/* Selector de destino */}
                   <div className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
-                    Mensajito que acompaña a la foto
+                    ¿A quién le envío la foto?
                   </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => cambiarDestino(lightbox, 'cliente')}
+                      disabled={!lightbox.cel}
+                      className={`py-2 px-2 rounded-lg border text-[11px] font-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        waDestino === 'cliente'
+                          ? 'bg-emerald-600 border-emerald-400 text-white'
+                          : 'bg-slate-950/60 border-slate-600 text-slate-300 hover:border-emerald-500/50'
+                      }`}
+                    >
+                      👤 Cliente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cambiarDestino(lightbox, 'grupo')}
+                      className={`py-2 px-2 rounded-lg border text-[11px] font-black transition-colors ${
+                        waDestino === 'grupo'
+                          ? 'bg-violet-600 border-violet-400 text-white'
+                          : 'bg-slate-950/60 border-slate-600 text-slate-300 hover:border-violet-500/50'
+                      }`}
+                    >
+                      👥 Grupo MATE
+                    </button>
+                  </div>
+
+                  {/* Detalle del destino */}
+                  {waDestino === 'cliente' ? (
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      {lightbox.cel ? (
+                        <>La foto llega a <b className="text-slate-300">{lightbox.nombre}</b> como <b className="text-slate-300">imagen + mensajito</b> — la manda el bot.</>
+                      ) : (
+                        <>Este cliente no tiene celular guardado — solo puedes enviarla al grupo.</>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      {estadoGrupoVivo(estadoGrupo) ? (
+                        <>🟢 Bot conectado al grupo — la foto llega como <b className="text-slate-300">imagen + mensajito</b>.</>
+                      ) : (
+                        <>🔴 El bot todavía no puede escribir en el grupo (falta instalar el parche <b className="text-slate-300">grupo_mate.js</b>).</>
+                      )}
+                    </p>
+                  )}
+
                   <textarea
                     value={waMensaje}
-                    onChange={(e) => setWaMensaje(e.target.value)}
+                    onChange={(e) => { setWaMensaje(e.target.value); setWaEditado(true); }}
                     rows={4}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-600 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-500/60 resize-none"
                     placeholder="Escribe el mensajito…"
                   />
                   <button
                     onClick={() => enviarPorWhatsApp(lightbox)}
-                    disabled={waEnviando}
+                    disabled={waEnviando || (waDestino === 'cliente' && !lightbox.cel)}
                     className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-black transition-colors flex items-center justify-center gap-2"
                   >
                     {waEnviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
-                    {waEnviando ? 'Preparando…' : 'Enviar foto + mensajito'}
+                    {waEnviando
+                      ? 'Enviando…'
+                      : waDestino === 'cliente'
+                        ? 'Enviar foto al cliente'
+                        : 'Enviar foto al grupo MATE'}
                   </button>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    La foto sale como <b className="text-slate-300">imagen de frente</b> (no como enlace) — elige el chat del cliente en la hoja de compartir.
+                    El mensajito sale como <b className="text-slate-300">texto aparte</b> junto a la foto — igual que los envíos del robot.
                   </p>
                 </div>
               )}
