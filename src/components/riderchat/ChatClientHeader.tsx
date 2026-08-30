@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════════════════
-// 👤 ChatClientHeader — cabecera del chat abierto (Fase 3.15)
+// 👤 ChatClientHeader — cabecera del chat abierto (F3.15 · 3.16)
 // Avatar con paleta por nombre, pill de estado (activo/cerrado/
-// bloqueado), teléfono, abrir en wa.me, llamar y detalles.
+// bloqueado), teléfono, abrir en wa.me, llamar, detalles y el
+// menú ⋮ con FIJAR CHAT + FONDO DEL CHAT (como el Chat Baileys).
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -15,6 +16,9 @@ import {
   Ban,
   Info,
   Check,
+  Pin,
+  Palette,
+  MoreVertical,
 } from 'lucide-react';
 import { ChatRider, EstadoChat } from '../../utils/riderChatUtils';
 import { formatPhoneNumber, getInitials, getAvatarPalette } from '../../utils/riderChatUtils';
@@ -24,6 +28,12 @@ interface ChatClientHeaderProps {
   onBack?: () => void;
   onUpdateStatus?: (status: EstadoChat) => void;
   onToggleInfoPanel?: () => void;
+  /** ¿El chat está fijado? (Fase 3.16) */
+  fijado?: boolean;
+  /** Fija / desfija este chat (Fase 3.16) */
+  onToggleFijado?: () => void;
+  /** Abre el selector de fondo del chat (Fase 3.16) */
+  onAbrirFondo?: () => void;
 }
 
 export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
@@ -31,19 +41,27 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
   onBack,
   onUpdateStatus,
   onToggleInfoPanel,
+  fijado = false,
+  onToggleFijado,
+  onAbrirFondo,
 }) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [showMainMenu, setShowMainMenu] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const statusRef = useRef<HTMLDivElement>(null);
+  const mainMenuRef = useRef<HTMLDivElement>(null);
 
   const whatsappUrl = `https://wa.me/${chat.clientPhone}`;
   const avatarPalette = getAvatarPalette(chat.clientName);
 
-  // Cerrar dropdown al hacer click afuera
+  // Cerrar dropdowns al hacer click afuera
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (statusRef.current && !statusRef.current.contains(event.target as Node)) {
         setShowStatusMenu(false);
+      }
+      if (mainMenuRef.current && !mainMenuRef.current.contains(event.target as Node)) {
+        setShowMainMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -100,8 +118,9 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
 
         {/* Nombre + estado + teléfono */}
         <div className="min-w-0">
-          <h2 className="text-sm sm:text-base font-bold text-white truncate leading-tight">
-            {chat.clientName}
+          <h2 className="text-sm sm:text-base font-bold text-white truncate leading-tight flex items-center gap-1.5">
+            <span className="truncate">{chat.clientName}</span>
+            {fijado && <Pin className="w-3.5 h-3.5 text-emerald-400 shrink-0 rotate-45" title="Chat fijado" />}
           </h2>
 
           {/* Fila 2: pill de estado + teléfono (el pill ya dice el estado,
@@ -182,7 +201,7 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
         </a>
         <a
           href={`tel:+${chat.clientPhone}`}
-          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors"
+          className="hidden sm:block p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors"
           title="Llamar por teléfono"
         >
           <Phone className="w-4 h-4" />
@@ -194,6 +213,53 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
         >
           <Info className="w-4 h-4" />
         </button>
+
+        {/* Menú ⋮ — Fijar chat + Fondo del chat (Fase 3.16, como el Chat Baileys) */}
+        <div className="relative" ref={mainMenuRef}>
+          <button
+            onClick={() => setShowMainMenu(!showMainMenu)}
+            className={`p-2 rounded-full transition-colors ${
+              showMainMenu
+                ? 'bg-emerald-600 text-white'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Más opciones"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+          {showMainMenu && (
+            <div className="absolute right-0 top-full mt-1 w-52 bg-slate-800 rounded-2xl shadow-xl border border-slate-700 py-1.5 z-30">
+              <button
+                onClick={() => {
+                  onToggleFijado?.();
+                  setShowMainMenu(false);
+                }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-slate-200 hover:bg-slate-700/50 font-medium text-left"
+              >
+                <Pin className={`w-4 h-4 shrink-0 ${fijado ? 'text-emerald-400' : 'text-slate-300'}`} />
+                <span>{fijado ? 'Quitar de fijados' : 'Fijar chat'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  onAbrirFondo?.();
+                  setShowMainMenu(false);
+                }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-slate-200 hover:bg-slate-700/50 font-medium text-left"
+              >
+                <Palette className="w-4 h-4 shrink-0 text-violet-300" />
+                <span>Fondo del chat</span>
+              </button>
+              <div className="mx-3 my-1 border-t border-slate-700/60" />
+              <a
+                href={`tel:+${chat.clientPhone}`}
+                className="sm:hidden w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-slate-200 hover:bg-slate-700/50 font-medium"
+              >
+                <Phone className="w-4 h-4 shrink-0 text-slate-300" />
+                <span>Llamar por teléfono</span>
+              </a>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

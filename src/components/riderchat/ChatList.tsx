@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-// 📋 ChatList — lista de conversaciones (Fase 3.15)
+// 📋 ChatList — lista de conversaciones (Fase 3.15 · 3.16)
 // Búsqueda, tabs de estado (todos/activos/cerrados/bloqueados),
-// badges de no leídos con pulso y avatar con paleta por nombre.
+// badges de no leídos con pulso, avatar con paleta por nombre y
+// CHATS FIJADOS: sección propia arriba + botón 📌 en cada fila
+// (igual que el Chat Baileys / WhatsApp).
 // ═══════════════════════════════════════════════════════════
 
 import React from 'react';
-import { Search, X, Plus, MessageSquare, Image as ImageIcon, FileText, MapPin, Tag, Rocket } from 'lucide-react';
+import { Search, X, Plus, MessageSquare, Image as ImageIcon, FileText, MapPin, Tag, Rocket, Pin, PinOff } from 'lucide-react';
 import { ChatRider, FiltrosChat } from '../../utils/riderChatUtils';
 import { formatMessageTime, getInitials, truncateText, getAvatarPalette } from '../../utils/riderChatUtils';
 
@@ -19,6 +21,10 @@ interface ChatListProps {
   onFilterChange: (newFilter: FiltrosChat) => void;
   isLoading?: boolean;
   modoDemo?: boolean;
+  /** Teléfonos fijados (Fase 3.16) */
+  fijados: Set<string>;
+  /** Fija / desfija desde la fila de la lista */
+  onToggleFijado: (phone: string) => void;
 }
 
 export const ChatList: React.FC<ChatListProps> = ({
@@ -31,24 +37,11 @@ export const ChatList: React.FC<ChatListProps> = ({
   onFilterChange,
   isLoading = false,
   modoDemo = false,
+  fijados,
+  onToggleFijado,
 }) => {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onFilterChange({ ...filter, search: e.target.value });
-  };
-
-  const iconoTipoMensaje = (type?: string) => {
-    switch (type) {
-      case 'image':
-        return <ImageIcon className="w-3.5 h-3.5 text-emerald-400 inline mr-1 shrink-0" />;
-      case 'audio':
-        return <MessageSquare className="w-3.5 h-3.5 text-emerald-400 inline mr-1 shrink-0" />;
-      case 'document':
-        return <FileText className="w-3.5 h-3.5 text-blue-400 inline mr-1 shrink-0" />;
-      case 'location':
-        return <MapPin className="w-3.5 h-3.5 text-red-400 inline mr-1 shrink-0" />;
-      default:
-        return null;
-    }
   };
 
   return (
@@ -131,8 +124,8 @@ export const ChatList: React.FC<ChatListProps> = ({
         </div>
       </div>
 
-      {/* Conversaciones */}
-      <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60">
+      {/* Conversaciones — fijados arriba (sección propia) y el resto abajo */}
+      <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex justify-center py-10">
             <div className="animate-spin w-7 h-7 border-2 border-emerald-500 border-t-transparent rounded-full" />
@@ -143,81 +136,162 @@ export const ChatList: React.FC<ChatListProps> = ({
             <p className="text-xs mt-1">Crea un chat nuevo con el botón + o manda un broadcast.</p>
           </div>
         ) : (
-          chats.map((chat) => {
-            const isSelected = activePhone === chat.clientPhone;
-            const palette = getAvatarPalette(chat.clientName);
-            const unread = chat.unreadCount > 99 ? '99+' : chat.unreadCount;
-
+          (() => {
+            const fijadosList = chats.filter((c) => fijados.has(c.clientPhone));
+            const resto = chats.filter((c) => !fijados.has(c.clientPhone));
             return (
-              <div
-                key={chat.clientPhone}
-                onClick={() => onSelectChat(chat.clientPhone)}
-                className={`flex items-start gap-3 p-3.5 cursor-pointer transition-colors ${
-                  isSelected
-                    ? 'bg-emerald-500/10 border-l-4 border-emerald-500'
-                    : 'hover:bg-slate-800/60 border-l-4 border-transparent'
-                }`}
-              >
-                {/* Avatar */}
-                <div className="relative shrink-0">
-                  {chat.avatar ? (
-                    <img
-                      src={chat.avatar}
-                      alt={chat.clientName}
-                      className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div
-                      className={`w-12 h-12 rounded-full ${palette.bg} ${palette.text} font-bold text-sm flex items-center justify-center border-2 ${palette.border}`}
-                    >
-                      {getInitials(chat.clientName)}
-                    </div>
-                  )}
-
-                  {chat.status === 'active' && (
-                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full ring-2 ring-slate-900" />
-                  )}
-
-                  {/* No leídos */}
-                  {chat.unreadCount > 0 && (
-                    <div className="absolute -top-1 -right-1 z-20 flex items-center justify-center">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                      <span className="relative inline-flex items-center justify-center bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full shadow-md border-2 border-slate-900">
-                        {unread}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Contenido */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-xs sm:text-sm font-bold text-white truncate">{chat.clientName}</h3>
-                    <span className="text-[10px] text-slate-500 shrink-0 font-medium ml-1">
-                      {formatMessageTime(chat.lastMessageTime)}
-                    </span>
+              <>
+                {fijadosList.length > 0 && (
+                  <div className="px-4 pt-3 pb-1 text-[10px] font-black uppercase tracking-wider text-emerald-400/90 flex items-center gap-1.5">
+                    <Pin className="w-3 h-3 rotate-45" /> Fijados · {fijadosList.length}
                   </div>
-
-                  <p className="text-xs text-slate-400 truncate flex items-center">
-                    {iconoTipoMensaje(chat.lastMessageType)}
-                    <span>{truncateText(chat.lastMessage, 34)}</span>
-                  </p>
-
-                  {chat.tags && chat.tags.length > 0 && (
-                    <div className="flex items-center gap-1 mt-1.5">
-                      <Tag className="w-3 h-3 text-slate-500 shrink-0" />
-                      <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium truncate max-w-32 border border-slate-700/60">
-                        {chat.tags[0]}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
+                )}
+                {fijadosList.map((chat) => (
+                  <ItemChat
+                    key={`f-${chat.clientPhone}`}
+                    chat={chat}
+                    isSelected={activePhone === chat.clientPhone}
+                    fijado={true}
+                    onSelectChat={onSelectChat}
+                    onToggleFijado={onToggleFijado}
+                  />
+                ))}
+                {fijadosList.length > 0 && resto.length > 0 && (
+                  <div className="mx-4 my-2 border-t border-slate-800" />
+                )}
+                {resto.length > 0 && fijadosList.length > 0 && (
+                  <div className="px-4 pt-1 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                    Todos los chats · {resto.length}
+                  </div>
+                )}
+                {resto.map((chat) => (
+                  <ItemChat
+                    key={chat.clientPhone}
+                    chat={chat}
+                    isSelected={activePhone === chat.clientPhone}
+                    fijado={false}
+                    onSelectChat={onSelectChat}
+                    onToggleFijado={onToggleFijado}
+                  />
+                ))}
+              </>
             );
-          })
+          })()
         )}
       </div>
+    </div>
+  );
+};
+
+/** Fila de conversación (con botón 📌 para fijar sin abrir el chat) */
+const ItemChat: React.FC<{
+  chat: ChatRider;
+  isSelected: boolean;
+  fijado: boolean;
+  onSelectChat: (phone: string) => void;
+  onToggleFijado: (phone: string) => void;
+}> = ({ chat, isSelected, fijado, onSelectChat, onToggleFijado }) => {
+  const iconoTipoMensaje = (type?: string) => {
+    switch (type) {
+      case 'image':
+        return <ImageIcon className="w-3.5 h-3.5 text-emerald-400 inline mr-1 shrink-0" />;
+      case 'audio':
+        return <MessageSquare className="w-3.5 h-3.5 text-emerald-400 inline mr-1 shrink-0" />;
+      case 'document':
+        return <FileText className="w-3.5 h-3.5 text-blue-400 inline mr-1 shrink-0" />;
+      case 'location':
+        return <MapPin className="w-3.5 h-3.5 text-red-400 inline mr-1 shrink-0" />;
+      default:
+        return null;
+    }
+  };
+
+  const palette = getAvatarPalette(chat.clientName);
+  const unread = chat.unreadCount > 99 ? '99+' : chat.unreadCount;
+
+  return (
+    <div
+      onClick={() => onSelectChat(chat.clientPhone)}
+      className={`group/row flex items-start gap-3 p-3.5 cursor-pointer transition-colors ${
+        isSelected
+          ? 'bg-emerald-500/10 border-l-4 border-emerald-500'
+          : 'hover:bg-slate-800/60 border-l-4 border-transparent'
+      }`}
+    >
+      {/* Avatar */}
+      <div className="relative shrink-0">
+        {chat.avatar ? (
+          <img
+            src={chat.avatar}
+            alt={chat.clientName}
+            className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40"
+            loading="lazy"
+          />
+        ) : (
+          <div
+            className={`w-12 h-12 rounded-full ${palette.bg} ${palette.text} font-bold text-sm flex items-center justify-center border-2 ${palette.border}`}
+          >
+            {getInitials(chat.clientName)}
+          </div>
+        )}
+
+        {chat.status === 'active' && (
+          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full ring-2 ring-slate-900" />
+        )}
+
+        {/* No leídos */}
+        {chat.unreadCount > 0 && (
+          <div className="absolute -top-1 -right-1 z-20 flex items-center justify-center">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex items-center justify-center bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full shadow-md border-2 border-slate-900">
+              {unread}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Contenido */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xs sm:text-sm font-bold text-white truncate flex items-center gap-1 min-w-0">
+            <span className="truncate">{chat.clientName}</span>
+            {fijado && <Pin className="w-3 h-3 text-emerald-400 shrink-0 rotate-45" />}
+          </h3>
+          <span className="text-[10px] text-slate-500 shrink-0 font-medium ml-1">
+            {formatMessageTime(chat.lastMessageTime)}
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-400 truncate flex items-center">
+          {iconoTipoMensaje(chat.lastMessageType)}
+          <span>{truncateText(chat.lastMessage, 34)}</span>
+        </p>
+
+        {chat.tags && chat.tags.length > 0 && (
+          <div className="flex items-center gap-1 mt-1.5">
+            <Tag className="w-3 h-3 text-slate-500 shrink-0" />
+            <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium truncate max-w-32 border border-slate-700/60">
+              {chat.tags[0]}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Botón fijar / desfijar (no abre el chat) */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleFijado(chat.clientPhone);
+        }}
+        className={`p-1.5 rounded-full transition-all shrink-0 self-center ${
+          fijado
+            ? 'text-emerald-400 bg-emerald-500/10'
+            : 'text-slate-600 hover:text-amber-300 opacity-60 sm:opacity-40 group-hover/row:opacity-100 hover:bg-amber-500/10'
+        }`}
+        title={fijado ? 'Quitar de fijados' : 'Fijar chat (se queda arriba de la lista)'}
+      >
+        {fijado ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+      </button>
     </div>
   );
 };

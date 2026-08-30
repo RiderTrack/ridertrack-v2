@@ -1,11 +1,20 @@
 // ═══════════════════════════════════════════════════════════
-// 💬 RiderChatView — el RiderChat acoplado al panel (F3.15)
+// 💬 RiderChatView — el RiderChat acoplado al panel (F3.15 · 3.16)
 //
 // La app RiderChat V2 completa vive aquí: lista de chats +
 // ventana de conversación + plantillas aprobadas de Meta +
 // broadcast a la ruta activa. Mismas colecciones Firestore que
 // el RiderChat original (chats/) → lo que mandes de un lado se
 // ve en el otro.
+//
+// FASE 3.16 — nivel WhatsApp Web (como el Chat Baileys):
+//   ✅ CHATS FIJADOS: sección propia arriba + botón 📌 en cada
+//      fila y en el menú ⋮ del chat abierto
+//   ✅ FONDO DEL CHAT personalizable: 8 presets + Mi foto
+//   ✅ MENSAJES RÁPIDOS DESPLEGABLES: la pastilla ⚡ Rápido
+//      reemplaza las tiras fijas (plantillas + sugerencias)
+//   ✅ polish profesional: aviso ventana 24 h de Meta, emojis,
+//      cabecera con menú ⋮ ordenado
 //
 // La credencial es la MISMA de ⚙️ Configuración → WhatsApp
 // Oficial (config_empresa, compartida entre dispositivos). Sin
@@ -32,12 +41,20 @@ import {
   FiltrosChat,
   MediaMensaje,
   EstadoChat,
+  FondoChatRider,
   leerBorrador,
   guardarBorrador,
   leerChatActivo,
   guardarChatActivo,
   leerPlantillasRapidas,
   guardarPlantillasRapidas,
+  leerFijadosRider,
+  toggleFijadoRider,
+  ordenarChatsConFijados,
+  leerFondoChatRider,
+  guardarFondoChatRider,
+  leerRapidoAbierto,
+  guardarRapidoAbierto,
 } from '../../utils/riderChatUtils';
 import {
   sendWhatsAppMessage,
@@ -63,6 +80,7 @@ import { ChatWindow } from './ChatWindow';
 import { NewChatModal } from './NewChatModal';
 import { QuickTemplatesModal } from './QuickTemplatesModal';
 import { BroadcastModal } from './BroadcastModal';
+import { FondoChatModal } from './FondoChatModal';
 import { WhatsAppApiModal } from '../WhatsAppApiModal';
 
 interface RiderChatViewProps {
@@ -106,11 +124,17 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
   );
   const [filter, setFilter] = useState<FiltrosChat>({ search: '', status: 'all', sortBy: 'recent' });
 
+  // Fase 3.16 — fijados, fondo y panel rápido desplegable
+  const [fijados, setFijados] = useState<Set<string>>(() => leerFijadosRider());
+  const [fondo, setFondo] = useState<FondoChatRider>(() => leerFondoChatRider());
+  const [rapidoAbierto, setRapidoAbierto] = useState<boolean>(() => leerRapidoAbierto());
+
   // Modales
   const [showNewChat, setShowNewChat] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showFondo, setShowFondo] = useState(false);
 
   // ── Suscripción a la lista de chats ──────────────────────
   useEffect(() => {
@@ -176,22 +200,54 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
     [chats, activePhone]
   );
 
-  // Lista filtrada
+  // Lista filtrada — con los FIJADOS arriba (Fase 3.16)
   const chatsFiltrados = useMemo(
     () =>
-      chats.filter((chat) => {
-        if (filter.status !== 'all' && chat.status !== filter.status) return false;
-        if (filter.search.trim()) {
-          const q = filter.search.toLowerCase().trim();
-          const nombre = chat.clientName.toLowerCase().includes(q);
-          const tel = chat.clientPhone.includes(q);
-          const tags = chat.tags?.some((t) => t.toLowerCase().includes(q));
-          return nombre || tel || tags;
-        }
-        return true;
-      }),
-    [chats, filter]
+      ordenarChatsConFijados(
+        chats.filter((chat) => {
+          if (filter.status !== 'all' && chat.status !== filter.status) return false;
+          if (filter.search.trim()) {
+            const q = filter.search.toLowerCase().trim();
+            const nombre = chat.clientName.toLowerCase().includes(q);
+            const tel = chat.clientPhone.includes(q);
+            const tags = chat.tags?.some((t) => t.toLowerCase().includes(q));
+            return nombre || tel || tags;
+          }
+          return true;
+        }),
+        fijados
+      ),
+    [chats, filter, fijados]
   );
+
+  // ── Fase 3.16: fijar / desfijar un chat ────────────────
+  const handleToggleFijado = useCallback(
+    (phone: string) => {
+      const nombreChat = chats.find((c) => c.clientPhone === phone)?.clientName || phone;
+      const ahoraFijado = toggleFijadoRider(phone);
+      setFijados(leerFijadosRider());
+      onShowToast?.(
+        ahoraFijado ? '📌 Chat fijado' : '📌 Fijado quitado',
+        ahoraFijado
+          ? `${nombreChat} se queda arriba de la lista`
+          : `${nombreChat} vuelve a su orden normal`,
+        'info'
+      );
+    },
+    [chats, onShowToast]
+  );
+
+  // ── Fase 3.16: aplicar fondo ───────────────────────────
+  const handleAplicarFondo = useCallback((nuevoFondo: FondoChatRider) => {
+    guardarFondoChatRider(nuevoFondo);
+    setFondo(nuevoFondo);
+  }, []);
+
+  // ── Fase 3.16: plegar / desplegar el panel rápido ──────
+  const handleToggleRapido = useCallback((abierto: boolean) => {
+    setRapidoAbierto(abierto);
+    guardarRapidoAbierto(abierto);
+  }, []);
 
   const selectChat = useCallback(async (phone: string) => {
     setActivePhone(phone);
@@ -478,7 +534,7 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2 flex-wrap">
               Rider Chat — WhatsApp Oficial
               <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">
-                FASE 3.15
+                FASE 3.16
               </span>
             </h1>
             <p className="text-xs text-slate-400">
@@ -551,6 +607,8 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             onFilterChange={setFilter}
             isLoading={isLoadingChats}
             modoDemo={modoDemo}
+            fijados={fijados}
+            onToggleFijado={handleToggleFijado}
           />
         </div>
 
@@ -576,6 +634,12 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             isSending={isSending}
             isLoadingMessages={isLoadingMessages}
             modoDemo={modoDemo}
+            fondo={fondo}
+            fijado={activePhone ? fijados.has(activePhone) : false}
+            onToggleFijado={() => activePhone && handleToggleFijado(activePhone)}
+            onAbrirFondo={() => setShowFondo(true)}
+            rapidoAbierto={rapidoAbierto}
+            onToggleRapido={handleToggleRapido}
           />
         </div>
       </div>
@@ -599,6 +663,14 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
         onClose={() => setShowBroadcast(false)}
         config={credencial}
         clientes={clientes}
+        onShowToast={onShowToast}
+      />
+
+      <FondoChatModal
+        isOpen={showFondo}
+        onClose={() => setShowFondo(false)}
+        fondoActual={fondo}
+        onAplicar={handleAplicarFondo}
         onShowToast={onShowToast}
       />
 
