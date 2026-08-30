@@ -36,6 +36,26 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # ══════════════════════════════════════════════════════════════════
+      # 🛡️ ANTI-429 — Maven Central (repo.maven.apache.org) limita las
+      # peticiones de los servidores compartidos de GitHub y el build muere
+      # con "429 Too Many Requests". Protección en 4 capas:
+      #   1) Espejos Maven (Aliyun + Tencent) ANTES de mavenCentral()
+      #   2) Reintentos de red de Gradle (429/503 → espera y reintenta)
+      #   3) Caché de dependencias (tras el 1er build verde, ya no descarga)
+      #   4) Reintento completo del build tras 90 s si algo más falla
+      # ══════════════════════════════════════════════════════════════════
+
+      - name: "[Anti-429 1/4] Caché de dependencias Gradle"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-v1
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps react-is
 
@@ -75,6 +95,31 @@ jobs:
             echo 'apply plugin: "com.google.gms.google-services"' >> "$APP_GRADLE"
           fi
 
+      - name: "[Anti-429 2/4] Espejos Maven en build.gradle (Aliyun + Tencent antes de mavenCentral)"
+        run: |
+          BG="android/build.gradle"
+          if ! grep -q "maven.aliyun.com" "$BG"; then
+            # Inserta los espejos DESPUÉS de google() (confiable) y ANTES de
+            # mavenCentral() (el que responde 429) en buildscript y allprojects
+            sed -i "/^[[:space:]]*google()$/a\        maven { url 'https://maven.aliyun.com/repository/central' }\n        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }" "$BG"
+            echo "✅ Espejos insertados en build.gradle (buildscript + allprojects)"
+          else
+            echo "✅ Espejos ya presentes en build.gradle"
+          fi
+          echo "### 🛡️ Anti-429: repositorios del build" >> $GITHUB_STEP_SUMMARY
+          echo '```gradle' >> $GITHUB_STEP_SUMMARY
+          sed -n '/buildscript {/,/^}/p' "$BG" | head -20 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "[Anti-429 3/4] Reintentos de red en gradle.properties"
+        run: |
+          GP="android/gradle.properties"
+          touch "$GP"
+          if ! grep -q "org.gradle.internal.repository.max.retries" "$GP"; then
+            printf '\n# Reintentos ante 429/503 de repos Maven (GitHub Actions)\nsystemProp.org.gradle.internal.repository.max.retries=3\nsystemProp.org.gradle.internal.repository.initial.backoff=1000\n' >> "$GP"
+          fi
+          echo "✅ Reintentos de red activados (3 intentos, backoff 1 s)"
+
       - name: Configure GoogleAuth plugin
         run: |
           mkdir -p android/app/src/main/res/values
@@ -90,33 +135,17 @@ jobs:
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <application|' "$MANIFEST"
 
-      # 🎵 Fase 3.11: deep link ridertrack://callback de Spotify —
-      # sin este filtro el login de Spotify NO puede volver a la app
-      # (misma técnica del filtro LAUNCHER: se agrega como filtro hermano)
-      - name: Add Spotify deep link (ridertrack://)
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q 'android:scheme="ridertrack"' "$MANIFEST"; then
-            sed -i '/android.intent.category.LAUNCHER/,/<\/intent-filter>/{
-          /<\/intent-filter>/a\
-                      <intent-filter>\
-                          <action android:name="android.intent.action.VIEW" />\
-                          <category android:name="android.intent.category.DEFAULT" />\
-                          <category android:name="android.intent.category.BROWSABLE" />\
-                          <data android:scheme="ridertrack" />\
-                      </intent-filter>
-          }' "$MANIFEST"
-            echo "✅ Deep link ridertrack:// agregado al manifest"
-          else
-            echo "✅ Deep link ridertrack:// ya existía"
-          fi
-
       - name: Set Gradle permissions
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Build Debug APK (con reintento automático)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          if ! ./gradlew assembleDebug --no-daemon; then
+            echo "⚠️ Primer intento falló (suele ser el 429 de Maven Central) — esperando 90 s y reintentando…"
+            sleep 90
+            ./gradlew assembleDebug --no-daemon
+          fi
 
       - name: Restore or generate keystore
         run: |
