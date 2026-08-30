@@ -118,4 +118,8 @@ export interface AppNotification {
   tiempo: string;
   leido: boolean;
   tipo: 'order' | 'driver' | 'whatsapp' | 'system';
+  /** Fase 3.17: si viene de un chat, lleva canal + teléfono —
+   *  la notificación se vuelve CLICKEABLE y te lleva al chat */
+  canalChat?: 'baileys' | 'meta';
+  telChat?: string;
 }

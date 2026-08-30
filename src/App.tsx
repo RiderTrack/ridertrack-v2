@@ -29,6 +29,16 @@ import { MediosProvider } from './components/medios/MediosProvider';
 import { MiniPlayerReproductor } from './components/medios/MiniPlayerReproductor';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
+// Fase 3.17: avisos globales de chat (campanita + toast flotante)
+import { AvisoChatToast } from './components/AvisoChatToast';
+import {
+  iniciarAvisosChat,
+  suscribirAvisos,
+  AvisoChat,
+  CanalChat,
+  formatearTiempoAviso,
+} from './services/avisosChat';
+import { sonarMensaje } from './services/notificaciones';
 import { useAuth } from './hooks/useAuth';
 import { useClientes } from './hooks/useClientes';
 import { LoginScreen } from './components/LoginScreen';
@@ -185,6 +195,80 @@ export default function App() {
   // Fase 3.15: no leídos del Rider Chat (WhatsApp Oficial) → badge del menú
   const [riderChatNoLeidos, setRiderChatNoLeidos] = useState(0);
 
+  // ═════════════════════════════════════════
+  // 🔔 Fase 3.17: AVISOS GLOBALES DE CHAT — aunque estés en Mi Ruta,
+  // Pedidos o donde sea, si un cliente te escribe al Chat Baileys
+  // o al Rider Chat (Meta) aparece: toast flotante con "Ver chat",
+  // notificación en la campanita del header y sonido.
+  // ═════════════════════════════════════════
+  const [avisosFlotantes, setAvisosFlotantes] = useState<AvisoChat[]>([]);
+  const [notifsChat, setNotifsChat] = useState<AppNotification[]>([]);
+  // chat que la app debe abrir en cuanto se monte la vista del canal
+  const [chatPendiente, setChatPendiente] = useState<{ canal: CanalChat; tel: string } | null>(null);
+  // qué chat está abierto en cada vista (para NO avisar lo que ya ves)
+  const [chatActivoPorCanal, setChatActivoPorCanal] = useState<Partial<Record<CanalChat, string | null>>>({});
+
+  // Refs de activeTab/chatActivo para leerlos dentro del handler
+  // del aviso sin re-arrancar la suscripción en cada cambio
+  const activeTabRef = useRef<NavigationTab>(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  const chatActivoPorCanalRef = useRef(chatActivoPorCanal);
+  useEffect(() => {
+    chatActivoPorCanalRef.current = chatActivoPorCanal;
+  }, [chatActivoPorCanal]);
+
+  useEffect(() => {
+    if (!user) return;
+    iniciarAvisosChat();
+    return suscribirAvisos((aviso) => {
+      // 1) Notificación de la campanita (arriba de la lista)
+      setNotifsChat((prev) =>
+        [
+          {
+            id: 'NCHAT-' + aviso.id,
+            titulo: `💬 ${aviso.nombre}`,
+            mensaje: aviso.texto,
+            tiempo: formatearTiempoAviso(aviso.timestamp),
+            leido: false,
+            tipo: 'whatsapp' as const,
+            canalChat: aviso.canal,
+            telChat: aviso.tel,
+          },
+          ...prev,
+        ].slice(0, 8)
+      );
+      setNotificacionesLeidas(false);
+
+      // 2) ¿Está viendo ESTE chat ahora? → ni toast ni sonido
+      const tabDelCanal: NavigationTab = aviso.canal === 'baileys' ? 'whatsapp' : 'chatapi';
+      const viendoEsteChat =
+        activeTabRef.current === tabDelCanal && chatActivoPorCanalRef.current[aviso.canal] === aviso.tel;
+      if (viendoEsteChat) return;
+
+      // 3) Toast flotante con "Ver chat" (máx 3, los más recientes)
+      setAvisosFlotantes((prev) => [...prev, aviso].slice(-3));
+      const idAviso = aviso.id;
+      setTimeout(() => {
+        setAvisosFlotantes((prev) => prev.filter((a) => a.id !== idAviso));
+      }, 9000);
+
+      // 4) Sonido solo si NO estás en la pestaña del chat (la vista
+      //    ya suena por su lado cuando está abierta — sin doble beep)
+      if (activeTabRef.current !== tabDelCanal) {
+        sonarMensaje();
+      }
+    });
+  }, [user]);
+
+  /** Ver un aviso (toast o campanita): pestaña del canal + abrir el chat */
+  const handleVerAvisoChat = (canal: CanalChat, tel: string) => {
+    setChatPendiente({ canal, tel });
+    setActiveTab(canal === 'baileys' ? 'whatsapp' : 'chatapi');
+    setIsMobileMenuOpen(false);
+  };
+
   // Actividades en vivo (eventos de esta sesión, se fusionan con las derivadas)
   const [liveActivities, setLiveActivities] = useState<ActivityItem[]>([]);
   const [notificacionesLeidas, setNotificacionesLeidas] = useState(false);
@@ -301,8 +385,13 @@ export default function App() {
 
   const notifications = useMemo<AppNotification[]>(() => {
     const base = construirNotificaciones(clientes, stats);
-    return notificacionesLeidas ? base.map((n) => ({ ...n, leido: true })) : base;
-  }, [clientes, stats, notificacionesLeidas]);
+    const baseFinal = notificacionesLeidas ? base.map((n) => ({ ...n, leido: true })) : base;
+    // Fase 3.17: los mensajes de chat van PRIMERO (lo más fresco)
+    const chatFinal = notificacionesLeidas
+      ? notifsChat.map((n) => ({ ...n, leido: true }))
+      : notifsChat;
+    return [...chatFinal, ...baseFinal];
+  }, [clientes, stats, notificacionesLeidas, notifsChat]);
 
   const pendientesCount = stats.pendientes;
 
@@ -576,6 +665,9 @@ export default function App() {
         onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
         notifications={notifications}
         onMarkNotificationsRead={handleMarkNotificationsRead}
+        onNotificationClick={(n) => {
+          if (n.canalChat && n.telChat) handleVerAvisoChat(n.canalChat, n.telChat);
+        }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onShowToast={showToast}
@@ -692,19 +784,36 @@ export default function App() {
           {/* Fase 3.1: 🤖 Chat de Baileys estilo WhatsApp Web — todo lo que el
               robot envía y recibe (chats, broadcasts, pedidos de ubicación).
               Fase 3.3: fotos de perfil reales, notas de voz, botones rápidos,
-              fijar/borrar chat, fondos y el Grupo MATE de trabajo. */}
-          {activeTab === 'whatsapp' && <ChatBaileysView onShowToast={showToast} />}
+              fijar/borrar chat, fondos y el Grupo MATE de trabajo.
+              Fase 3.17: abre un chat puntual desde la campanita / aviso flotante. */}
+          {activeTab === 'whatsapp' && (
+            <ChatBaileysView
+              onShowToast={showToast}
+              abrirChatTel={chatPendiente?.canal === 'baileys' ? chatPendiente.tel : undefined}
+              onAbrirChatConsumido={() => setChatPendiente(null)}
+              onActiveChatChange={(tel) =>
+                setChatActivoPorCanal((prev) => ({ ...prev, baileys: tel }))
+              }
+            />
+          )}
 
           {/* Fase 3.15: 💬 RiderChat OFICIAL acoplado al panel — la app
               RiderChat V2 completa (lista, chat, plantillas aprobadas de
               Meta, broadcast a la ruta) corriendo con la MISMA credencial
               de ⚙️ Configuración → WhatsApp Oficial. Sin credencial arranca
-              en MODO DEMO (envíos simulados). */}
+              en MODO DEMO (envíos simulados).
+              Fase 3.17: abre un chat puntual desde la campanita / aviso
+              flotante + fotos de perfil reales de clientes_registrados. */}
           {activeTab === 'chatapi' && (
             <RiderChatView
               onShowToast={showToast}
               clientes={clientes}
               onUnreadChange={setRiderChatNoLeidos}
+              abrirChatTel={chatPendiente?.canal === 'meta' ? chatPendiente.tel : undefined}
+              onAbrirChatConsumido={() => setChatPendiente(null)}
+              onActiveChatChange={(tel) =>
+                setChatActivoPorCanal((prev) => ({ ...prev, meta: tel }))
+              }
             />
           )}
 
@@ -751,6 +860,17 @@ export default function App() {
 
       {/* Toast Notifications Overlay */}
       <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
+
+      {/* 🔔 Fase 3.17: avisos flotantes de chat — "te escribieron" con
+          botón Ver chat, funciona desde CUALQUIER pestaña */}
+      <AvisoChatToast
+        avisos={avisosFlotantes}
+        onVer={(aviso) => {
+          handleVerAvisoChat(aviso.canal, aviso.tel);
+          setAvisosFlotantes((prev) => prev.filter((a) => a.id !== aviso.id));
+        }}
+        onCerrar={(id) => setAvisosFlotantes((prev) => prev.filter((a) => a.id !== id))}
+      />
 
       {/* ⏱️ Nota: el cronómetro de ruta vive en Mi Ruta (CronometroRuta
           Fase 2.2) — integrado arriba de la lista de clientes, con
