@@ -173,3 +173,9 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.7);
 }
+
+/* ═══ Fase 3.11: Medios — ecualizador del mini-reproductor ═══ */
+@keyframes rtEq {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
+}

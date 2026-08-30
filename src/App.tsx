@@ -22,6 +22,9 @@ import { ResumenView } from './components/ResumenView';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
 import { MediosView } from './components/MediosView';
+// Fase 3.11: Medios — radio/Spotify/YouTube globales (siguen sonando al cambiar de pestaña)
+import { MediosProvider } from './components/medios/MediosProvider';
+import { MiniPlayerReproductor } from './components/medios/MiniPlayerReproductor';
 import { NewOrderModal } from './components/NewOrderModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useAuth } from './hooks/useAuth';
@@ -557,6 +560,7 @@ export default function App() {
   }
 
   return (
+    <MediosProvider onShowToast={showToast}>
     <div
       className="min-h-screen bg-slate-950 text-slate-100 font-sans transition-colors duration-200"
     >
@@ -767,6 +771,11 @@ export default function App() {
         onClose={() => setNewOrderModalOpen(false)}
         onCreateOrder={handleCreateOrder}
       />
+
+      {/* 🎵 Fase 3.11: mini-reproductor global (radio/Spotify/YouTube) —
+          acompaña en todas las pestañas; grande cuando estás en Medios */}
+      <MiniPlayerReproductor mediosVisible={activeTab === 'medios'} />
     </div>
+    </MediosProvider>
   );
 }
