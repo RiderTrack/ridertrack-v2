@@ -39,9 +39,12 @@ import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
 import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
-import { Flag, MapPinned, ClipboardList, Copy, Check, Bike } from 'lucide-react';
+import { Flag, MapPinned, ClipboardList, Copy, Check, Bike, Navigation as NavigationIcon } from 'lucide-react';
 // Fase 2.8: exportación a la app Circuit (formato de importación)
 import { exportarCircuitRuta } from '../utils/exportarExcel';
+// Fase 3.12: navegación GPS propia con voz (modal de pantalla completa)
+import { NavegacionGpsModal } from './navegacion/NavegacionGpsModal';
+import type { ParadaNav } from '../services/navegacionGps';
 // Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
 import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
 // Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
@@ -137,6 +140,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
   // Estado para modal de foto de entrega
   const [fotoEntregaCliente, setFotoEntregaCliente] = useState<Cliente | null>(null);
+
+  // 🧭 (Fase 3.12) Navegación GPS propia con voz
+  const [navGpsAbierto, setNavGpsAbierto] = useState(false);
+  const [navGpsParadas, setNavGpsParadas] = useState<ParadaNav[]>([]);
 
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
@@ -580,6 +587,45 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     );
   }
 
+  // 🧭 (Fase 3.12) Abrir la navegación GPS con voz: arma las
+  // paradas pendientes ORDENADAS por nº de ruta (las que ya
+  // tienen coordenada) y suelta el modal a pantalla completa.
+  const abrirNavegacionGps = () => {
+    const pendientes = clientes
+      .filter(
+        (c) =>
+          (c.st === 'pendiente' || !c.st) &&
+          typeof c.lat === 'number' &&
+          typeof c.lng === 'number' &&
+          !isNaN(c.lat!) &&
+          !isNaN(c.lng!)
+      )
+      .sort((a, b) => (a.num ?? 999) - (b.num ?? 999));
+
+    if (pendientes.length === 0) {
+      onShowToast?.(
+        '🧭 Sin paradas para navegar',
+        'Necesitas al menos 1 cliente PENDIENTE con ubicación (usa "Ruta" para ubicarlos primero)',
+        'warning'
+      );
+      return;
+    }
+
+    const paradas: ParadaNav[] = pendientes.map((c) => ({
+      id: c.id,
+      num: c.num ?? 0,
+      nombre: c.nombre,
+      dir: c.dir,
+      dist: c.dist,
+      cobrar: c.cobrar || 0,
+      lat: c.lat!,
+      lng: c.lng!,
+    }));
+
+    setNavGpsParadas(paradas);
+    setNavGpsAbierto(true);
+  };
+
   return (
     <div className="space-y-3 pb-12">
       {/* Hidden file input */}
@@ -607,12 +653,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               {new Date().toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} · {stats.total} clientes
             </p>
           </div>
-          {/* (Fase 2.11) Botonera en UNA sola línea: grid de 3 columnas.
-              Antes, con flex-wrap junto al título, el botón + se caía a
-              una 2ª fila en pantallas angostas y quedaba disparejo
-              (Sync y Ruta arriba, + abajo). El botón + ahora dice
-              "Agregar" — es más claro que el signo solo. */}
-          <div className="grid grid-cols-3 gap-1.5 mb-3">
+          {/* (Fase 2.11) Botonera en UNA sola línea. (Fase 3.12) ahora
+              de 4 columnas: Sync | Ruta | GPS | Agregar — el botón GPS
+              abre la navegación propia con voz de la Fase 3.12. */}
+          <div className="grid grid-cols-4 gap-1.5 mb-3">
             <button
               onClick={async () => {
                 const count = await sincronizarDesdeModular();
@@ -673,6 +717,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             >
               {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <MapPin className="w-3.5 h-3.5 flex-shrink-0" />}
               <span className="truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
+            </button>
+            {/* 🧭 (Fase 3.12) Navegación GPS propia con voz */}
+            <button
+              onClick={abrirNavegacionGps}
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0"
+              title="Navegación GPS con voz: flechita sobre la ruta, giros anunciados en español y recálculo si te desvías"
+            >
+              <NavigationIcon className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">GPS</span>
             </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
@@ -2449,6 +2502,19 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           cliente={ubicarCliente}
           onClose={() => setUbicarClienteId(null)}
           onGuardar={guardarUbicacion}
+          onShowToast={onShowToast}
+        />
+      )}
+
+      {/* 🧭 Navegación GPS propia con voz (Fase 3.12): flechita,
+          giros anunciados en español, recálculo y escape Waze/Google */}
+      {navGpsAbierto && (
+        <NavegacionGpsModal
+          paradas={navGpsParadas}
+          onClose={() => {
+            setNavGpsAbierto(false);
+            setNavGpsParadas([]);
+          }}
           onShowToast={onShowToast}
         />
       )}
