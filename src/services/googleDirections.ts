@@ -350,3 +350,96 @@ export function guardarRutaOptimizada(ruta: RutaObtenida): void {
   cache[ruta.firma] = ruta;
   escribirCacheRuta(cache);
 }
+
+// ── Instrucciones turno a turno (Fase 3.12 — Navegación GPS) ─
+
+/**
+ * Un paso de la ruta tal como lo necesita la navegación: la
+ * instrucción YA LIMPIA en español ("Gira a la izquierda hacia
+ * Av. Arequipa"), la maniobra de Google (turn-left…) para el
+ * ícono del cartel, metros/segundos del paso y su geometría.
+ */
+export interface PasoInstruccion {
+  /** Texto limpio en español (sin etiquetas HTML de Google) */
+  instruccion: string;
+  /** Maniobra de Google: turn-left, roundabout-right, straight… (null en salida/llegada) */
+  maniobra: string | null;
+  /** Metros de este paso */
+  distanciaM: number;
+  /** Segundos de este paso */
+  duracionS: number;
+  /** Geometría del paso (para dibujar y proyectar la posición) */
+  puntos: Array<{ lat: number; lng: number }>;
+}
+
+export interface RutaInstrucciones {
+  /** Pasos de TODOS los legs concatenados, en orden */
+  pasos: PasoInstruccion[];
+  /** Geometría completa de la ruta (pasos encadenados sin duplicar vértices) */
+  puntos: Array<{ lat: number; lng: number }>;
+  distanciaKm: number;
+  tiempoMin: number;
+}
+
+/**
+ * Limpia el html_instructions de Google: quita <b>/<div> y
+ * entidades (&nbsp;) y colapsa espacios. "Gira a la izquierda
+ * hacia <b>Av. Arequipa</b>" → "Gira a la izquierda hacia Av.
+ * Arequipa".
+ */
+export function limpiarInstruccion(html: string): string {
+  return String(html || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Trae de Google la ruta de un tramo con TODOS sus pasos
+ * (instrucciones + maniobras) para la navegación turno a turno.
+ * Un solo origen → destino (la navegación va parada por parada,
+ * así el cartel y la voz siempre hablan del tramo actual).
+ *
+ * Devuelve null si Google no responde (el llamador cae a la
+ * ruta recta de emergencia de navegacionGps.ts).
+ */
+export async function obtenerInstruccionesGoogle(
+  origen: PuntoGeoSimple,
+  destino: PuntoGeoSimple
+): Promise<RutaInstrucciones | null> {
+  const data = await directionsFetch({
+    origin: wp(origen),
+    destination: wp(destino),
+  });
+  if (!data) return null;
+
+  const ruta = data.routes[0];
+  const pasos: PasoInstruccion[] = [];
+  const puntos: Array<{ lat: number; lng: number }> = [];
+
+  for (const leg of ruta.legs || []) {
+    for (const paso of leg.steps || []) {
+      const pts = decodificarPolyline(String(paso?.polyline?.points || '')).map(redondear);
+      if (pts.length === 0) continue;
+      pasos.push({
+        instruccion: limpiarInstruccion(String(paso?.html_instructions || '')),
+        maniobra: paso?.maneuver || null,
+        distanciaM: Math.round(Number(paso?.distance?.value || 0)),
+        duracionS: Math.round(Number(paso?.duration?.value || 0)),
+        puntos: pts,
+      });
+      // Encadenar sin duplicar el vértice de unión entre pasos
+      const desde = puntos.length > 0 ? 1 : 0;
+      for (let i = desde; i < pts.length; i++) puntos.push(pts[i]);
+    }
+  }
+
+  if (pasos.length === 0 || puntos.length < 2) return null;
+
+  const { km, min } = sumarLegs(ruta);
+  return { pasos, puntos, distanciaKm: km, tiempoMin: min };
+}
