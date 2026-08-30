@@ -75,6 +75,7 @@ import {
   subirMediaChat,
 } from '../../services/riderChatFirestore';
 import { sonarMensaje } from '../../services/notificaciones';
+import { suscribirFotosPerfil, normalizarTelFoto } from '../../services/fotosPerfil';
 import { ChatList } from './ChatList';
 import { ChatWindow } from './ChatWindow';
 import { NewChatModal } from './NewChatModal';
@@ -89,12 +90,21 @@ interface RiderChatViewProps {
   clientes?: Cliente[];
   /** Aviso al panel: total de no leídos (badge del menú) */
   onUnreadChange?: (total: number) => void;
+  /** Fase 3.17: teléfono del chat a abrir al montar (aviso/campanita) */
+  abrirChatTel?: string;
+  /** Fase 3.17: la vista ya abrió el chat pedido (App limpia el pendiente) */
+  onAbrirChatConsumido?: () => void;
+  /** Fase 3.17: reporta qué chat está abierto (para no avisar lo que ya ves) */
+  onActiveChatChange?: (tel: string | null) => void;
 }
 
 export const RiderChatView: React.FC<RiderChatViewProps> = ({
   onShowToast,
   clientes = [],
   onUnreadChange,
+  abrirChatTel,
+  onAbrirChatConsumido,
+  onActiveChatChange,
 }) => {
   const { user } = useAuth();
   const { config } = useConfig();
@@ -135,6 +145,15 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showFondo, setShowFondo] = useState(false);
+
+  // Fase 3.17: fotos de perfil reales (clientes_registrados.foto_perfil)
+  const [fotosPerfil, setFotosPerfil] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => suscribirFotosPerfil(setFotosPerfil), []);
+
+  // Fase 3.17: reportar el chat abierto (avisos globales)
+  useEffect(() => {
+    onActiveChatChange?.(activePhone);
+  }, [activePhone, onActiveChatChange]);
 
   // ── Suscripción a la lista de chats ──────────────────────
   useEffect(() => {
@@ -263,6 +282,22 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
       selectChat(chats[0].clientPhone);
     }
   }, [chats, activePhone, selectChat]);
+
+  // ── Fase 3.17: abrir el chat pedido por el aviso flotante / campanita.
+  //    El tel llega en 9 dígitos y los chats usan 51… — se busca normalizado
+  //    y el effect reintenta solo cuando la lista termine de cargar. ──
+  useEffect(() => {
+    if (!abrirChatTel) return;
+    const objetivo = chats.find(
+      (c) => normalizarTelFoto(c.clientPhone) === normalizarTelFoto(abrirChatTel)
+    );
+    if (objetivo) {
+      if (activePhone !== objetivo.clientPhone) {
+        selectChat(objetivo.clientPhone);
+      }
+      onAbrirChatConsumido?.();
+    }
+  }, [abrirChatTel, chats, activePhone, selectChat, onAbrirChatConsumido]);
 
   // ── Envío de texto ───────────────────────────────────────
   const handleSendMessage = useCallback(
@@ -534,7 +569,7 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2 flex-wrap">
               Rider Chat — WhatsApp Oficial
               <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">
-                FASE 3.16
+                FASE 3.17
               </span>
             </h1>
             <p className="text-xs text-slate-400">
@@ -609,6 +644,7 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             modoDemo={modoDemo}
             fijados={fijados}
             onToggleFijado={handleToggleFijado}
+            fotosPerfil={fotosPerfil}
           />
         </div>
 
@@ -640,6 +676,7 @@ export const RiderChatView: React.FC<RiderChatViewProps> = ({
             onAbrirFondo={() => setShowFondo(true)}
             rapidoAbierto={rapidoAbierto}
             onToggleRapido={handleToggleRapido}
+            foto={activePhone ? fotosPerfil.get(normalizarTelFoto(activePhone)) : undefined}
           />
         </div>
       </div>

@@ -54,6 +54,8 @@ interface ChatWindowProps {
   /** ¿El panel de mensajes rápidos está desplegado? (Fase 3.16) */
   rapidoAbierto: boolean;
   onToggleRapido: (abierto: boolean) => void;
+  /** Foto de perfil real de WhatsApp (Fase 3.17) */
+  foto?: string;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -79,6 +81,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onAbrirFondo,
   rapidoAbierto,
   onToggleRapido,
+  foto,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
@@ -135,6 +138,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         fijado={fijado}
         onToggleFijado={onToggleFijado}
         onAbrirFondo={onAbrirFondo}
+        foto={foto}
       />
 
       {/* Mensajes — con el fondo elegido (como WhatsApp) */}

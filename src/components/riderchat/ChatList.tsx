@@ -6,10 +6,11 @@
 // (igual que el Chat Baileys / WhatsApp).
 // ═══════════════════════════════════════════════════════════
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Search, X, Plus, MessageSquare, Image as ImageIcon, FileText, MapPin, Tag, Rocket, Pin, PinOff } from 'lucide-react';
 import { ChatRider, FiltrosChat } from '../../utils/riderChatUtils';
 import { formatMessageTime, getInitials, truncateText, getAvatarPalette } from '../../utils/riderChatUtils';
+import { normalizarTelFoto } from '../../services/fotosPerfil';
 
 interface ChatListProps {
   chats: ChatRider[];
@@ -25,6 +26,8 @@ interface ChatListProps {
   fijados: Set<string>;
   /** Fija / desfija desde la fila de la lista */
   onToggleFijado: (phone: string) => void;
+  /** Fotos de perfil reales por teléfono (Fase 3.17) */
+  fotosPerfil?: Map<string, string>;
 }
 
 export const ChatList: React.FC<ChatListProps> = ({
@@ -39,6 +42,7 @@ export const ChatList: React.FC<ChatListProps> = ({
   modoDemo = false,
   fijados,
   onToggleFijado,
+  fotosPerfil,
 }) => {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onFilterChange({ ...filter, search: e.target.value });
@@ -154,6 +158,7 @@ export const ChatList: React.FC<ChatListProps> = ({
                     fijado={true}
                     onSelectChat={onSelectChat}
                     onToggleFijado={onToggleFijado}
+                    foto={fotosPerfil?.get(normalizarTelFoto(chat.clientPhone))}
                   />
                 ))}
                 {fijadosList.length > 0 && resto.length > 0 && (
@@ -172,6 +177,7 @@ export const ChatList: React.FC<ChatListProps> = ({
                     fijado={false}
                     onSelectChat={onSelectChat}
                     onToggleFijado={onToggleFijado}
+                    foto={fotosPerfil?.get(normalizarTelFoto(chat.clientPhone))}
                   />
                 ))}
               </>
@@ -190,7 +196,10 @@ const ItemChat: React.FC<{
   fijado: boolean;
   onSelectChat: (phone: string) => void;
   onToggleFijado: (phone: string) => void;
-}> = ({ chat, isSelected, fijado, onSelectChat, onToggleFijado }) => {
+  /** Foto de perfil real de WhatsApp (Fase 3.17) */
+  foto?: string;
+}> = ({ chat, isSelected, fijado, onSelectChat, onToggleFijado, foto }) => {
+  const [fotoRota, setFotoRota] = useState(false);
   const iconoTipoMensaje = (type?: string) => {
     switch (type) {
       case 'image':
@@ -218,14 +227,16 @@ const ItemChat: React.FC<{
           : 'hover:bg-slate-800/60 border-l-4 border-transparent'
       }`}
     >
-      {/* Avatar */}
+      {/* Avatar — foto real de WhatsApp si existe (Fase 3.17) */}
       <div className="relative shrink-0">
-        {chat.avatar ? (
+        {(chat.avatar || foto) && !fotoRota ? (
           <img
-            src={chat.avatar}
+            src={chat.avatar || foto}
             alt={chat.clientName}
-            className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40"
+            onError={() => setFotoRota(true)}
+            referrerPolicy="no-referrer"
             loading="lazy"
+            className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40 bg-slate-700"
           />
         ) : (
           <div

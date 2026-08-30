@@ -34,6 +34,8 @@ interface ChatClientHeaderProps {
   onToggleFijado?: () => void;
   /** Abre el selector de fondo del chat (Fase 3.16) */
   onAbrirFondo?: () => void;
+  /** Foto de perfil real de WhatsApp (Fase 3.17) */
+  foto?: string;
 }
 
 export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
@@ -44,10 +46,12 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
   fijado = false,
   onToggleFijado,
   onAbrirFondo,
+  foto,
 }) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [fotoRota, setFotoRota] = useState(false);
   const statusRef = useRef<HTMLDivElement>(null);
   const mainMenuRef = useRef<HTMLDivElement>(null);
 
@@ -94,13 +98,15 @@ export const ChatClientHeader: React.FC<ChatClientHeaderProps> = ({
           </button>
         )}
 
-        {/* Avatar */}
+        {/* Avatar — foto real de WhatsApp si existe (Fase 3.17) */}
         <div className="relative shrink-0">
-          {chat.avatar ? (
+          {(foto || chat.avatar) && !fotoRota ? (
             <img
-              src={chat.avatar}
+              src={foto || chat.avatar}
               alt={chat.clientName}
-              className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30"
+              onError={() => setFotoRota(true)}
+              referrerPolicy="no-referrer"
+              className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/30 bg-slate-700"
             />
           ) : (
             <div
