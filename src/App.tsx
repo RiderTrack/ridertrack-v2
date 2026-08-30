@@ -732,7 +732,7 @@ export default function App() {
 
           {activeTab === 'estadisticas' && <ResumenView />}
 
-          {activeTab === 'configuracion' && <SettingsView onShowToast={showToast} />}
+          {activeTab === 'configuracion' && <SettingsView onShowToast={showToast} onNavigateTab={(t) => setActiveTab(t as NavigationTab)} />}
           {activeTab === 'medios' && <MediosView />}
 
           {activeTab === 'perfil' && <ProfileView />}
