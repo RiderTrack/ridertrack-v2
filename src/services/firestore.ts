@@ -788,6 +788,20 @@ export interface ConfigCuentas {
   };
   /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
   ruta?: ConfigRuta;
+  /** Fase 3.14: WhatsApp oficial de Meta (Cloud API) — config del
+   *  número de negocio para enviar mensajes por el canal oficial.
+   *  Convive con el Rider chat (Baileys): el bot de WhatsApp sigue
+   *  siendo el canal diario; esto es la base del canal oficial. */
+  whatsappMeta?: {
+    /** Phone Number ID que da Meta (WhatsApp Manager → API Setup) */
+    phoneNumberId: string;
+    /** Token de acceso permanente (System User del negocio) */
+    token: string;
+    /** Número verificado en formato internacional, ej. 51987654321 */
+    numero?: string;
+    /** Nombre verificado del negocio (lo devuelve la prueba de conexión) */
+    nombreVerificado?: string;
+  };
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -803,6 +817,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
     tocho: { nombre: 'Tocho', celular: '' },
   },
   ruta: { inicio: null, fin: null, volverAlInicio: false },
+  whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
 };
 
 // ── Fase 2.1: utilidades a prueba de red muerta ─────────────
@@ -838,6 +853,7 @@ function fusionarConfig(data: any): ConfigCuentas {
       tocho: { ...CONFIG_CUENTAS_DEFAULT.ventas!.tocho, ...data?.ventas?.tocho },
     },
     ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
+    whatsappMeta: { ...CONFIG_CUENTAS_DEFAULT.whatsappMeta, ...data?.whatsappMeta },
   };
 }
 

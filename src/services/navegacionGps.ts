@@ -66,6 +66,57 @@ export const MIN_MOVIMIENTO_RUMBO_M = 3;
 /** Velocidad promedio usada en las estimaciones de la ruta recta (km/h) */
 export const VELOCIDAD_ESTIMADA_KMH = 22;
 
+// ── Reglas de Despacho (Fase 3.14 — Configuración → Reglas) ─
+// Los umbrales de arriba son los defaults afinados para moto en
+// Lima; el rider puede ajustarlos desde la app y se guardan en
+// localStorage. Los GETTERS leen el ajuste (o el default) — así
+// los tests siguen usando los defaults y nada se rompe.
+
+const NAV_CFG_KEY = 'rt_navcfg_v1';
+
+export interface PreferenciasNav {
+  /** Aviso temprano de maniobra: "En N metros…" (default 250) */
+  avisoLejosM: number;
+  /** Aviso de preparación: "En N metros…" (default 90) */
+  avisoCercaM: number;
+  /** Metros al destino para considerar llegada (default 45) */
+  llegadaM: number;
+  /** Auto-recalcular al desviarse (default true) */
+  autoRecalcular: boolean;
+}
+
+export const PREFERENCIAS_NAV_DEFAULT: PreferenciasNav = {
+  avisoLejosM: UMBRAL_AVISO_LEJOS_M,
+  avisoCercaM: UMBRAL_AVISO_CERCA_M,
+  llegadaM: UMBRAL_LLEGADA_M,
+  autoRecalcular: true,
+};
+
+/** Lee las preferencias del rider (con defaults a prueba de basura) */
+export function leerPreferenciasNav(): PreferenciasNav {
+  try {
+    const raw = localStorage.getItem(NAV_CFG_KEY);
+    if (!raw) return { ...PREFERENCIAS_NAV_DEFAULT };
+    const d = JSON.parse(raw);
+    const num = (v: any, def: number, min: number, max: number) =>
+      Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : def;
+    return {
+      avisoLejosM: num(d.avisoLejosM, UMBRAL_AVISO_LEJOS_M, 100, 800),
+      avisoCercaM: num(d.avisoCercaM, UMBRAL_AVISO_CERCA_M, 40, 300),
+      llegadaM: num(d.llegadaM, UMBRAL_LLEGADA_M, 20, 150),
+      autoRecalcular: d.autoRecalcular !== false,
+    };
+  } catch {
+    return { ...PREFERENCIAS_NAV_DEFAULT };
+  }
+}
+
+export function guardarPreferenciasNav(p: PreferenciasNav): void {
+  try {
+    localStorage.setItem(NAV_CFG_KEY, JSON.stringify(p));
+  } catch {}
+}
+
 // ── Persistencia de la preferencia de voz ──────────────────
 
 const VOZ_KEY = 'rt_navvoz_v1';
@@ -473,10 +524,14 @@ export class MotorVoz {
       }
     }
 
+    // Umbrales de las Reglas de Despacho (F3.14): se leen en cada
+    // evaluación para que un cambio en Configuración aplique ya.
+    const pref = leerPreferenciasNav();
+
     let fase: 'lejos' | 'cerca' | 'ahora' | null = null;
     if (distanciaM <= UMBRAL_AVISO_AHORA_M) fase = 'ahora';
-    else if (distanciaM <= UMBRAL_AVISO_CERCA_M) fase = 'cerca';
-    else if (distanciaM <= UMBRAL_AVISO_LEJOS_M) fase = 'lejos';
+    else if (distanciaM <= pref.avisoCercaM) fase = 'cerca';
+    else if (distanciaM <= pref.avisoLejosM) fase = 'lejos';
     if (!fase || fases.has(fase)) return null;
 
     fases.add(fase);
