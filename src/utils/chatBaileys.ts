@@ -54,6 +54,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { db, storage, storageRef, uploadBytes, getDownloadURL } from '../services/firebase';
+import { suscribirFotosPerfil } from '../services/fotosPerfil';
 
 /** UID del rider dueño del bot (mismo que usa la v1 y la v2) */
 export const UID_BOT = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
@@ -209,7 +210,9 @@ export function esEspejoSaliente(m: { tipo?: string; origen?: string }): boolean
 /**
  * Fase 3.18 — ¿el espejo saliente corresponde a una respuesta manual
  * tuya (ya pintada desde respuestas_manuales con ticks)? Match por
- * mismo teléfono + mismo texto en una ventana de ±20s.
+ * mismo teléfono + mismo texto en una ventana de ±45s (F3.19: antes
+ * ±20s — se amplía para tolerar el desfase de reloj entre el teléfono
+ * del panel y el Termux donde corre el bot).
  */
 export function esDuplicadoManual(
   m: { telefono?: unknown; texto?: string; timestamp?: unknown },
@@ -220,8 +223,36 @@ export function esDuplicadoManual(
   if (!tel || !texto) return false;
   const ts = Number(m.timestamp) || 0;
   return manuales.some(
-    (x) => x.tel === tel && x.texto === texto && Math.abs(x.timestamp - ts) <= 20_000
+    (x) => x.tel === tel && x.texto === texto && Math.abs(x.timestamp - ts) <= 45_000
   );
+}
+
+/**
+ * Fase 3.19 — Filtra ENTRANTES duplicados. El bot a veces guarda el
+ * MISMO mensaje dos veces (Baileys entrega el mensaje por LID y por
+ * PN casi a la vez → dos docs con el mismo texto a menos de 4 s) y
+ * en el chat se veía "hola hola" pegado. Recibe los docs en orden
+ * cronológico ASC y devuelve solo los únicos. En el grupo MATE la
+ * clave incluye quién escribió (dos personas pueden decir "ok" a la
+ * vez); en 1 a 1 la clave es teléfono + texto.
+ */
+export function filtrarDuplicadosEntrantes<
+  T extends { telefono?: unknown; texto?: string; timestamp?: unknown; esGrupo?: unknown; nombre?: unknown }
+>(docs: T[]): T[] {
+  const ultimo = new Map<string, number>();
+  return docs.filter((d) => {
+    const tel = telKey(d.telefono);
+    const texto = String(d.texto || '').trim();
+    const ts = Number(d.timestamp) || 0;
+    const esGrupo = d.esGrupo === true || String(d.telefono || '') === 'GRUPO_MATE';
+    if (!texto) return true;
+    if (!tel && !esGrupo) return true;
+    const clave = esGrupo ? 'g|' + String(d.nombre || '') + '|' + texto : tel + '|' + texto;
+    const previo = ultimo.get(clave);
+    if (previo !== undefined && Math.abs(ts - previo) <= 4_000) return false;
+    ultimo.set(clave, ts);
+    return true;
+  });
 }
 
 /**
@@ -270,11 +301,6 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     esGrupo: true,
   };
   convs.set(TEL_GRUPO_MATE, convGrupo);
-
-  // Fase 3.18 — registro en vivo de tus respuestas manuales (tel,
-  // texto, ts) para poder deduplicar los espejos salientes que el
-  // bot guarda en mensajes_clientes (ver listener 1).
-  let manualesVivas: { tel: string; texto: string; timestamp: number }[] = [];
 
   const emitir = () => {
     // recontar no leídos + silencio + fotos
@@ -342,89 +368,165 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
 
   const ignorar = (e: Error) => console.warn('[chatBaileys] listener:', e.message);
 
-  // 1. Entrantes del cliente
+  // ── Fase 3.19: RECONSTRUCCIÓN ATÓMICA anti-carrera ──
+  // ANTES los listeners 1 (mensajes_clientes) y 2 (respuestas_manuales)
+  // procesaban sus snapshots por separado y el dedupe de espejos
+  // dependía de CUÁL llegara primero: en la carga inicial el listener 1
+  // procesaba los espejos con manualesVivas VACÍO → TUS mensajes
+  // aparecían otra vez como "Bot · respondió solo" (duplicados).
+  // Ahora ambos guardan sus docs crudos y llaman a UNA sola función
+  // que reconstruye TODO con los DOS datasets siempre al día — el
+  // orden de llegada ya no importa.
+  type DocCrudo = { id: string; data: DocumentData };
+  let docsMensajesCrudos: DocCrudo[] = [];
+  let docsManualesCrudos: DocCrudo[] = [];
+
+  const reconstruirChat = () => {
+    // 1) Limpiar SOLO los orígenes que reconstruimos aquí: cliente,
+    //    rudyAuto y rudy de TEXTO. Las notas de voz / imágenes que
+    //    pinta el listener 4 (cola_envio es_chat) se PRESERVAN —
+    //    antes se borraban y volvían solo cuando la cola cambiaba
+    //    (bug: las notas de voz desaparecían al mandar un manual).
+    convs.forEach((c) => {
+      c.mensajes = c.mensajes.filter(
+        (m) =>
+          m.origen !== 'cliente' &&
+          m.origen !== 'rudyAuto' &&
+          !(m.origen === 'rudy' && !m.audioUrl && !m.imageUrl)
+      );
+    });
+
+    // 2) Tus manuales vivos (para el dedupe de espejos salientes)
+    const manualesVivas: { tel: string; texto: string; timestamp: number }[] = [];
+    docsManualesCrudos.forEach(({ data: m }) => {
+      const tel = telKey(m.telefono);
+      const texto = String(m.texto || '').trim();
+      if (tel && texto) manualesVivas.push({ tel, texto, timestamp: Number(m.timestamp) || 0 });
+    });
+
+    // 3) Entrantes + espejos en orden cronológico ASC (para que el
+    //    dedupe de entrantes duplicados vea primero el más antiguo)
+    const ordenados = [...docsMensajesCrudos].sort(
+      (a, b) => (Number(a.data.timestamp) || 0) - (Number(b.data.timestamp) || 0)
+    );
+    const unicos = filtrarDuplicadosEntrantes(
+      ordenados.map(({ id, data }) => ({
+        id,
+        telefono: data.telefono,
+        texto: data.texto as string | undefined,
+        timestamp: data.timestamp,
+        esGrupo: data.esGrupo,
+        nombre: data.nombre,
+        data,
+      }))
+    );
+    unicos.forEach(({ id, data: m, telefono, texto }) => {
+      // FASE 3.9 — mensajes que llegan AL GRUPO MATE (los guarda el
+      // parche grupo_mate.js del bot en mensajes_clientes con
+      // telefono='GRUPO_MATE'). Van a la conversación del grupo
+      // como burbujas de la izquierda (con el nombre de quien escribió).
+      if (String(m.telefono || '') === TEL_GRUPO_MATE || m.esGrupo === true) {
+        convGrupo.mensajes.push({
+          id: 'mc_' + id,
+          tel: TEL_GRUPO_MATE,
+          origen: 'cliente',
+          tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+          texto: m.texto || '',
+          timestamp: Number(m.timestamp) || 0,
+          leido: !!m.leido,
+          enviado: null,
+          nombre: m.nombre || 'Grupo',
+        });
+        return;
+      }
+      const tel = telKey(telefono);
+      if (!tel) return;
+      void texto;
+
+      // ── Fase 3.18: espejo SALIENTE del bot en mensajes_clientes ──
+      if (esEspejoSaliente(m)) {
+        // ¿Es el espejo de una respuesta manual tuya? → ya está
+        // pintada (con ticks) desde respuestas_manuales: saltar.
+        if (esDuplicadoManual(m, manualesVivas)) return;
+        // Es un AUTO-REPLY del bot (IA / plantillas): burbuja tuya,
+        // del lado derecho como en WhatsApp.
+        const convAuto = asegurarConv(tel, m.nombre);
+        convAuto.mensajes.push({
+          id: 'mc_' + id,
+          tel,
+          origen: 'rudyAuto',
+          tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+          texto: m.texto || '',
+          timestamp: Number(m.timestamp) || 0,
+          leido: true,
+          enviado: null,
+          nombre: 'Bot',
+        });
+        return;
+      }
+
+      const conv = asegurarConv(tel, m.nombre);
+      conv.mensajes.push({
+        id: 'mc_' + id,
+        tel,
+        origen: 'cliente',
+        tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+        texto: m.texto || '',
+        timestamp: Number(m.timestamp) || 0,
+        leido: !!m.leido,
+        enviado: null,
+        base64: m.base64 || undefined,
+        mimetype: m.mimetype || undefined,
+        nombreArchivo: m.nombreArchivo || undefined,
+        lat: m.lat ?? null,
+        lng: m.lng ?? null,
+        borrableDocId: id,
+        nombre: m.nombre,
+      });
+    });
+
+    // 4) Tus manuales con ticks ⏳→✓→✓✓→azul
+    docsManualesCrudos.forEach(({ id, data: m }) => {
+      const tel = telKey(m.telefono);
+      if (!tel) return;
+      const conv = asegurarConv(tel, m.nombre);
+      conv.mensajes.push({
+        id: 'rm_' + id,
+        tel,
+        origen: 'rudy',
+        tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
+        texto: m.texto || '',
+        timestamp: Number(m.timestamp) || 0,
+        leido: true,
+        enviado: !!m.enviado,
+        // Fase 3.18 — estado real de WhatsApp (checks azules): lo
+        // escribe el parche estado_mensajes.js del bot con los
+        // receipts de Baileys (delivered = ✓✓ gris, read = ✓✓ azul).
+        estadoWa: m.estadoWa === 'delivered' || m.estadoWa === 'read' ? m.estadoWa : null,
+        base64: m.base64 || undefined,
+        mimetype: m.mimetype || undefined,
+        nombreArchivo: m.nombreArchivo || undefined,
+        nombre: m.nombre,
+      });
+    });
+
+    // 5) Conversaciones que quedaron vacías (sin mensajes NINGUNO de
+    //    ninguna fuente y sin historia) se limpian — las que tienen
+    //    acciones del bot o audios de la cola siguen vivas.
+    convs.forEach((c) => {
+      if (c.esGrupo) return; // el grupo de trabajo siempre vive
+      if (c.mensajes.length === 0 && c.ultimoTimestamp === 0) convs.delete(c.tel);
+    });
+    emitir();
+  };
+
+  // 1. Entrantes del cliente (+ espejos salientes del bot)
   unsubs.push(
     onSnapshot(
       query(collection(db!, 'mensajes_clientes'), orderBy('timestamp', 'desc'), limit(300)),
       (snap: QuerySnapshot<DocumentData>) => {
-        // Reconstruir mensajes entrantes. Fase 3.18: también se
-        // reconstruyen los espejos SALIENTES del bot (sus auto-replies)
-        // como burbujas tuyas — antes se pintaban como si el CLIENTE
-        // hubiera dicho "Hola Verónica, ya voy en camino...". Y los
-        // espejos de TUS manuales se descartan (ya viven con ticks en
-        // respuestas_manuales → listener 2).
-        convs.forEach((c) => {
-          c.mensajes = c.mensajes.filter((m) => m.origen !== 'cliente' && m.origen !== 'rudyAuto');
-        });
-        snap.forEach((d) => {
-          const m = d.data();
-          // FASE 3.9 — mensajes que llegan AL GRUPO MATE (los guarda el
-          // parche grupo_mate.js del bot en mensajes_clientes con
-          // telefono='GRUPO_MATE'). Van a la conversación del grupo
-          // como burbujas de la izquierda (con el nombre de quien escribió).
-          if (String(m.telefono || '') === TEL_GRUPO_MATE || m.esGrupo === true) {
-            convGrupo.mensajes.push({
-              id: 'mc_' + d.id,
-              tel: TEL_GRUPO_MATE,
-              origen: 'cliente',
-              tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
-              texto: m.texto || '',
-              timestamp: Number(m.timestamp) || 0,
-              leido: !!m.leido,
-              enviado: null,
-              nombre: m.nombre || 'Grupo',
-            });
-            return;
-          }
-          const tel = telKey(m.telefono);
-          if (!tel) return;
-
-          // ── Fase 3.18: espejo SALIENTE del bot en mensajes_clientes ──
-          if (esEspejoSaliente(m)) {
-            // ¿Es el espejo de una respuesta manual tuya? → ya está
-            // pintada (con ticks) desde respuestas_manuales: saltar.
-            if (esDuplicadoManual(m, manualesVivas)) return;
-            // Es un AUTO-REPLY del bot (IA / plantillas): burbuja tuya,
-            // del lado derecho como en WhatsApp.
-            const convAuto = asegurarConv(tel, m.nombre);
-            convAuto.mensajes.push({
-              id: 'mc_' + d.id,
-              tel,
-              origen: 'rudyAuto',
-              tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
-              texto: m.texto || '',
-              timestamp: Number(m.timestamp) || 0,
-              leido: true,
-              enviado: null,
-              nombre: 'Bot',
-            });
-            return;
-          }
-
-          const conv = asegurarConv(tel, m.nombre);
-          conv.mensajes.push({
-            id: 'mc_' + d.id,
-            tel,
-            origen: 'cliente',
-            tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
-            texto: m.texto || '',
-            timestamp: Number(m.timestamp) || 0,
-            leido: !!m.leido,
-            enviado: null,
-            base64: m.base64 || undefined,
-            mimetype: m.mimetype || undefined,
-            nombreArchivo: m.nombreArchivo || undefined,
-            lat: m.lat ?? null,
-            lng: m.lng ?? null,
-            borrableDocId: d.id,
-            nombre: m.nombre,
-          });
-        });
-        convs.forEach((c) => {
-          if (c.esGrupo) return; // el grupo de trabajo siempre vive
-          if (c.mensajes.length === 0 && c.ultimoTimestamp === 0) convs.delete(c.tel);
-        });
-        emitir();
+        docsMensajesCrudos = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+        reconstruirChat();
       },
       ignorar
     )
@@ -435,39 +537,8 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     onSnapshot(
       query(collection(db!, 'respuestas_manuales'), orderBy('timestamp', 'desc'), limit(120)),
       (snap: QuerySnapshot<DocumentData>) => {
-        convs.forEach((c) => {
-          c.mensajes = c.mensajes.filter((m) => m.origen !== 'rudy');
-        });
-        // Fase 3.18 — registro vivo para el dedupe de espejos salientes
-        manualesVivas = [];
-        snap.forEach((d) => {
-          const m = d.data();
-          const tel = telKey(m.telefono);
-          if (!tel) return;
-          const texto = String(m.texto || '').trim();
-          const ts = Number(m.timestamp) || 0;
-          if (texto) manualesVivas.push({ tel, texto, timestamp: ts });
-          const conv = asegurarConv(tel, m.nombre);
-          conv.mensajes.push({
-            id: 'rm_' + d.id,
-            tel,
-            origen: 'rudy',
-            tipoContenido: (m.tipoContenido as TipoContenido) || 'texto',
-            texto: m.texto || '',
-            timestamp: ts,
-            leido: true,
-            enviado: !!m.enviado,
-            // Fase 3.18 — estado real de WhatsApp (checks azules): lo
-            // escribe el parche estado_mensajes.js del bot con los
-            // receipts de Baileys (delivered = ✓✓ gris, read = ✓✓ azul).
-            estadoWa: m.estadoWa === 'delivered' || m.estadoWa === 'read' ? m.estadoWa : null,
-            base64: m.base64 || undefined,
-            mimetype: m.mimetype || undefined,
-            nombreArchivo: m.nombreArchivo || undefined,
-            nombre: m.nombre,
-          });
-        });
-        emitir();
+        docsManualesCrudos = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+        reconstruirChat();
       },
       ignorar
     )
@@ -616,23 +687,18 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     )
   );
 
-  // 6. FOTOS DE PERFIL reales de WhatsApp (clientes_registrados.foto_perfil)
-  //    — igual que la v1: el bot guarda/actualiza la foto y el panel la lee.
+  // 6. FOTOS DE PERFIL reales de WhatsApp (F3.19: se reutiliza el
+  //    SINGLETON de services/fotosPerfil — antes este listener hacía
+  //    su PROPIA suscripción a clientes_registrados y bajaba los mismos
+  //    docs dos veces. El singleton además prefiere foto_perfil_data
+  //    (base64 permanente que escribe el bot) sobre foto_perfil (URL
+  //    de WhatsApp que expira en horas).
   unsubs.push(
-    onSnapshot(
-      collection(db!, 'clientes_registrados'),
-      (snap: QuerySnapshot<DocumentData>) => {
-        fotos.clear();
-        snap.forEach((d) => {
-          const url = d.data()?.foto_perfil;
-          if (!url) return;
-          const tel = telKey(d.id) || telKey(d.data()?.telefono);
-          if (tel) fotos.set(tel, String(url));
-        });
-        emitir();
-      },
-      ignorar
-    )
+    suscribirFotosPerfil((mapaFotos) => {
+      fotos.clear();
+      mapaFotos.forEach((url, tel) => fotos.set(tel, url));
+      emitir();
+    })
   );
 
   // 5. Bot silenciado
