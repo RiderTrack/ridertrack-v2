@@ -1,12 +1,18 @@
 // ═══════════════════════════════════════════════════════════
 // 🏚️ DETECTOR DE DIRECCIONES INCOMPLETAS — RiderTrack V2
 // (Fase 2.5 — portado del Rider Modular v1 direcciones-ia.js)
+// (Fase 3.14 — SUPERDETECTOR: lote/lt, mza, manz., "entre
+//  calle y calle" y "cuadra N". Caso real que lo motivó: un
+//  cliente de Breña con "…entre Jr. 2 y Jr. 4" pasaba como
+//  dirección BUENA porque el 2 y el 4 —nombres de calles—
+//  engañaban al chequeo de dígitos)
 //
 // Detecta direcciones que NO especifican un número exacto:
-//   - 'mz'  → por MANZANA ("mz c 12", "manzana b", "mz. 15 lote 3")
+//   - 'mz'  → por MANZANA/LOTE ("mz c 12", "manzana b", "mz. 15
+//             lote 3", "mza-c", "lote 3", "lt 29")
 //   - 'sn'  → SIN NÚMERO ("s/n", "sn", "sin número", "sin numero")
-//   - 'ref' → SOLO REFERENCIA (campo dirección vacío pero hay obs,
-//             o la dirección no contiene ningún dígito)
+//   - 'ref' → SOLO REFERENCIA ("entre Jr. Quilca y Jr. Paruro",
+//             "cuadra 5 de Av. Brasil", sin ningún dígito…)
 // El rider puede filtrarlos con el chip "⚠️ Mz/SN" en Mi Ruta y
 // pedirles su ubicación exacta por WhatsApp con un toque.
 // ═══════════════════════════════════════════════════════════
@@ -25,15 +31,35 @@ function normalizar(dir: string): string {
 
 /**
  * Clasifica una dirección. Orden de chequeo:
- * 1. mz   → contiene "mz", "mz." o "manzana"
- * 2. sn   → contiene "s/n", "sn" suelto, "sin numero"
- * 3. ref  → no tiene NINGÚN dígito en la dirección (solo referencia)
+ * 1. mz   → manzana o lote (mz, mza, manzana, manz., lt, lote)
+ * 2. sn   → "s/n", "sn" suelto, "sin numero"
+ * 3. ref  → sin NÚMERO DE CASA: se quita la cláusula "entre …"
+ *           y las referencias "cuadra N" y quedan solo palabras
+ *           ("av brasil") o nada → referencia, no un punto
+ * 4. ok   → tiene número de casa ("av sucre 523")
+ *
+ * La clave del fix 3.14: en "entre Jr. 2 y Jr. 4" el 2 y el 4
+ * son NOMBRES de calles, no el número de la casa. Se quita la
+ * cláusula "entre…" ANTES de mirar los dígitos: "av arequipa
+ * 123 entre jr 2 y jr 4" sigue OK (el 123 es de la casa), pero
+ * "av brasil entre jr 2 y jr 4" queda como SOLO REFERENCIA.
  */
 export function tipoDireccion(dir: string, obs?: string): TipoDireccion {
   const d = normalizar(dir);
 
-  // 1) Por manzana — igual que la v1 (\bmz\b|manzana)
-  if (/\bmz\b/.test(d) || /\bmanzana\b/.test(d) || /\bmz\s*[a-z0-9]/.test(d)) {
+  // 1) Por manzana/lote — familia completa de la v1:
+  //    mz c | mz-c | mz.15 | mza c | mza5 | manzana b | manz. c
+  //    lt 29 | lote 3 | lote-b | mz c lt 29
+  if (
+    /\bmz\b/.test(d) ||
+    /\bmz[\s._:-]+\s*[a-z0-9]/.test(d) ||
+    /\bmza\b/.test(d) ||
+    /\bmza[\s._:-]?\s*[a-z0-9]/.test(d) ||
+    /\bmanzana\b/.test(d) ||
+    /\bmanz\.?\s*[-\s._:]?\s*[a-z0-9]/.test(d) ||
+    /\blote\b/.test(d) ||
+    /\blt[\s._:-]+\s*[a-z0-9]/.test(d)
+  ) {
     return 'mz';
   }
 
@@ -42,11 +68,24 @@ export function tipoDireccion(dir: string, obs?: string): TipoDireccion {
     return 'sn';
   }
 
-  // 3) Solo referencia: sin ningún dígito en la dirección
-  //    (una dirección real de Lima siempre tiene número:
-  //     "av sucre 523", "jr unite 456"...)
+  // 3a. Sin NINGÚN dígito ("frente al mercado", "casa azul")
   if (d.length > 0 && !/\d/.test(d)) {
     return 'ref';
+  }
+
+  // 3b. Tiene dígitos… ¿pero son de la CASA o de referencias?
+  //     Se quita "entre …" (hasta una coma o el final) y
+  //     "cuadra/cdra N", y se vuelve a mirar:
+  //     "av arequipa 123 entre jr 2 y jr 4" → "av arequipa 123" → OK
+  //     "av brasil entre jr 2 y jr 4"      → "av brasil"      → REF
+  //     "cuadra 5 de av brasil"            → "de av brasil"   → REF
+  if (d.length > 0) {
+    const sinReferencias = d
+      .replace(/\bentre\b[^,]*/g, ' ')
+      .replace(/\b(cuadra|cdra)\.?\s+\d+\b/g, ' ');
+    if (!/\d/.test(sinReferencias)) {
+      return 'ref';
+    }
   }
 
   // Dirección vacía pero con observación → referencia

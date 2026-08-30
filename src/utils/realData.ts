@@ -66,6 +66,23 @@ export const METODO_PANEL_A_ST: Record<string, string> = {
   'Empresa': 'empresa',
 };
 
+// ── Cajas: lo tuyo vs lo de la empresa (Fase 3.14 — una sola
+//    fuente de verdad; antes cada archivo tenía SU copia y el
+//    chip 🏢 de Mi Ruta solo contaba st === 'empresa', dejando
+//    afuera POS / Pago Link / Yape-Plin / Transferencia que
+//    TAMBIÉN los paga la empresa) ────────────────────────────
+
+/** Métodos que paga la EMPRESA (caja 🏢) — el cliente le paga directo a la empresa */
+export const METODOS_EMPRESA = ['pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa'];
+
+/** Métodos que son del RIDER (caja 💵) — efectivo y Yape a Rudy */
+export const METODOS_RIDER = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'cambio'];
+
+/** ¿Este st es un pago que le pertenece a la empresa? */
+export function esPagoEmpresa(st: string | undefined | null): boolean {
+  return METODOS_EMPRESA.includes(st || '');
+}
+
 // ── Mapeos de estado ────────────────────────────────────────
 
 /** st real → estado de la UI (pendiente / entregado / cancelado) */
