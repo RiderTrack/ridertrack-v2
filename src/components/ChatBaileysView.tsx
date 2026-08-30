@@ -129,6 +129,13 @@ import {
 
 interface ChatBaileysViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  /** Fase 3.17: teléfono (o 'GRUPO_MATE') del chat a abrir al montar —
+   *  llega del aviso flotante o de la campanita del header */
+  abrirChatTel?: string;
+  /** Fase 3.17: la vista ya abrió el chat pedido (App limpia el pendiente) */
+  onAbrirChatConsumido?: () => void;
+  /** Fase 3.17: reporta qué chat está abierto (para no avisar lo que ya ves) */
+  onActiveChatChange?: (tel: string | null) => void;
 }
 
 const EMOJIS = ['😊', '😂', '👍', '🙏', '❤️', '🎉', '✅', '🔥', '👌', '😅', '🤝', '💪', '🚀', '📍', '📦', '💰', '⏰', '🙌', '😉', '🥳', '😎', '🤗', '☕', '🍀', '⚡', '🎁', '📸', '👏', '🫡', '🤖'];
@@ -500,7 +507,12 @@ function llenarVariables(texto: string, nombre: string): string {
     .split('{fecha}').join(ahora.toLocaleDateString('es-PE'));
 }
 
-export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast }) => {
+export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
+  onShowToast,
+  abrirChatTel,
+  onAbrirChatConsumido,
+  onActiveChatChange,
+}) => {
   const { user, profile } = useAuth();
 
   const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
@@ -575,6 +587,27 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
     if (telActivo) marcarLeidoChat(telActivo);
     setMenuRapidos(false);
   }, [telActivo]);
+
+  // ── Fase 3.17: abrir el chat pedido por el aviso/campanita ──
+  useEffect(() => {
+    if (!abrirChatTel) return;
+    if (telActivo === abrirChatTel) {
+      onAbrirChatConsumido?.();
+      return;
+    }
+    // El chat puede tardar un instante en llegar (Firestore) — se abre
+    // igual: el tel queda activo y los mensajes llegan al suscribirse.
+    setTelActivo(abrirChatTel);
+    setMenuChat(false);
+    setEmojiAbierto(false);
+    setMenuAdjuntos(false);
+    onAbrirChatConsumido?.();
+  }, [abrirChatTel]);
+
+  // ── Fase 3.17: reportar el chat abierto (avisos globales) ──
+  useEffect(() => {
+    onActiveChatChange?.(telActivo);
+  }, [telActivo, onActiveChatChange]);
 
   // ── Cerrar el menú ⋮ al hacer clic fuera ──
   useEffect(() => {

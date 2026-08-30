@@ -10,6 +10,8 @@ import {
   X,
   ShieldCheck,
   Camera,
+  MessageCircle,
+  ArrowRight,
 } from 'lucide-react';
 import { ThemeMode, AppNotification } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -28,6 +30,8 @@ interface HeaderProps {
   /** Avatar ilustrado elegido (Fase 1.5) */
   riderAvatar?: string;
   onAbrirAvatarPicker?: () => void;
+  /** Fase 3.17: click en una notificación de chat → abre el chat */
+  onNotificationClick?: (n: AppNotification) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   riderName = 'Rider',
   riderAvatar,
   onAbrirAvatarPicker,
+  onNotificationClick,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
@@ -125,7 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Fase 3.5: el número de FASE visible en el badge — así
                   siempre sabemos qué build estás probando (F3.14 = fase 3.14) */}
               <span className="hidden sm:inline-block px-1.5 py-0.2 text-[10px] font-black rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                V2.4 · F3.16
+                V2.4 · F3.17
               </span>
             </div>
             <span className="text-[10px] text-slate-400 font-medium hidden sm:block">
@@ -225,23 +230,63 @@ export const Header: React.FC<HeaderProps> = ({
                 {notifications.length === 0 ? (
                   <div className="p-6 text-center text-xs text-slate-400">Sin notificaciones pendientes</div>
                 ) : (
-                  notifications.map((n) => (
-                    <div
-                      key={n.id}
-                      className={`p-3.5 transition-colors ${
-                        !n.leido ? 'bg-blue-500/5 hover:bg-blue-500/10' : 'hover:bg-slate-700/30'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-white">{n.titulo}</p>
-                          <p className="text-xs text-slate-300 mt-0.5 leading-snug">{n.mensaje}</p>
-                          <span className="text-[10px] text-slate-400 font-mono mt-1 block">{n.tiempo}</span>
+                  notifications.map((n) => {
+                    // Fase 3.17: las de chat son clickeables → abren el chat
+                    const esChat = !!n.canalChat && !!n.telChat;
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          if (esChat && onNotificationClick) {
+                            onNotificationClick(n);
+                            setShowNotifications(false);
+                          }
+                        }}
+                        className={`p-3.5 transition-colors ${
+                          esChat ? 'cursor-pointer hover:bg-emerald-500/10' : ''
+                        } ${
+                          !n.leido
+                            ? esChat
+                              ? 'bg-emerald-500/5'
+                              : 'bg-blue-500/5 hover:bg-blue-500/10'
+                            : 'hover:bg-slate-700/30'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          {esChat ? (
+                            <div
+                              className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                n.canalChat === 'baileys'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : 'bg-blue-500/20 text-blue-400'
+                              }`}
+                              title={
+                                n.canalChat === 'baileys'
+                                  ? 'Chat Baileys (bot Rudy)'
+                                  : 'Rider Chat (WhatsApp Oficial)'
+                              }
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </div>
+                          ) : (
+                            <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-white truncate">{n.titulo}</p>
+                            <p className="text-xs text-slate-300 mt-0.5 leading-snug">{n.mensaje}</p>
+                            <div className="flex items-center justify-between gap-2 mt-1">
+                              <span className="text-[10px] text-slate-400 font-mono">{n.tiempo}</span>
+                              {esChat && (
+                                <span className="flex items-center gap-0.5 text-[10px] font-black text-emerald-400">
+                                  Abrir chat <ArrowRight className="w-2.5 h-2.5" />
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
