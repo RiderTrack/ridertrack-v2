@@ -1,27 +1,26 @@
 // ═══════════════════════════════════════════════════════════
-// 💬 WHATSAPP API MODAL - RiderTrack V2 (Fase 3.14)
+// 💬 WHATSAPP API MODAL - RiderTrack V2 (Fase 3.14 → 3.15)
 // Configuración del WhatsApp OFICIAL de Meta (Cloud API).
 //
 // Qué hace:
 //   • Guarda Phone Number ID + token en config_empresa (lo ven
 //     todos los dispositivos de la cuenta)
-//   • "Probar conexión" → Meta devuelve el nombre VERIFICADO del
-//     negocio (así sabes que el token está bien)
+//   • "Probar conexión" → DIAGNÓSTICO POR PASOS (F3.15):
+//     Paso 1 valida el token, Paso 2 valida el Phone Number ID.
+//     Si pusiste el teléfono en vez del ID (el error 400 más
+//     común), te lo dice con guía de dónde sacar el correcto.
 //   • "Enviar mensaje de prueba" → manda un texto real por el
 //     canal oficial (para probar de punta a punta)
 //
-// IMPORTANTE — cómo conseguir los datos (gratis):
-//   1. business.facebook.com → crea el negocio de MATE
-//   2. WhatsApp Manager → API Setup → ahí están el Phone Number
-//      ID y el token de prueba (temporal 24h)
-//   3. Para el token PERMANENTE: System Users → generar token
-//      con permiso whatsapp_business_messaging
-//   (La primera conversación de cada cliente es gratis; después
-//    Meta cobra por conversación iniciada.)
+// IMPORTANTE — el error 400 clásico:
+//   Phone Number ID ≠ número de teléfono. El ID es un código
+//   largo (13-17 dígitos) que sale en business.facebook.com →
+//   WhatsApp Manager → API Setup, o en la config de tu robot
+//   de Meta (phone_number_id).
 //
 // Este es el CANAL OFICIAL — convive con el Rider chat (Baileys,
-// el WhatsApp del bot). La bandeja de entrada del canal oficial
-// (leer respuestas) requiere un servidor webhook: próxima fase.
+// el WhatsApp del bot). El chat completo vive en la pestaña
+// "Rider Chat Oficial" (Fase 3.15).
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect } from 'react';
@@ -35,13 +34,18 @@ import {
   Eye,
   EyeOff,
   Info,
+  CheckCircle2,
+  XCircle,
+  Lightbulb,
 } from 'lucide-react';
-import { ConfigCuentas, CONFIG_CUENTAS_DEFAULT } from '../services/firestore';
+import { ConfigCuentas } from '../services/firestore';
 import { useConfig } from '../hooks/useConfig';
 import {
   ConfigWhatsAppMeta,
-  probarConexion,
+  diagnosticarConexion,
+  DiagnosticoMeta,
   enviarTexto,
+  pareceTelefono,
 } from '../services/whatsappMeta';
 
 interface WhatsAppApiModalProps {
@@ -56,7 +60,7 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
   const [token, setToken] = useState('');
   const [verToken, setVerToken] = useState(false);
   const [probando, setProbando] = useState(false);
-  const [estado, setEstado] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [diagnostico, setDiagnostico] = useState<DiagnosticoMeta | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [numPrueba, setNumPrueba] = useState('');
   const [textoPrueba, setTextoPrueba] = useState(
@@ -94,21 +98,26 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
 
   const handleProbar = async () => {
     setProbando(true);
-    setEstado(null);
+    setDiagnostico(null);
     try {
-      // Probar con lo escrito en pantalla (aún sin guardar)
-      const r = await probarConexion(cfgActual());
-      setEstado({ ok: r.ok, texto: r.mensaje });
+      // Diagnóstico completo con lo escrito en pantalla (aún sin guardar)
+      const d = await diagnosticarConexion(cfgActual());
+      setDiagnostico(d);
       // Si conectó, guardar el nombre verificado que devolvió Meta
-      if (r.ok && r.nombreVerificado) {
+      if (d.ok) {
         await guardar({
           ...config,
           whatsappMeta: {
-            ...cfgActual(),
-            numero: r.numero || config.whatsappMeta?.numero || '',
-            nombreVerificado: r.nombreVerificado,
+            phoneNumberId: d.idResuelto || cfgActual().phoneNumberId,
+            token: cfgActual().token,
+            numero: d.numero || config.whatsappMeta?.numero || '',
+            nombreVerificado: d.nombreVerificado || config.whatsappMeta?.nombreVerificado || '',
           },
         });
+        // Si Meta aceptó una variante del ID (ej: sin espacios/+), la dejamos puesta
+        if (d.idResuelto && d.idResuelto !== phoneNumberId.trim()) {
+          setPhoneNumberId(d.idResuelto);
+        }
       }
     } finally {
       setProbando(false);
@@ -132,6 +141,8 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
       </div>
     );
   }
+
+  const avisoTelefono = pareceTelefono(String(phoneNumberId || ''));
 
   return (
     <div
@@ -168,9 +179,11 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
             <div className="text-[11px] text-blue-200/90 leading-relaxed">
               <b>¿De dónde salen los datos?</b> En{' '}
               <span className="text-blue-300 font-semibold">business.facebook.com</span> → tu negocio →{' '}
-              <b>WhatsApp Manager → API Setup</b>: ahí está el Phone Number ID y el token de prueba.
-              Para el token permanente: <b>System Users</b> → generar token con permiso{' '}
-              <i>whatsapp_business_messaging</i>.
+              <b>WhatsApp Manager → API Setup</b>: ahí está el <b>Phone Number ID</b> y el token de prueba.
+              ⚠️ El Phone Number ID <b>NO es el número de teléfono</b>: es un código largo (13-17 dígitos).
+              Si ya tienes un robot de Meta, el ID está en su configuración (búscalo como{' '}
+              <i>phone_number_id</i>). Para el token permanente: <b>System Users</b> → generar token con
+              permiso <i>whatsapp_business_messaging</i>.
             </div>
           </div>
 
@@ -183,10 +196,19 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
               <input
                 value={phoneNumberId}
                 onChange={(e) => setPhoneNumberId(e.target.value)}
-                placeholder="Ej: 123456789012345"
+                placeholder="Ej: 1272517762604297 (código largo, NO el 51…)"
                 inputMode="numeric"
-                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/60"
+                className={`w-full px-3 py-2.5 rounded-xl bg-slate-800 border text-white text-sm placeholder:text-slate-500 focus:outline-none ${
+                  avisoTelefono
+                    ? 'border-amber-500/60 focus:border-amber-400'
+                    : 'border-slate-700 focus:border-emerald-500/60'
+                }`}
               />
+              {avisoTelefono && (
+                <p className="text-[10px] text-amber-400 mt-1 font-medium">
+                  ⚠️ Eso parece un NÚMERO de teléfono — el Phone Number ID es un código largo distinto.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-[11px] font-bold text-slate-300 mb-1.5 uppercase tracking-wide">
@@ -214,26 +236,6 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
             </div>
           </div>
 
-          {/* Estado de conexión */}
-          {estado && (
-            <div
-              className={`p-3 rounded-xl border flex items-start gap-2 ${
-                estado.ok
-                  ? 'bg-emerald-500/10 border-emerald-500/30'
-                  : 'bg-red-500/10 border-red-500/30'
-              }`}
-            >
-              {estado.ok ? (
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              ) : (
-                <X className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              )}
-              <p className={`text-xs leading-relaxed ${estado.ok ? 'text-emerald-200' : 'text-red-200'}`}>
-                {estado.texto}
-              </p>
-            </div>
-          )}
-
           {/* Botones de credencial */}
           <div className="grid grid-cols-2 gap-2.5">
             <button
@@ -253,6 +255,58 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
               Probar conexión
             </button>
           </div>
+
+          {/* Diagnóstico por pasos (F3.15) */}
+          {diagnostico && (
+            <div
+              className={`p-3.5 rounded-xl border space-y-2.5 ${
+                diagnostico.ok
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-red-500/10 border-red-500/30'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {diagnostico.ok ? (
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                )}
+                <p
+                  className={`text-xs leading-relaxed font-medium ${
+                    diagnostico.ok ? 'text-emerald-200' : 'text-red-200'
+                  }`}
+                >
+                  {diagnostico.mensaje}
+                </p>
+              </div>
+
+              {/* Pasos */}
+              {diagnostico.pasos.map((p, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-slate-900/60 border border-slate-700/60"
+                >
+                  {p.estado === 'ok' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-slate-200">{p.titulo}</p>
+                    <p className="text-[11px] text-slate-400 leading-relaxed break-words">{p.detalle}</p>
+                  </div>
+                </div>
+              ))}
+
+              {/* Pista accionable */}
+              {diagnostico.pista && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 flex gap-2">
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">{diagnostico.pista}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Separador */}
           <div className="flex items-center gap-3">
@@ -303,10 +357,10 @@ export const WhatsAppApiModal: React.FC<WhatsAppApiModalProps> = ({ onClose, onS
           <div className="p-3 rounded-xl bg-slate-800/70 border border-slate-700/70 flex gap-2.5">
             <MessageCircle className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              <b className="text-slate-300">¿Y el Rider chat?</b> Sigue tal cual — es el WhatsApp del bot
-              (Baileys) y es el canal del día a día. Este canal oficial es aparte: sale del número del
-              NEGOCIO verificado, con la calidad y el respaldo de Meta. La bandeja para LEER respuestas
-              por este canal (necesita un pequeño servidor webhook) viene en la próxima fase.
+              <b className="text-slate-300">¿Y el Rider chat?</b> ¡Ya está acoplado al panel! 🎉 La pestaña{' '}
+              <b className="text-emerald-400">Rider Chat Oficial</b> (menú → Operación) es el chat completo
+              con este canal: conversaciones, plantillas y broadcast. El Chat Baileys (bot Rudy) sigue tal
+              cual en su pestaña — es el canal del día a día.
             </p>
           </div>
         </div>

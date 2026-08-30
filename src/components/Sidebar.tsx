@@ -43,6 +43,8 @@ interface SidebarProps {
   activeDriversCount: number;
   /** Fase 3.1: chats sin leer del bot de Baileys (badge del menú) */
   chatNoLeidos?: number;
+  /** Fase 3.15: chats sin leer del Rider Chat Oficial (badge del menú) */
+  riderChatNoLeidos?: number;
   /** Nombre real del rider (perfil) */
   riderName?: string;
   /** Avatar ilustrado elegido (Fase 1.5) */
@@ -74,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeOrdersCount,
   activeDriversCount,
   chatNoLeidos = 0,
+  riderChatNoLeidos = 0,
   riderName = 'Rider',
   riderAvatar,
   onSeleccionarAvatar,
@@ -120,7 +123,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: chatNoLeidos > 0 ? `${chatNoLeidos}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
-        { id: 'chatapi', label: 'Chat API WhatsApp', icon: MessageSquare },
+        {
+          id: 'chatapi',
+          label: 'Rider Chat Oficial',
+          icon: MessageSquare,
+          badge: riderChatNoLeidos > 0 ? `${riderChatNoLeidos}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
         { id: 'catalogo', label: 'Catálogo', icon: Store },
         { id: 'plantillas', label: 'Centro del Bot', icon: SlidersHorizontal },
       ],
@@ -174,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.14</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.15</span>
         </div>
         <button
           onClick={onCloseMobile}
