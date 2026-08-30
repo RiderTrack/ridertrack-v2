@@ -118,6 +118,7 @@ import {
   guardarFondoChat,
   FondoChat,
   borrarChatCompleto,
+  estadoTicks,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
 import {
@@ -190,10 +191,21 @@ const AvatarChat: React.FC<{
   );
 };
 
-/** Ticks estilo WhatsApp: ⏳ pendiente / ✓✓ enviado */
-const Ticks: React.FC<{ enviado: boolean | null }> = ({ enviado }) => {
-  if (enviado === null) return null;
-  if (enviado) return <CheckCheck className="w-3.5 h-3.5 text-emerald-100/90" />;
+/**
+ * Fase 3.18 — Ticks estilo WhatsApp con 4 estados (componente):
+ * elige el icono según estadoTicks() — la lógica pura vive en
+ * utils/chatBaileys.ts para poder testearla sin cargar la vista.
+ */
+const Ticks: React.FC<{ enviado: boolean | null; estadoWa?: 'delivered' | 'read' | null }> = ({
+  enviado,
+  estadoWa,
+}) => {
+  const estado = estadoTicks(enviado, estadoWa);
+  if (estado === null) return null;
+  if (estado === 'leido')
+    return <CheckCheck className="w-3.5 h-3.5 text-sky-300 drop-shadow-[0_0_1px_rgba(56,189,248,.8)]" />;
+  if (estado === 'entregado') return <CheckCheck className="w-3.5 h-3.5 text-emerald-100/90" />;
+  if (estado === 'enviado') return <Check className="w-3.5 h-3.5 text-emerald-100/90" />;
   return <Clock className="w-3.5 h-3.5 text-emerald-100/70 animate-pulse" />;
 };
 
@@ -271,15 +283,18 @@ interface BurbujaProps {
 const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRevelar, onVerImagen, onEliminar }) => {
   const esEntrante = m.origen === 'cliente';
   const esBot = m.origen === 'bot';
+  const esAuto = m.origen === 'rudyAuto';
   const esCampana = m.origen === 'campana';
 
   const burbujaBase = esEntrante
     ? 'bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
     : esBot
       ? 'bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
-      : esCampana
-        ? 'bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
-        : 'bg-emerald-600 text-white rounded-2xl rounded-tr-md';
+      : esAuto
+        ? 'bg-emerald-700/80 border border-emerald-500/30 text-white rounded-2xl rounded-tr-md'
+        : esCampana
+          ? 'bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
+          : 'bg-emerald-600 text-white rounded-2xl rounded-tr-md';
 
   const esAudio = m.tipoContenido === 'audio' && (m.base64 || m.audioUrl);
 
@@ -290,6 +305,11 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
         {esBot && (
           <div className="flex items-center gap-1 mb-1 text-[10px] font-bold text-emerald-200/90 uppercase tracking-wide">
             <Bot className="w-3 h-3" /> Bot · {(m.accionBot || '').replace(/_/g, ' ')}
+          </div>
+        )}
+        {esAuto && (
+          <div className="flex items-center gap-1 mb-1 px-1.5 py-0.5 rounded bg-slate-950/60 w-fit text-[10px] font-bold text-white uppercase tracking-wide">
+            <Bot className="w-3 h-3 text-emerald-300" /> Bot · respondió solo
           </div>
         )}
         {esCampana && (
@@ -364,7 +384,7 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
             </button>
           )}
           <span className="text-[10px] opacity-70">{horaCorta(m.timestamp)}</span>
-          {!esEntrante && <Ticks enviado={m.enviado} />}
+          {!esEntrante && <Ticks enviado={m.enviado} estadoWa={m.estadoWa} />}
         </div>
       </div>
     </div>
@@ -381,7 +401,7 @@ const ItemConversacion: React.FC<{
   const ultimo = conv.ultimoMensaje;
   const prefijo = !ultimo
     ? ''
-    : ultimo.origen === 'rudy'
+    : ultimo.origen === 'rudy' || ultimo.origen === 'rudyAuto'
       ? 'Tú: '
       : ultimo.origen === 'bot'
         ? '🤖 '
@@ -432,6 +452,20 @@ const ItemConversacion: React.FC<{
         <div className="flex items-center gap-1.5">
           {conv.silenciado && <BellOff className="w-3 h-3 text-amber-500 flex-shrink-0" />}
           {conv.esGrupo && <Users className="w-3 h-3 text-emerald-400 flex-shrink-0" />}
+          {/* Fase 3.18 — mini-ticks junto al último mensaje tuyo (como WhatsApp) */}
+          {ultimo && (ultimo.origen === 'rudy') && (
+            <span className="flex-shrink-0">
+              {estadoTicks(ultimo.enviado, ultimo.estadoWa) === 'leido' ? (
+                <CheckCheck className="w-3 h-3 text-sky-400" />
+              ) : estadoTicks(ultimo.enviado, ultimo.estadoWa) === 'entregado' ? (
+                <CheckCheck className="w-3 h-3 text-slate-500" />
+              ) : estadoTicks(ultimo.enviado, ultimo.estadoWa) === 'enviado' ? (
+                <Check className="w-3 h-3 text-slate-500" />
+              ) : (
+                <Clock className="w-3 h-3 text-slate-500" />
+              )}
+            </span>
+          )}
           <span className={`text-xs truncate ${conv.noLeidos > 0 ? 'font-semibold text-slate-300' : 'text-slate-500'}`}>
             {prefijo}{preview}
           </span>
@@ -675,10 +709,15 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     return [...convActiva.mensajes, ...historial, ...historialImg];
   }, [convActiva, audiosLocales, imagenesLocales]);
 
-  // ── Auto-scroll al último mensaje ──
+  // ── Auto-scroll al último mensaje (Fase 3.18: inteligente) ──
+  // Solo baja solo si estabas cerca del final (como WhatsApp): si
+  // subiste a leer historial, un mensaje nuevo NO te salta el scroll.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const cercaDelFinal = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    // Al cambiar de chat sí baja siempre (empiezas en lo último)
+    if (cercaDelFinal || mensajesConv.length === 0) el.scrollTop = el.scrollHeight;
   }, [mensajesConv.length, telActivo]);
 
   // ── Mapa campaign_id → nombre ──
