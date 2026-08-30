@@ -47,6 +47,8 @@ import { NavegacionGpsModal } from './navegacion/NavegacionGpsModal';
 import type { ParadaNav } from '../services/navegacionGps';
 // Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
 import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
+import { esPagoEmpresa } from '../utils/realData';
+import { sonarPago } from '../services/notificaciones';
 // Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
 import { GRUPO_MATE_JID } from '../utils/chatBaileys';
 
@@ -276,8 +278,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
       );
     } else if (filtroEstado === 'empresa') {
-      // Pagados por empresa (Fase 2.5)
-      filtrados = filtrados.filter(c => c.st === 'empresa');
+      // 🏢 Pagos de la EMPRESA (Fase 3.14 fix): POS, Pago Link,
+      // Yape/Plin, Transferencia, José Smith y En Empresa — todos
+      // los cobra la empresa (el rider no recibe esa plata).
+      // Antes solo contaba st === 'empresa' y POS/Pago Link/Yape-Plin
+      // quedaban fuera del chip.
+      filtrados = filtrados.filter(c => esPagoEmpresa(c.st));
     } else if (filtroEstado === 'mzsn') {
       // ⚠️ Direcciones por manzana o sin número (Fase 2.5 — como la v1):
       // verlos juntos para pedirles la ubicación exacta de una vez
@@ -322,7 +328,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // ⚠️ Fase 2.5: contadores para los chips nuevos — clientes con dirección
   // por manzana / sin número (como la v1) y pagados por empresa
   const nMzsn = useMemo(() => clientes.filter(c => direccionIncompleta(c.dir, c.obs)).length, [clientes]);
-  const nEmpresa = useMemo(() => clientes.filter(c => c.st === 'empresa').length, [clientes]);
+  const nEmpresa = useMemo(() => clientes.filter(c => esPagoEmpresa(c.st)).length, [clientes]);
 
   // Botones de pago (iguales que RiderTrack Modular)
   const pagosList = [
@@ -941,12 +947,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             { id: 'pendientes', label: 'Pend', count: stats.pendientes },
             { id: 'entregados', label: 'Entreg', count: stats.entregados },
             { id: 'fallidos', label: '❌ No entreg', count: stats.fallidos },
-            { id: 'empresa', label: '🏪 Empresa', count: nEmpresa },
+            { id: 'empresa', label: '🏪 Empresa', count: nEmpresa, title: 'Pagos que cobra la empresa: POS, Pago Link, Yape/Plin, Transferencia, José Smith y En Empresa' },
             { id: 'mzsn', label: '⚠️ Mz/SN', count: nMzsn },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setFiltroEstado(tab.id as any)}
+              title={(tab as any).title}
               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all border ${
                 filtroEstado === tab.id
                   ? 'bg-emerald-600 text-white border-emerald-600'
@@ -1250,6 +1257,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               key={id}
                               onClick={() => {
                                 cambiarEstado(c.id, id);
+                                sonarPago(); // 🔔 Fase 3.14
                                 onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
                               }}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${

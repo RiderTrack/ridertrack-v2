@@ -119,6 +119,7 @@ import {
   FondoChat,
   borrarChatCompleto,
 } from '../utils/chatBaileys';
+import { sonarMensaje } from '../services/notificaciones';
 import {
   escucharPlantillas,
   PlantillaMensaje,
@@ -550,9 +551,16 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({ onShowToast })
 
   // ── Suscripciones en tiempo real ──
   useEffect(() => {
+    let sinLeerPrevio = -1; // -1 = primera carga (no beep)
     const sub = suscribirChat((convs, st) => {
       setConversaciones(convs);
       setStats(st);
+      // 🔔 Fase 3.14: beep cuando LLEGA un mensaje nuevo de un cliente
+      // (solo si subió la cantidad de sin leer y no es la primera carga)
+      if (sinLeerPrevio >= 0 && st.noLeidos > sinLeerPrevio) {
+        sonarMensaje();
+      }
+      sinLeerPrevio = st.noLeidos;
     });
     const unsubCampanas = suscribirCampanas(setCampanas);
     const unsubPlantillas = escucharPlantillas(setPlantillas, (e) =>
