@@ -780,6 +780,12 @@ export interface ConfigCuentas {
   /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
   plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
+  /** Fase 3.10: equipo de ventas — contactos que envía el bot (chicos_venta) */
+  ventas?: {
+    fabiana?: { nombre: string; celular: string; };
+    karla?: { nombre: string; celular: string; };
+    tocho?: { nombre: string; celular: string; };
+  };
   /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
   ruta?: ConfigRuta;
 }
@@ -791,6 +797,11 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
   plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
+  ventas: {
+    fabiana: { nombre: 'Fabiana', celular: '' },
+    karla: { nombre: 'Karla', celular: '' },
+    tocho: { nombre: 'Tocho', celular: '' },
+  },
   ruta: { inicio: null, fin: null, volverAlInicio: false },
 };
 
@@ -821,6 +832,11 @@ function fusionarConfig(data: any): ConfigCuentas {
     interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
     plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
     empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
+    ventas: {
+      fabiana: { ...CONFIG_CUENTAS_DEFAULT.ventas!.fabiana, ...data?.ventas?.fabiana },
+      karla: { ...CONFIG_CUENTAS_DEFAULT.ventas!.karla, ...data?.ventas?.karla },
+      tocho: { ...CONFIG_CUENTAS_DEFAULT.ventas!.tocho, ...data?.ventas?.tocho },
+    },
     ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
   };
 }
