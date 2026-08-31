@@ -802,6 +802,15 @@ export interface ConfigCuentas {
     /** Nombre verificado del negocio (lo devuelve la prueba de conexión) */
     nombreVerificado?: string;
   };
+  /** Fase 3.21: apariencia — la imagen que representa a RiderTrack V2.
+   *  Se configura en Configuración → “Icono de la App”; el login la
+   *  muestra en lugar del logo por defecto. El icono del APK (escudo
+   *  v1) va fijo en el build vía android-icons/ — esto es el logo
+   *  interno de la app, editable al toque sin recompilar. */
+  apariencia?: {
+    /** Logo en base64 JPEG comprimido (~800px máx). Vacío = logo por defecto */
+    logoBase64?: string;
+  };
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -818,6 +827,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   },
   ruta: { inicio: null, fin: null, volverAlInicio: false },
   whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
+  apariencia: { logoBase64: '' },
 };
 
 // ── Fase 2.1: utilidades a prueba de red muerta ─────────────
@@ -854,6 +864,7 @@ function fusionarConfig(data: any): ConfigCuentas {
     },
     ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
     whatsappMeta: { ...CONFIG_CUENTAS_DEFAULT.whatsappMeta, ...data?.whatsappMeta },
+    apariencia: { ...CONFIG_CUENTAS_DEFAULT.apariencia, ...data?.apariencia },
   };
 }
 
