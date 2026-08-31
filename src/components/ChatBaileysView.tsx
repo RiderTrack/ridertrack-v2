@@ -46,7 +46,7 @@
 //   ✅ cabecera responsive (menú ⋮ — ya no se montan los botones)
 // ═══════════════════════════════════════════════════════════
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search,
   Send,
@@ -85,6 +85,7 @@ import {
   Package,
   Wallet,
   Navigation,
+  Type,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -187,7 +188,7 @@ const AvatarChat: React.FC<{
       <div
         className={`${grande ? 'w-11 h-11' : 'w-10 h-10'} rounded-full flex items-center justify-center flex-shrink-0 shadow-inner select-none bg-gradient-to-br from-emerald-500 to-teal-600 border border-emerald-400/40`}
       >
-        <Users className={`${grande ? 'w-5 h-5' : 'w-4.5 h-4.5'} text-white`} />
+        <Users className={`${grande ? 'w-5 h-5' : 'w-4.5 h-4.5'} text-white siempre-blanco`} />
       </div>
     );
   }
@@ -309,14 +310,14 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
   const esCampana = m.origen === 'campana';
 
   const burbujaBase = esEntrante
-    ? 'bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
+    ? 'rt-burbuja rt-burbuja-entrante bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
     : esBot
-      ? 'bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
+      ? 'rt-burbuja rt-burbuja-saliente bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
       : esAuto
-        ? 'bg-emerald-700/80 border border-emerald-500/30 text-white rounded-2xl rounded-tr-md'
+        ? 'rt-burbuja rt-burbuja-saliente bg-emerald-700/80 border border-emerald-500/30 text-white rounded-2xl rounded-tr-md'
         : esCampana
-          ? 'bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
-          : 'bg-emerald-600 text-white rounded-2xl rounded-tr-md';
+          ? 'rt-burbuja rt-burbuja-saliente bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
+          : 'rt-burbuja rt-burbuja-saliente bg-emerald-600 text-white rounded-2xl rounded-tr-md';
 
   const esAudio = m.tipoContenido === 'audio' && (m.base64 || m.audioUrl);
 
@@ -737,6 +738,23 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [presencia, setPresencia] = useState<PresenciaChat | null>(null);
   // Fase 3.22 — ficha viva de la ruta: t9 → posición/dirección/producto/monto
   const [mapaRuta, setMapaRuta] = useState<Map<string, InfoClienteRuta>>(new Map());
+  // Fase 3.25 — color de fuente del chat: 'auto' (sigue el tema) /
+  // 'blanca' (letras blancas, burbujas oscuras) / 'tinta' (letras
+  // oscuras, burbujas claras). Se recuerda entre sesiones.
+  const [fuenteChat, setFuenteChat] = useState<'auto' | 'blanca' | 'tinta'>(() => {
+    try {
+      const g = localStorage.getItem('rt_chat_fuente');
+      return g === 'blanca' || g === 'tinta' ? g : 'auto';
+    } catch { return 'auto'; }
+  });
+  const [menuFuente, setMenuFuente] = useState(false); // popover del selector
+  const menuFuenteRef = useRef<HTMLDivElement>(null);
+
+  const cambiarFuente = useCallback((f: 'auto' | 'blanca' | 'tinta') => {
+    setFuenteChat(f);
+    setMenuFuente(false);
+    try { localStorage.setItem('rt_chat_fuente', f); } catch { /* sin storage */ }
+  }, []);
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -829,11 +847,12 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     onActiveChatChange?.(telActivo);
   }, [telActivo, onActiveChatChange]);
 
-  // ── Cerrar el menú ⋮ al hacer clic fuera ──
+  // ── Cerrar el menú ⋮ y el selector de fuente al hacer clic fuera ──
   useEffect(() => {
-    if (!menuChat) return;
+    if (!menuChat && !menuFuente) return;
     const cerrar = (ev: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(ev.target as Node)) setMenuChat(false);
+      if (menuFuenteRef.current && !menuFuenteRef.current.contains(ev.target as Node)) setMenuFuente(false);
     };
     document.addEventListener('mousedown', cerrar);
     document.addEventListener('touchstart', cerrar);
@@ -1609,11 +1628,65 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   </div>
                 )}
 
+                {/* Fase 3.25 — Color de la fuente del chat (siempre visible,
+                    móvil incluido): Automática / Blanca / Tinta */}
+                <div className="relative flex-shrink-0" ref={menuFuenteRef}>
+                  <button
+                    type="button"
+                    onClick={() => { setMenuFuente((v) => !v); setMenuChat(false); }}
+                    className={`p-2 rounded-xl border transition-colors ${
+                      fuenteChat !== 'auto'
+                        ? 'bg-sky-500/20 text-sky-300 border-sky-400/50'
+                        : menuFuente
+                          ? 'bg-slate-600/50 text-white border-slate-500'
+                          : 'text-slate-300 border-slate-600 bg-slate-700/40 hover:bg-slate-700'
+                    }`}
+                    title="Color de la letra del chat (F3.25): automática, blanca o tinta"
+                  >
+                    <Type className="w-4 h-4" />
+                  </button>
+                  {menuFuente && (
+                    <div className="absolute right-0 top-11 z-50 w-60 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden py-1.5">
+                      <div className="px-3.5 pt-1 pb-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        Color de la letra
+                      </div>
+                      {([
+                        { id: 'auto', etiqueta: 'Automática', detalle: 'Sigue el tema de la app' },
+                        { id: 'blanca', etiqueta: 'Blanca', detalle: 'Letras blancas · burbujas oscuras' },
+                        { id: 'tinta', etiqueta: 'Tinta oscura', detalle: 'Letras negras · burbujas claras' },
+                      ] as const).map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => cambiarFuente(o.id)}
+                          className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors ${
+                            fuenteChat === o.id ? 'bg-sky-500/15' : 'hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className={`flex-shrink-0 w-4 ${fuenteChat === o.id ? 'text-sky-300' : 'text-transparent'}`}>
+                            <Check className="w-4 h-4" />
+                          </span>
+                          <span className="flex flex-col min-w-0">
+                            <span className={`text-sm font-bold ${fuenteChat === o.id ? 'text-white' : 'text-slate-200'}`}>{o.etiqueta}</span>
+                            <span className="text-[10px] text-slate-500 truncate">{o.detalle}</span>
+                          </span>
+                          <span className="ml-auto flex-shrink-0 w-6 h-6 rounded-lg border border-slate-600 flex items-center justify-center text-[10px] font-black bg-slate-800">
+                            <span className={o.id === 'blanca' ? 'text-white' : o.id === 'tinta' ? 'text-slate-950' : 'text-slate-300'}>Aa</span>
+                          </span>
+                        </button>
+                      ))}
+                      <div className="px-3.5 pt-2 pb-1 text-[10px] text-slate-500 leading-snug border-t border-slate-800 mt-1.5">
+                        En modo claro las burbujas verdes quedaban con letra negra (F3.25 lo corrige). Elige lo que mejor leas.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Menú ⋮ (siempre visible — móvil incluido) */}
                 <div className="relative flex-shrink-0" ref={menuRef}>
                   <button
                     type="button"
-                    onClick={() => setMenuChat((v) => !v)}
+                    onClick={() => { setMenuChat((v) => !v); setMenuFuente(false); }}
                     className={`p-2 rounded-xl border transition-colors ${menuChat ? 'bg-emerald-600 text-white border-emerald-500' : 'text-slate-300 border-slate-600 bg-slate-700/40 hover:bg-slate-700'}`}
                     title="Más opciones"
                   >
@@ -1647,15 +1720,17 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
               {/* Mensajes (con el fondo elegido) */}
               <div
                 ref={scrollRef}
-                className={`flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 ${fondo.css ? '' : 'bg-slate-900/40'}`}
+                className={`flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 ${fondo.css ? '' : 'bg-slate-900/40'} ${
+                  fuenteChat === 'blanca' ? 'rt-fuente-blanca' : fuenteChat === 'tinta' ? 'rt-fuente-tinta' : ''
+                }`}
                 style={fondo.css ? { background: fondo.css } : undefined}
               >
                 {esGrupo && (
                   <div className="mx-auto max-w-lg mb-3 p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-200/90 leading-relaxed">
                     <b className="text-sky-300">👥 Grupo de trabajo MATE.</b> Lo que escribas aquí lo manda el bot
-                    al grupo de WhatsApp de MATE. Ves todos los reportes que el bot envía al grupo; lo que
-                    respondan los compañeros llegará cuando el bot también guarde los mensajes del grupo
-                    (pendiente en su parche).
+                    al grupo de WhatsApp de MATE. Los reportes del bot y <b>lo que respondan los compañeros
+                    llegan aquí en vivo</b> (parche grupo_mate.js v2 del bot — si dejan de llegar,
+                    actualiza el parche de la fase 3.25 y reinicia el bot).
                   </div>
                 )}
                 {mensajesAgrupados.length === 0 ? (
