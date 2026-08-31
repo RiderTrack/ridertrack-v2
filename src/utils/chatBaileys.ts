@@ -1176,6 +1176,139 @@ export async function avisarPosicionBot(
 }
 
 // ═══════════════════════════════════════════════════════════
+// FASE 3.22 — FICHA DEL CLIENTE EN EL CHAT (en vivo)
+// Posición en la ruta + dirección + producto + monto, sin salir
+// de la conversación. Una SOLA suscripción a ruta_activa sirve
+// para toda la lista de chats y para la ficha del chat abierto.
+// ═══════════════════════════════════════════════════════════
+
+/** Info de un cliente dentro de la ruta activa (para el chat) */
+export interface InfoClienteRuta {
+  /** posición 1-based dentro del orden de la ruta */
+  posicion: number;
+  /** total de clientes en la ruta de hoy */
+  total: number;
+  /** entregados/pagados hasta ahora */
+  entregados: number;
+  /** entregas pendientes ANTES de llegar a él */
+  faltanAntes: number;
+  /** estado bruto (st) — ''|pendiente|efectivo|yape-rudy|...|fallida */
+  estado: string;
+  /** estado bonito para pintar (⏳ Pendiente / 💵 Efectivo...) */
+  estadoTexto: string;
+  dir: string;
+  dist: string;
+  prod: string;
+  cobrar: number;
+  nombreRuta: string;
+}
+
+/** Estados que cuentan como PAGADO/entregado (mismo criterio que RutaView) */
+const ST_PAGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio', 'entregado'];
+/** Estados fallidos (borde rojo en RutaView) */
+const ST_FALLIDOS = ['fallida', 'fallido', 'rechazado', 'cancelado', 'no_contesta', 'ausente', 'devolucion'];
+/** Traducción corta de los estados conocidos */
+const ST_TEXTO: Record<string, string> = {
+  pendiente: '⏳ Pendiente',
+  entregado: '✅ Entregado',
+  efectivo: '💵 Efectivo',
+  'yape-rudy': '💰 Yape (a mí)',
+  'yape-efectivo': '💰 Yape+Efectivo',
+  'yape-plin': '💚 Yape/Plin',
+  mixto: '🔀 Mixto',
+  pos: '💳 POS',
+  transferencia: '🏦 Transferencia',
+  'pago-link': '🔗 Pago Link',
+  'jose-smith': '👤 José Smith',
+  empresa: '🏢 Empresa',
+  cambio: '🔄 Cambio',
+  reprogramar: '🔁 Reprogramar',
+  fallida: '❌ Fallida',
+  fallido: '❌ Fallida',
+  rechazado: '❌ Rechazado',
+  cancelado: '🚫 Cancelado',
+  no_contesta: '📵 No contesta',
+  ausente: '🚪 Ausente',
+  devolucion: '↩️ Devolución',
+};
+
+/** Normaliza el estado de un cliente de la ruta */
+function stNormal(st: unknown): string {
+  const s = String(st ?? '').trim();
+  return !s || s === 'pendiente' ? 'pendiente' : s;
+}
+
+/** ¿El cliente está pagado/entregado? */
+export function stEsPagado(st: string): boolean {
+  return ST_PAGADOS.includes(st);
+}
+
+/** Color base del estado (para la ficha y la insignia de la lista) */
+export function stColorRuta(st: string): 'pendiente' | 'pagado' | 'fallido' | 'otro' {
+  if (!st || st === 'pendiente') return 'pendiente';
+  if (ST_PAGADOS.includes(st)) return 'pagado';
+  if (ST_FALLIDOS.includes(st)) return 'fallido';
+  return 'otro';
+}
+
+/** Texto bonito del estado */
+export function stTextoRuta(st: string): string {
+  return ST_TEXTO[st] || st;
+}
+
+/**
+ * Suscripción EN VIVO a toda la ruta activa → mapa t9 → InfoClienteRuta.
+ * UNA sola suscripción alimenta la insignia de cada conversación de la
+ * lista y la ficha del chat abierto. Se actualiza sola cuando marcas
+ * entregado/pagado desde RutaView (mismo doc ruta_activa).
+ */
+export function suscribirRutaClientes(
+  cb: (mapa: Map<string, InfoClienteRuta>, nombreRuta: string) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db!, 'ruta_activa', UID_BOT),
+    (snap) => {
+      const mapa = new Map<string, InfoClienteRuta>();
+      if (!snap.exists()) {
+        cb(mapa, '');
+        return;
+      }
+      const data = snap.data() || ({} as DocumentData);
+      const lista: any[] = Array.isArray(data.clientes) ? data.clientes : [];
+      const nombreRuta = String(data.nombre || data.titulo || '');
+      const abierto = (x: any) => {
+        const s = stNormal(x.st);
+        return s === 'pendiente' || s === 'reprogramar';
+      };
+      const entregados = lista.filter((x) => !abierto(x)).length;
+      lista.forEach((x, idx) => {
+        const t9 = telKey(x.cel);
+        if (!t9) return;
+        const st = stNormal(x.st);
+        mapa.set(t9, {
+          posicion: idx + 1,
+          total: lista.length,
+          entregados,
+          faltanAntes: lista.filter((y, i) => i < idx && abierto(y)).length,
+          estado: st,
+          estadoTexto: stTextoRuta(st),
+          dir: String(x.dir || ''),
+          dist: String(x.dist || ''),
+          prod: String(x.prod || ''),
+          cobrar: parseFloat(String(x.cobrar || 0)) || 0,
+          nombreRuta,
+        });
+      });
+      cb(mapa, nombreRuta);
+    },
+    () => {
+      /* sin ruta activa o sin permiso → lista vacía, el chat queda igual */
+      cb(new Map(), '');
+    }
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // FASE 3.9 — GALERÍA: FOTO + MENSAJITO POR EL BOT
 // (elige destino: cliente directo o grupo MATE)
 // ═══════════════════════════════════════════════════════════
