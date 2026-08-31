@@ -3,6 +3,7 @@
 // Proyecto: ridertrack-93c8a (mismo que Modular y RiderChat)
 // ═══════════════════════════════════════════════════════════
 
+import { Capacitor } from '@capacitor/core';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
@@ -14,6 +15,7 @@ import {
   sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
+  updateProfile,
   User,
 } from 'firebase/auth';
 import {
@@ -57,20 +59,17 @@ try {
   app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
   auth = getAuth(app);
 
-  // Detectar APK (Capacitor) para usar long polling
-  const isAPK = typeof (window as any).Capacitor !== 'undefined' && (window as any).Capacitor?.isNative;
-  if (isAPK) {
-    console.log('📱 APK detectado - usando long polling');
+  // Detectar APK (Capacitor) para usar long polling (mejor performance en Android)
+  const isNative = Capacitor.isNativePlatform();
+  if (isNative) {
     db = initializeFirestore(app, { experimentalForceLongPolling: true });
   } else {
     db = getFirestore(app);
   }
 
   storage = getStorage(app);
-
-  console.log('✅ Firebase inicializado:', firebaseConfig.projectId);
 } catch (e) {
-  console.error('❌ Error inicializando Firebase:', e);
+  console.error('Error inicializando Firebase:', e);
 }
 
 export { app, auth, db, storage };
@@ -94,11 +93,21 @@ export async function loginConGoogleWeb() {
 // Login con Google (APK - Capacitor GoogleAuth)
 export async function loginConGoogleAPK(googleUser: any) {
   try {
-    const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+    // El idToken puede venir en diferentes ubicaciones según la versión del plugin
+    const idToken = googleUser?.authentication?.idToken
+      || googleUser?.idToken
+      || googleUser?.authentication?.accessToken
+      || googleUser?.accessToken;
+
+    if (!idToken) {
+      throw new Error('No se pudo obtener el token de Google');
+    }
+
+    const credential = GoogleAuthProvider.credential(idToken);
     const result = await signInWithCredential(auth, credential);
     return { success: true, user: result.user };
   } catch (e: any) {
-    return { success: false, error: e.message };
+    return { success: false, error: e.message || 'Error al conectar con Firebase' };
   }
 }
 
@@ -121,8 +130,8 @@ export async function loginConEmail(email: string, password: string) {
 export async function registrarConEmail(email: string, password: string, nombre: string) {
   try {
     const result = await createUserWithEmailAndPassword(auth, email, password);
-    // Guardar nombre en el perfil
-    await result.user.updateProfile({ displayName: nombre });
+    // Guardar nombre en el perfil (API modular de Firebase v10: función externa, no método)
+    await updateProfile(result.user, { displayName: nombre });
     // Guardar datos en Firestore
     await setDoc(doc(db, 'usuarios', result.user.uid), {
       nombre: nombre,

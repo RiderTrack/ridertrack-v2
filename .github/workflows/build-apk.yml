@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+# ⚠️ EDITA AQUÍ si registras un NUEVO SHA-1 en Firebase Console
+env:
+  FIREBASE_SHA1: "4D:85:AF:E6:56:7E:7F:47:69:9A:E4:E1:1A:24:2C:48:29:19:03:3B"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,6 +35,26 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+
+      # ══════════════════════════════════════════════════════════════════
+      # 🛡️ ANTI-429 — Maven Central (repo.maven.apache.org) limita las
+      # peticiones de los servidores compartidos de GitHub y el build muere
+      # con "429 Too Many Requests". Protección en 4 capas:
+      #   1) Espejos Maven (Aliyun + Tencent) ANTES de mavenCentral()
+      #   2) Reintentos de red de Gradle (429/503 → espera y reintenta)
+      #   3) Caché de dependencias (tras el 1er build verde, ya no descarga)
+      #   4) Reintento completo del build tras 90 s si algo más falla
+      # ══════════════════════════════════════════════════════════════════
+
+      - name: "[Anti-429 1/4] Caché de dependencias Gradle"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-v1
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps react-is
@@ -71,6 +95,31 @@ jobs:
             echo 'apply plugin: "com.google.gms.google-services"' >> "$APP_GRADLE"
           fi
 
+      - name: "[Anti-429 2/4] Espejos Maven en build.gradle (Aliyun + Tencent antes de mavenCentral)"
+        run: |
+          BG="android/build.gradle"
+          if ! grep -q "maven.aliyun.com" "$BG"; then
+            # Inserta los espejos DESPUÉS de google() (confiable) y ANTES de
+            # mavenCentral() (el que responde 429) en buildscript y allprojects
+            sed -i "/^[[:space:]]*google()$/a\        maven { url 'https://maven.aliyun.com/repository/central' }\n        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }" "$BG"
+            echo "✅ Espejos insertados en build.gradle (buildscript + allprojects)"
+          else
+            echo "✅ Espejos ya presentes en build.gradle"
+          fi
+          echo "### 🛡️ Anti-429: repositorios del build" >> $GITHUB_STEP_SUMMARY
+          echo '```gradle' >> $GITHUB_STEP_SUMMARY
+          sed -n '/buildscript {/,/^}/p' "$BG" | head -20 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "[Anti-429 3/4] Reintentos de red en gradle.properties"
+        run: |
+          GP="android/gradle.properties"
+          touch "$GP"
+          if ! grep -q "org.gradle.internal.repository.max.retries" "$GP"; then
+            printf '\n# Reintentos ante 429/503 de repos Maven (GitHub Actions)\nsystemProp.org.gradle.internal.repository.max.retries=3\nsystemProp.org.gradle.internal.repository.initial.backoff=1000\n' >> "$GP"
+          fi
+          echo "✅ Reintentos de red activados (3 intentos, backoff 1 s)"
+
       - name: Configure GoogleAuth plugin
         run: |
           mkdir -p android/app/src/main/res/values
@@ -89,17 +138,34 @@ jobs:
       - name: Set Gradle permissions
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Build Debug APK (con reintento automático)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          if ! ./gradlew assembleDebug --no-daemon; then
+            echo "⚠️ Primer intento falló (suele ser el 429 de Maven Central) — esperando 90 s y reintentando…"
+            sleep 90
+            ./gradlew assembleDebug --no-daemon
+          fi
 
       - name: Restore or generate keystore
         run: |
+          echo "## 🔑 Diagnóstico de firma" >> $GITHUB_STEP_SUMMARY
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "✅ Usando keystore guardado en Secrets"
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            # 🔍 Mostrar el SHA-1 del keystore del secret (para comparar con Firebase)
+            KS_SHA1=$(keytool -list -v -keystore release.keystore -alias ridertrack -storepass ridertrack123 2>/dev/null | grep "SHA1:" | awk '{print $NF}')
+            if [ -n "$KS_SHA1" ]; then
+              echo "- SHA-1 keystore del secret: $KS_SHA1"
+              echo "SHA-1 del keystore (secret): **$KS_SHA1**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ⚠️ No se pudo leer el SHA-1 del keystore (alias/password distintos)"
+              echo "⚠️ No se pudo leer el keystore con alias 'ridertrack' / pass 'ridertrack123'" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "⚠️ No hay KEYSTORE_BASE64 — generando nuevo keystore"
+            echo "### ⚠️ ATENCIÓN: keystore FALLBACK generado" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Este APK NO funcionará con login Google (SHA-1 no registrado en Firebase)" >> $GITHUB_STEP_SUMMARY
             keytool -genkeypair \
               -keystore release.keystore \
               -alias ridertrack \
@@ -122,6 +188,34 @@ jobs:
         run: |
           APKSIGNER=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -1)
           $APKSIGNER sign --ks release.keystore --ks-key-alias ridertrack --ks-pass pass:ridertrack123 --key-pass pass:ridertrack123 --out RiderTrackV2.apk RiderTrackV2-aligned.apk
+
+      - name: Verify APK SHA-1 vs Firebase
+        run: |
+          APKSIGNER=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -1)
+          # Obtener SHA-1 real del APK firmado
+          APK_SHA1=$($APKSIGNER verify --print-certs RiderTrackV2.apk 2>/dev/null | grep -i "SHA-1" | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
+          if [ -z "$APK_SHA1" ]; then
+            APK_SHA1=$(keytool -printcert -jarfile RiderTrackV2.apk 2>/dev/null | grep -i "^SHA1:" | head -1 | awk '{print $NF}')
+          fi
+          echo "SHA-1 del APK firmado: $APK_SHA1"
+          echo "SHA-1 esperado (Firebase): ${{ env.FIREBASE_SHA1 }}"
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Verificación | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA-1 del APK firmado | \`$APK_SHA1\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA-1 registrado en Firebase | \`${{ env.FIREBASE_SHA1 }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$APK_SHA1" = "${{ env.FIREBASE_SHA1 }}" ]; then
+            echo "### ✅ SHA-1 COINCIDE — el login Google debe funcionar" >> $GITHUB_STEP_SUMMARY
+            echo "✅ El SHA-1 del APK coincide con Firebase"
+          else
+            echo "### ❌ SHA-1 NO COINCIDE — el login Google FALLARÁ" >> $GITHUB_STEP_SUMMARY
+            echo "👉 Registra ESTE SHA-1 en Firebase Console → Configuración → app com.ridertrack.v2:" >> $GITHUB_STEP_SUMMARY
+            echo "\`$APK_SHA1\`" >> $GITHUB_STEP_SUMMARY
+            echo "❌ El SHA-1 del APK ($APK_SHA1) NO coincide con Firebase (${{ env.FIREBASE_SHA1 }})"
+          fi
 
       - name: Upload signed APK
         uses: actions/upload-artifact@v4

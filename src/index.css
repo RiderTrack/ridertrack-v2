@@ -1,9 +1,158 @@
 @import "tailwindcss";
 
+/* ═══ VARIANTE "light:" OFICIAL (Fase 2.4) ═══
+   Tailwind v4 no trae variante light: de fábrica (solo dark: por
+   medio del SO). Los componentes 2.2 (GoogleLiveMap, LeafletLiveMap)
+   ya usaban clases light:* que estaban MUERTAS (no compilaban).
+   Esta línea las activa de verdad: light:bg-white ahora funciona
+   cuando el <html> tiene la clase .light — mismo mecanismo que el
+   toggle de tema de la app. */
+@custom-variant light (&:where(.light, .light *));
+
+/* ═══════════════════════════════════════════════════════════════
+   🎨 TEMA CLARO / OSCURO COMPLETO — Fase 1.5
+   ═══════════════════════════════════════════════════════════════
+   Tailwind v4 compila CADA utilidad de color como una variable CSS:
+     .bg-slate-800  →  background-color: var(--color-slate-800)
+     .text-white    →  color: var(--color-white)
+
+   Eso nos permite convertir TODA la app (fondos, letras, botones,
+   bordes, bordes divisores…) invirtiendo la paleta "slate" cuando
+   el <html> tiene la clase .light:
+
+   • Lo que era superficie oscura (slate-800/900/950) → claro.
+   • Lo que era texto claro (slate-50/100/200/300)   → tinta oscura.
+   • Los acentos 300/400 (emerald, blue, amber…) que eran tenues
+     sobre fondo oscuro → se oscurecen para leerse sobre blanco.
+
+   Así NINGUNA letra se desvanece: cada texto mantiene su contraste
+   pero con los papeles invertidos. Ideal para trabajar bajo el sol.
+   ═══════════════════════════════════════════════════════════════ */
+
+.light {
+  /* ── Superficies (lo oscuro se vuelve claro) ── */
+  --color-slate-950: #e8eef6;   /* fondo raíz de la app */
+  --color-slate-900: #ffffff;   /* sidebar, tarjetas, headers */
+  --color-slate-800: #f1f5f9;   /* tarjetas secundarias, inputs */
+  --color-slate-700: #dbe3ee;   /* bordes de tarjetas */
+  --color-slate-600: #c3cfdc;   /* bordes secundarios */
+  /* ── Texto (lo claro se vuelve tinta) ── */
+  --color-slate-500: #64748b;   /* texto apagado (similar en ambos) */
+  --color-slate-400: #51617b;   /* texto secundario */
+  --color-slate-300: #3a4a63;   /* texto medio */
+  --color-slate-200: #243349;   /* texto fuerte */
+  --color-slate-100: #152238;   /* texto principal */
+  --color-slate-50: #0d1728;    /* texto máximo */
+
+  /* ── Tonos PROFUNDOS de acento (Fase 2.4): los gradientes "premium"
+     usaban via-blue-950 (azul marino) que NO se invertía → en modo
+     claro quedaba una banda oscura fea en el centro del hero y los
+     textos perdían contraste (bug reportado con screenshot). Ahora
+     se vuelven azules suaves: el gradiente queda blanco→celeste. ── */
+  --color-blue-950: #dbeafe;
+  --color-blue-900: #bfdbfe;
+  --color-indigo-950: #e0e7ff;
+  --color-indigo-900: #c7d2fe;
+
+  /* ── Acentos 300/400: se oscurecen para leerse en fondo claro ── */
+  --color-emerald-400: #059669;
+  --color-emerald-300: #047857;
+  --color-blue-400: #2563eb;
+  --color-blue-300: #1d4ed8;
+  --color-indigo-400: #4f46e5;
+  --color-indigo-300: #4338ca;
+  --color-purple-400: #9333ea;
+  --color-purple-300: #7e22ce;
+  --color-amber-400: #b45309;
+  --color-amber-300: #92400e;
+  --color-red-400: #dc2626;
+  --color-red-300: #b91c1c;
+  --color-rose-400: #e11d48;
+  --color-rose-300: #be123c;
+  --color-cyan-400: #0891b2;
+  --color-cyan-300: #0e7490;
+  --color-teal-400: #0d9488;
+  --color-teal-300: #0f766e;
+  --color-green-400: #16a34a;
+  --color-green-300: #15803d;
+  --color-pink-400: #db2777;
+  --color-pink-300: #be185d;
+  --color-sky-400: #0284c7;
+  --color-sky-300: #0369a1;
+  --color-yellow-400: #a16207;
+  --color-yellow-300: #854d0e;
+  --color-orange-400: #c2410c;
+  --color-lime-400: #4d7c0f;
+  --color-violet-400: #7c3aed;
+  --color-fuchsia-400: #c026d3;
+}
+
+/* Los textos "text-white" que viven sobre tarjetas/oscuros pasan a
+   tinta oscura en modo claro (antes se desvanecían sobre el blanco) */
+.light .text-white {
+  color: #0f1a2e;
+}
+
+/* Igual para los estados hover/group-hover (iconos de botones de
+   cierre, chips, pestañas…) — así NINGÚN texto se vuelve invisible */
+.light .hover\:text-white:hover,
+.light .group:hover .group-hover\:text-white,
+.light .focus\:text-white:focus {
+  color: #0f1a2e;
+}
+
+/* …pero los botones y elementos con fondo de COLOR SÓLIDO conservan
+   su letra blanca (azul, verde, morado, rojo, etc.) */
+.light .bg-blue-500, .light .bg-blue-600, .light .bg-blue-700,
+.light .bg-emerald-500, .light .bg-emerald-600, .light .bg-emerald-700,
+.light .bg-indigo-500, .light .bg-indigo-600, .light .bg-indigo-700,
+.light .bg-purple-500, .light .bg-purple-600, .light .bg-purple-700,
+.light .bg-red-500, .light .bg-red-600, .light .bg-red-700,
+.light .bg-rose-500, .light .bg-rose-600, .light .bg-rose-700,
+.light .bg-amber-500, .light .bg-amber-600, .light .bg-amber-700,
+.light .bg-orange-500, .light .bg-orange-600,
+.light .bg-teal-500, .light .bg-teal-600,
+.light .bg-cyan-500, .light .bg-cyan-600,
+.light .bg-green-500, .light .bg-green-600,
+.light .bg-violet-500, .light .bg-violet-600,
+.light .bg-sky-500, .light .bg-sky-600,
+.light .bg-lime-500, .light .bg-lime-600,
+.light .bg-pink-500, .light .bg-pink-600,
+.light .bg-fuchsia-500, .light .bg-fuchsia-600,
+.light .bg-yellow-500, .light .bg-yellow-600,
+.light .bg-slate-600, .light .bg-slate-700 {
+  color: #ffffff;
+}
+
+/* El logo "RT" del header y textos que DEBEN quedar blancos sobre
+   gradientes de color usan la clase .siempre-blanco */
+.light .siempre-blanco,
+.light .siempre-blanco * {
+  color: #ffffff !important;
+}
+
 @layer base {
   body {
-    @apply bg-[#0f172a] text-slate-100 antialiased font-sans selection:bg-blue-500 selection:text-white;
+    /* Fondo que sigue al tema: oscuro #0f172a / claro #e8eef6 */
+    @apply bg-slate-950 text-slate-100 antialiased font-sans selection:bg-blue-500 selection:text-white;
   }
+}
+
+/* ═══ PULSO DEL CRONÓMETRO / GPS EN VIVO (Fase 1.5) ═══ */
+@keyframes rtPulso {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.rt-pulso { animation: rtPulso 2s ease-out infinite; }
+
+/* Ocultar scrollbar (pestañas de categorías del avatar picker) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Custom Scrollbar */
@@ -23,4 +172,10 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.7);
+}
+
+/* ═══ Fase 3.11: Medios — ecualizador del mini-reproductor ═══ */
+@keyframes rtEq {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
 }

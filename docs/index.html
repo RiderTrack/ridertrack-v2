@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>RiderTrack · Tu entrega en vivo</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛵</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #0b1220;
+    --card: #101a2e;
+    --card2: #16223a;
+    --borde: #24344f;
+    --texto: #e7eefc;
+    --muted: #8ea3c2;
+    --indigo: #6366f1;
+    --indigo2: #818cf8;
+    --amber: #f59e0b;
+    --verde: #10b981;
+    --rojo: #ef4444;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--texto);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; }
+  #app { max-width: 480px; margin: 0 auto; padding: 12px 12px 24px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Header */
+  .hdr { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: linear-gradient(135deg, #1e2a4a, #101a2e); border: 1px solid var(--borde);
+    border-radius: 16px; }
+  .hdr .logo { font-size: 26px; filter: drop-shadow(0 0 6px rgba(99,102,241,.6)); }
+  .hdr .marca { font-weight: 900; font-size: 15px; letter-spacing: .3px; }
+  .hdr .marca small { display: block; font-weight: 600; font-size: 10.5px; color: var(--muted); letter-spacing: .5px; }
+  .hdr .estado-chip { margin-left: auto; font-size: 10.5px; font-weight: 800; padding: 5px 10px;
+    border-radius: 999px; border: 1px solid; white-space: nowrap; }
+
+  /* Banner de estado */
+  .banner { border-radius: 16px; padding: 14px 16px; border: 1px solid; position: relative; overflow: hidden; }
+  .banner h2 { margin: 0; font-size: 17px; font-weight: 900; display: flex; align-items: center; gap: 8px; }
+  .banner p { margin: 4px 0 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .banner .eta { font-size: 30px; font-weight: 900; margin-top: 6px; letter-spacing: .5px; }
+  .banner .eta small { font-size: 12px; font-weight: 700; color: var(--muted); margin-left: 6px; }
+  .b-camino { background: linear-gradient(135deg, rgba(99,102,241,.18), rgba(99,102,241,.05)); border-color: rgba(99,102,241,.4); }
+  .b-camino .eta { color: var(--indigo2); }
+  .b-llegando { background: linear-gradient(135deg, rgba(245,158,11,.18), rgba(245,158,11,.05)); border-color: rgba(245,158,11,.45); }
+  .b-llegando .eta { color: var(--amber); }
+  .b-entregado { background: linear-gradient(135deg, rgba(16,185,129,.18), rgba(16,185,129,.05)); border-color: rgba(16,185,129,.45); }
+  .b-entregado .eta { color: var(--verde); }
+  .b-fallido { background: linear-gradient(135deg, rgba(239,68,68,.16), rgba(239,68,68,.05)); border-color: rgba(239,68,68,.45); }
+  .b-fallido .eta { color: var(--rojo); }
+  .b-reprogramada { background: linear-gradient(135deg, rgba(148,163,184,.16), rgba(148,163,184,.05)); border-color: rgba(148,163,184,.4); }
+  .b-reprogramada .eta { color: #cbd5e1; }
+  .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; position: relative; }
+  .pulse-dot::after { content: ''; position: absolute; inset: -5px; border-radius: 50%;
+    border: 2px solid currentColor; opacity: .5; animation: pulso 1.6s ease-out infinite; }
+  @keyframes pulso { 0% { transform: scale(.5); opacity: .8; } 100% { transform: scale(1.4); opacity: 0; } }
+
+  /* Mapa */
+  .mapa-wrap { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--borde);
+    background: #0d1524; }
+  #mapa { height: 46vh; min-height: 260px; }
+  .btn-centrar { position: absolute; right: 10px; bottom: 14px; z-index: 1000; width: 40px; height: 40px;
+    border-radius: 12px; border: 1px solid var(--borde); background: rgba(16,26,46,.92); color: var(--texto);
+    font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+  .senal { position: absolute; left: 10px; bottom: 14px; z-index: 1000; font-size: 10.5px; font-weight: 700;
+    padding: 5px 10px; border-radius: 999px; background: rgba(16,26,46,.92); border: 1px solid var(--borde);
+    color: var(--muted); }
+  .senal.warn { color: #fbbf24; border-color: rgba(245,158,11,.5); }
+
+  /* Marcador moto */
+  .moto-mark { position: relative; width: 40px; height: 40px; }
+  .moto-mark .halo { position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(circle, rgba(99,102,241,.55), rgba(99,102,241,0) 70%); animation: halo 2.2s ease-out infinite; }
+  .moto-mark .cuerpo { position: absolute; inset: 5px; border-radius: 50%; background: #1e2a4a;
+    border: 2px solid var(--indigo2); display: flex; align-items: center; justify-content: center;
+    font-size: 17px; box-shadow: 0 0 14px rgba(99,102,241,.7); }
+  @keyframes halo { 0% { transform: scale(.7); opacity: .9; } 100% { transform: scale(1.7); opacity: 0; } }
+
+  /* Marcador mi entrega */
+  .casa-mark { position: relative; width: 34px; height: 34px; }
+  .casa-mark .cuerpo { position: absolute; inset: 0; border-radius: 50% 50% 50% 4px; transform: rotate(-45deg);
+    background: #059669; border: 2px solid #34d399; box-shadow: 0 0 12px rgba(16,185,129,.8); }
+  .casa-mark .icono { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; transform: rotate(45deg); }
+
+  /* Tarjeta de detalle */
+  .card { background: var(--card); border: 1px solid var(--borde); border-radius: 16px; padding: 14px 16px; }
+  .fila { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+  .fila + .fila { border-top: 1px dashed rgba(36,52,79,.8); }
+  .fila .ico { font-size: 17px; width: 26px; text-align: center; flex-shrink: 0; }
+  .fila .k { font-size: 10.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .fila .v { font-size: 13.5px; font-weight: 700; }
+  .fila .v small { color: var(--muted); font-weight: 600; }
+
+  /* Botón WhatsApp */
+  .btn-wa { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+    padding: 12px; border-radius: 14px; border: none; background: linear-gradient(135deg, #16a34a, #0d9488);
+    color: #fff; font-size: 14px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 18px rgba(22,163,74,.35);
+    text-decoration: none; }
+  .btn-wa:active { transform: scale(.98); }
+
+  /* Progreso */
+  .prog { height: 7px; border-radius: 999px; background: #1b2942; overflow: hidden; }
+  .prog > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #22d3ee);
+    transition: width .8s ease; }
+
+  .foot { text-align: center; font-size: 10.5px; color: #55688c; font-weight: 600; padding-top: 4px; }
+  .foot b { color: #7c93bd; }
+  .cargando { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 60px 20px;
+    color: var(--muted); font-weight: 700; font-size: 13px; }
+  .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #24344f;
+    border-top-color: var(--indigo2); animation: girar 1s linear infinite; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  .error-card { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.35);
+    border-radius: 16px; padding: 18px; text-align: center; }
+  .error-card h3 { margin: 0 0 6px; font-size: 15px; }
+  .error-card p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .oculto { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <div class="hdr">
+    <span class="logo">🛵</span>
+    <div class="marca">RiderTrack<small id="hdr-empresa">ENTREGA EN VIVO</small></div>
+    <span class="estado-chip" id="hdr-chip" style="display:none"></span>
+  </div>
+
+  <!-- Estado cargando -->
+  <div id="v-cargando" class="cargando">
+    <div class="spinner"></div>
+    <span>Conectando con tu entrega…</span>
+  </div>
+
+  <!-- Banner de estado -->
+  <div id="v-banner" class="banner oculto">
+    <h2><span class="pulse-dot" id="bn-dot"></span><span id="bn-titulo">En camino</span></h2>
+    <p id="bn-sub">El motorizado va hacia tu entrega</p>
+    <div class="eta" id="bn-eta">--:--<small>llegada aprox.</small></div>
+  </div>
+
+  <!-- Mapa -->
+  <div class="mapa-wrap oculto" id="v-mapa">
+    <div id="mapa"></div>
+    <button class="btn-centrar" id="btn-centrar" title="Centrar en la moto">🎯</button>
+    <div class="senal" id="mapa-senal">señal…</div>
+  </div>
+
+  <!-- Detalle de la entrega -->
+  <div class="card oculto" id="v-detalle">
+    <div class="fila"><span class="ico">📦</span><div><div class="k">Tu pedido</div><div class="v" id="dt-prod">—</div></div></div>
+    <div class="fila"><span class="ico">📍</span><div style="min-width:0"><div class="k">Dirección</div><div class="v" id="dt-dir" style="word-wrap:break-word">—</div></div></div>
+    <div class="fila"><span class="ico">#️⃣</span><div><div class="k">En la ruta</div><div class="v" id="dt-orden">—</div></div></div>
+    <div class="fila" id="fila-prog"><span class="ico">⏳</span><div style="flex:1">
+      <div class="k" id="dt-antes">—</div>
+      <div class="prog" style="margin-top:6px"><div id="dt-prog" style="width:0%"></div></div>
+    </div></div>
+  </div>
+
+  <!-- Escribir al rider -->
+  <a class="btn-wa oculto" id="v-wa" href="#" target="_blank" rel="noopener">💬 Escribir al motorizado</a>
+
+  <!-- Errores / estados informativos -->
+  <div id="v-error" class="oculto"></div>
+
+  <div class="foot">Seguimiento en vivo por <b>RiderTrack</b> · la posición se actualiza mientras el motorizado tiene la app abierta</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script type="module">
+// ═══════════════════════════════════════════════════════════
+// 🛵 PÁGINA DE SEGUIMIENTO PARA CLIENTES (Fase 2.15)
+// El rider comparte: ?r={suUid}&c={clienteId}
+// Lee ruta_activa/{uid} con Firebase Anonymous Auth (ya habilitado)
+// y muestra SOLO la entrega de ese cliente, en vivo.
+// Modo demo sin tocar datos reales: ?mock=1
+// ═══════════════════════════════════════════════════════════
+import {
+  ESTADO, calcular, haceRato, posicionStale, telWhatsApp,
+  haversineKm, estaEntregado, estaFallido,
+} from './seguimiento-core.js';
+
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const RIDER = qs.get('r') || '';
+let MIO = qs.get('c') || '';
+const MOCK = qs.get('mock') === '1';
+// En demo, si no viene ?c, seguir a la parada "Tú" (m4)
+if (MOCK && !MIO) MIO = 'm4';
+
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAzDl7gaS40JoXt9OoCPzG9FyaVPz_O34I',
+  authDomain: 'ridertrack-93c8a.firebaseapp.com',
+  projectId: 'ridertrack-93c8a',
+  messagingSenderId: '851606828420',
+  appId: '1:851606828420:web:873a892a091394693e59d1',
+};
+const UID_BOT = 'K8wx9X5GGOfindI1RGtIIQN3UGr1'; // respaldo: ruta del bot modular
+
+// ── Estado UI ──
+let mapa = null, mkMoto = null, mkCasa = null, capaDots = null, linea = null;
+let primerFit = false, posAnimada = null, posDestino = null, animRaf = null;
+let ultimoDoc = null;
+
+const TXT = {
+  [ESTADO.EN_CAMINO]: { t: 'En camino a tu entrega', s: 'El motorizado va hacia ti', cls: 'b-camino', chip: '🛵 En camino', color: '#818cf8' },
+  [ESTADO.LLEGANDO]: { t: '¡Llegando ahora!', s: 'El motorizado está llegando a tu dirección', cls: 'b-llegando', chip: '📍 Llegando', color: '#f59e0b' },
+  [ESTADO.ENTREGADO]: { t: 'Entregado ✓', s: 'Tu pedido fue entregado', cls: 'b-entregado', chip: '✅ Entregado', color: '#10b981' },
+  [ESTADO.FALLIDO]: { t: 'No se pudo entregar', s: 'Escríbele al motorizado para coordinar', cls: 'b-fallido', chip: '⚠️ Con problema', color: '#ef4444' },
+  [ESTADO.REPROGRAMADA]: { t: 'Reprogramada', s: 'Tu entrega fue reprogramada', cls: 'b-reprogramada', chip: '📅 Reprogramada', color: '#cbd5e1' },
+};
+
+function mostrarError(titulo, detalle, conWa) {
+  $('v-cargando').classList.add('oculto');
+  $('v-banner').classList.add('oculto');
+  $('v-mapa').classList.add('oculto');
+  $('v-detalle').classList.add('oculto');
+  const err = $('v-error');
+  err.classList.remove('oculto');
+  err.innerHTML = `<div class="error-card"><h3>${titulo}</h3><p>${detalle}</p></div>`;
+  if (conWa) err.appendChild($('v-wa'));
+  $('v-wa').classList.remove('oculto');
+}
+
+function waDelRider(rider) {
+  const tel = telWhatsApp(rider?.telefono || '');
+  if (!tel) { $('v-wa').classList.add('oculto'); return; }
+  const a = $('v-wa');
+  a.href = `https://wa.me/${tel}?text=${encodeURIComponent(
+    `Hola ${rider?.nombre || ''}! Vi el seguimiento de mi entrega 🛵`
+  )}`;
+  a.classList.remove('oculto');
+}
+
+// ── Mapa ──
+function initMapa() {
+  if (mapa) return;
+  mapa = L.map('mapa', { zoomControl: false, attributionControl: true }).setView([-12.046, -77.043], 12);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap · © CARTO', subdomains: 'abcd', maxZoom: 19,
+  }).addTo(mapa);
+  L.control.zoom({ position: 'topright' }).addTo(mapa);
+  capaDots = L.layerGroup().addTo(mapa);
+  $('btn-centrar').addEventListener('click', () => { primerFit = false; fit(); });
+}
+
+function iconoMoto() {
+  return L.divIcon({
+    className: '', iconSize: [40, 40], iconAnchor: [20, 20],
+    html: `<div class="moto-mark"><div class="halo"></div><div class="cuerpo">🛵</div></div>`,
+  });
+}
+function iconoCasa() {
+  return L.divIcon({
+    className: '', iconSize: [34, 34], iconAnchor: [17, 32],
+    html: `<div class="casa-mark"><div class="cuerpo"></div><div class="icono">🏠</div></div>`,
+  });
+}
+
+function fit() {
+  const puntos = [];
+  if (posAnimada) puntos.push([posAnimada.lat, posAnimada.lng]);
+  if (mkCasa) puntos.push(mkCasa.getLatLng());
+  if (!puntos.length) return;
+  if (puntos.length === 1) { mapa.setView(puntos[0], 15); primerFit = true; return; }
+  mapa.fitBounds(L.latLngBounds(puntos).pad(0.35), { animate: true });
+  primerFit = true;
+}
+
+// Animación suave de la moto entre ticks del GPS
+function animarMoto() {
+  cancelAnimationFrame(animRaf);
+  if (!posAnimada || !posDestino) return;
+  const desde = { ...posAnimada };
+  const t0 = performance.now();
+  const DUR = 1500;
+  const paso = (t) => {
+    const k = Math.min(1, (t - t0) / DUR);
+    const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    posAnimada = {
+      lat: desde.lat + (posDestino.lat - desde.lat) * e,
+      lng: desde.lng + (posDestino.lng - desde.lng) * e,
+    };
+    if (mkMoto) mkMoto.setLatLng([posAnimada.lat, posAnimada.lng]);
+    if (linea && linea.getLatLngs().length) linea.setLatLngs([ [posAnimada.lat, posAnimada.lng], ...linea.getLatLngs().slice(1) ]);
+    if (k < 1) animRaf = requestAnimationFrame(paso);
+  };
+  animRaf = requestAnimationFrame(paso);
+}
+
+// ── Render principal ──
+function render(doc) {
+  ultimoDoc = doc;
+  const d = doc;
+  const clientes = Array.isArray(d.clientes) ? d.clientes : [];
+  const yo = clientes.find((c) => String(c.id) === MIO);
+  const rider = d.rider || {};
+
+  // empresa en el header
+  $('hdr-empresa').textContent = (rider.empresa || 'ENTREGA EN VIVO').toUpperCase();
+  waDelRider(rider);
+
+  if (!yo) {
+    mostrarError(
+      'No encontramos tu entrega',
+      'Pídele a tu motorizado un link nuevo — la ruta de hoy cambió o ya terminó.',
+      true
+    );
+    return;
+  }
+
+  const pos = d.posicion && typeof d.posicion.lat === 'number' ? d.posicion : null;
+  const calc = calcular(pos, clientes, MIO);
+  const st = TXT[calc.estado];
+
+  // Banner
+  $('v-cargando').classList.add('oculto');
+  const bn = $('v-banner');
+  bn.classList.remove('oculto', 'b-camino', 'b-llegando', 'b-entregado', 'b-fallido', 'b-reprogramada');
+  bn.classList.add(st.cls);
+  $('bn-titulo').textContent = st.t;
+  $('bn-sub').textContent = st.s;
+  $('bn-dot').style.color = st.color;
+  const chip = $('hdr-chip');
+  chip.style.display = ''; chip.textContent = st.chip;
+  chip.style.color = st.color; chip.style.borderColor = st.color;
+
+  if (calc.estado === ESTADO.ENTREGADO) {
+    $('bn-eta').innerHTML = (yo.hora ? `✓ ${yo.hora}` : '✓') + '<small>entregado</small>';
+  } else if (calc.estado === ESTADO.FALLIDO || calc.estado === ESTADO.REPROGRAMADA) {
+    $('bn-eta').innerHTML = '—<small>sin hora</small>';
+  } else {
+    $('bn-eta').innerHTML = `${calc.etaHora}<small>llegada aprox. · ~${calc.etaMin} min</small>`;
+  }
+
+  // Detalle
+  $('v-detalle').classList.remove('oculto');
+  $('dt-prod').textContent = yo.prod || 'Entrega';
+  $('dt-dir').textContent = `${yo.dir || '—'}${yo.dist ? `, ${yo.dist}` : ''}`;
+  $('dt-orden').innerHTML = `Parada <b>#${calc.orden}</b> de ${calc.total} <small>del día</small>`;
+  const antes = calc.pendientesAntes;
+  $('dt-antes').innerHTML =
+    calc.estado === ESTADO.ENTREGADO ? 'Entrega completada 🎉'
+    : antes === 0 ? '¡Eres la siguiente parada! 🔔'
+    : `Faltan <b>${antes}</b> entrega${antes === 1 ? '' : 's'} antes que tú`;
+  const hechos = clientes.filter((c) => estaEntregado(c.st) || estaFallido(c.st)).length;
+  $('dt-prog').style.width = `${clientes.length ? Math.round((hechos / clientes.length) * 100) : 0}%`;
+
+  // Mapa
+  const conCoords = typeof yo.lat === 'number' && typeof yo.lng === 'number';
+  if (conCoords || pos) {
+    $('v-mapa').classList.remove('oculto');
+    initMapa();
+    setTimeout(() => mapa.invalidateSize(), 60);
+
+    // Mi parada
+    if (conCoords && !mkCasa) {
+      mkCasa = L.marker([yo.lat, yo.lng], { icon: iconoCasa() })
+        .addTo(mapa).bindTooltip('Tu entrega 🏠', { permanent: true, direction: 'top', offset: [0, -30] });
+    } else if (conCoords) {
+      mkCasa.setLatLng([yo.lat, yo.lng]);
+    }
+
+    // Puntitos de paradas pendientes antes que yo (sin datos personales)
+    capaDots.clearLayers();
+    const antesList = clientes
+      .filter((c) => c !== yo && (c.num ?? 0) < (calc.orden) && !estaEntregado(c.st) && !estaFallido(c.st) && typeof c.lat === 'number')
+      .sort((a, b) => (a.num ?? 0) - (b.num ?? 0));
+    for (const p of antesList) {
+      L.circleMarker([p.lat, p.lng], { radius: 5, color: '#64748b', weight: 1, fillColor: '#334155', fillOpacity: 0.9 })
+        .addTo(capaDots);
+    }
+
+    // Moto
+    if (pos) {
+      posDestino = { lat: pos.lat, lng: pos.lng };
+      if (!mkMoto) {
+        posAnimada = { ...posDestino };
+        mkMoto = L.marker([pos.lat, pos.lng], { icon: iconoMoto(), zIndexOffset: 900 }).addTo(mapa);
+      } else {
+        animarMoto();
+      }
+      // Línea moto → paradas pendientes → mi parada
+      const tramos = [[pos.lat, pos.lng], ...antesList.map((p) => [p.lat, p.lng])];
+      if (conCoords) tramos.push([yo.lat, yo.lng]);
+      const estilo = { color: calc.estado === ESTADO.LLEGANDO ? '#f59e0b' : '#6366f1', weight: 3, opacity: .75, dashArray: '7 8' };
+      if (linea) { linea.setLatLngs(tramos); linea.setStyle(estilo); }
+      else linea = L.polyline(tramos, estilo).addTo(mapa);
+    }
+
+    // Señal
+    const senal = $('mapa-senal');
+    if (!pos) { senal.textContent = 'sin señal GPS'; senal.classList.add('warn'); }
+    else if (posicionStale(pos.actualizadoAt)) { senal.textContent = `sin señal · ${haceRato(pos.actualizadoAt) || '?'}`; senal.classList.add('warn'); }
+    else { senal.textContent = `en vivo · ${haceRato(pos.actualizadoAt) || 'ahora'}`; senal.classList.remove('warn'); }
+
+    if (!primerFit) fit();
+  } else {
+    $('v-mapa').classList.add('oculto');
+  }
+}
+
+// ── Ruta terminada pero mi entrega visible ──
+// (la lógica normal la cubre: estados finales ya vienen en los st)
+
+// ═══════════════ ARRANQUE ═══════════════
+if (!MOCK) {
+  if (!RIDER || !MIO) {
+    mostrarError(
+      'Falta información del link',
+      'Abre el link completo que te compartió tu motorizado (debe incluir tu entrega).'
+    );
+  } else {
+    // Firebase con auth anónimo (verificado: habilitado en el proyecto)
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      await firebase.auth().signInAnonymously();
+      const db = firebase.firestore();
+      // Escuchar la ruta del rider; si ese doc no tiene clientes,
+      // respaldar con la ruta del bot modular (arquitectura v1/v2).
+      // ⚠️ En el SDK compat snap.exists es PROPIEDAD; en el modular es
+      // MÉTODO — existeDoc() soporta ambos (bug encontrado con Playwright:
+      // snap.exists() crasheaba silencioso en compat).
+      const existeDoc = (s) => (typeof s.exists === 'function' ? s.exists() : !!s.exists);
+      let conBot = false;
+      db.doc(`ruta_activa/${RIDER}`).onSnapshot(
+        (snap) => {
+          let d = existeDoc(snap) ? snap.data() : null;
+          const sinClientes = !d || !Array.isArray(d.clientes) || d.clientes.length === 0;
+          if (sinClientes && !conBot) {
+            // respaldo: leer doc del bot una sola vez y combinar
+            db.doc(`ruta_activa/${UID_BOT}`).get().then((s2) => {
+              conBot = true;
+              const d2 = existeDoc(s2) ? s2.data() : null;
+              const combinado = { ...(d2 || {}), ...(d || {}), posicion: (d && d.posicion) || (d2 && d2.posicion) };
+              render(combinado);
+            }).catch(() => render(d || {}));
+          } else {
+            render(d || { clientes: [] });
+          }
+        },
+        (err) => {
+          console.error(err);
+          mostrarError('No pude conectar', 'Revisa tu internet y vuelve a abrir el link.', true);
+        }
+      );
+    } catch (e) {
+      console.error(e);
+      mostrarError(
+        'No pude conectar con el servicio',
+        'Es posible que el acceso público esté desactivado. Avísale a tu motorizado.',
+        true
+      );
+    }
+  }
+} else {
+  // ═════════ DEMO (?mock=1): ruta falsa que se mueve sola ═════════
+  const PARADAS = [
+    { id: 'm1', num: 1, nombre: 'Ana', st: 'entregado', lat: -12.055, lng: -77.040 },
+    { id: 'm2', num: 2, nombre: 'Luis', st: 'entregado', lat: -12.060, lng: -77.045 },
+    { id: 'm3', num: 3, nombre: 'Carla', st: 'pendiente', lat: -12.066, lng: -77.052 },
+    { id: 'm4', num: 4, nombre: 'Tú', st: 'pendiente', lat: -12.072, lng: -77.060 },
+    { id: 'm5', num: 5, nombre: 'Pedro', st: 'pendiente', lat: -12.078, lng: -77.068 },
+  ];
+  let k = 0;
+  const ruta = { lat: -12.058, lng: -77.042 };
+  const tick = () => {
+    k = (k + 1) % 40;
+    const objetivo = PARADAS[2]; // avanza hacia la parada 3
+    ruta.lat += (objetivo.lat - ruta.lat) * 0.12;
+    ruta.lng += (objetivo.lng - ruta.lng) * 0.12;
+    const demo = {
+      activa: true,
+      rider: { nombre: 'Rudy Demo', telefono: '999999999', empresa: 'MATE' },
+      posicion: { lat: ruta.lat, lng: ruta.lng, velocidadKmh: 22, actualizadoAt: new Date().toISOString() },
+      clientes: PARADAS.map((p) => ({ ...p, dir: 'Av. Demo 123', dist: 'Miraflores', prod: 'Paquete demo' })),
+    };
+    render(demo);
+    setTimeout(tick, 2200);
+  };
+  tick();
+}
+</script>
+</body>
+</html>

@@ -1,14 +1,17 @@
+// ═════════════════════════════════════════════════════════
+// 💬 WHATSAPP VIEW — Chat API WhatsApp (recuperada Fase 3.3)
+// Esta es la vista original de Mensajería WhatsApp (wa.me) que
+// estaba en desarrollo. La Fase 3.1 la había reemplazado por el
+// Chat Baileys; ahora conviven: el Chat API seguirá creciendo
+// cuando se conecte la API oficial de WhatsApp Cloud.
+// ═════════════════════════════════════════════════════════
+
 import React, { useState } from 'react';
 import {
   MessageSquare,
   Send,
-  Wifi,
   Sparkles,
-  Search,
   CheckCheck,
-  Plus,
-  RefreshCw,
-  Code
 } from 'lucide-react';
 import { WhatsAppMessage } from '../types';
 import { WHATSAPP_TEMPLATES } from '../data/mockData';
@@ -34,13 +37,15 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-              WhatsApp Cloud API Hub
-              <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-slate-950">
-                VERIFIED
+              Chat API WhatsApp
+              <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500 text-slate-950">
+                EN DESARROLLO
               </span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400">
-              Integración oficial de mensajería transaccional para avisos de entrega y tracking
+              Mensajería directa vía wa.me con plantillas rápidas. Aquí vivirá la API
+              oficial de WhatsApp Cloud cuando se conecte — el bot Rudy sigue
+              atendiendo todo en el Chat Baileys.
             </p>
           </div>
         </div>
@@ -49,7 +54,7 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({
           onClick={() => onOpenWhatsAppModal()}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all"
         >
-          <Send className="w-4 h-4" /> Despachar Mensaje
+          <Send className="w-4 h-4" /> Enviar Mensaje
         </button>
       </div>
 
@@ -58,14 +63,17 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({
         {/* Templates Panel */}
         <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700 space-y-4">
           <h3 className="font-bold text-sm text-white flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-emerald-400" /> Plantillas Homologadas Meta
+            <Sparkles className="w-4 h-4 text-emerald-400" /> Plantillas Rápidas
           </h3>
 
           <div className="space-y-2.5">
             {WHATSAPP_TEMPLATES.map((tpl) => (
               <div
                 key={tpl.id}
-                onClick={() => setSelectedTemplate(tpl)}
+                onClick={() => {
+                  setSelectedTemplate(tpl);
+                  onOpenWhatsAppModal();
+                }}
                 className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                   selectedTemplate.id === tpl.id
                     ? 'bg-emerald-950/40 border-emerald-500 text-white'
@@ -84,51 +92,66 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({
               </div>
             ))}
           </div>
+
+          <p className="text-[10px] text-slate-400">
+            Toca una plantilla para abrir el editor con el mensaje precargado.
+          </p>
         </div>
 
         {/* Message History Logs (2 Cols) */}
         <div className="lg:col-span-2 p-5 rounded-2xl bg-slate-800 border border-slate-700 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-700">
-            <h3 className="font-bold text-sm text-white">Historial de Notificaciones Enviadas</h3>
+            <h3 className="font-bold text-sm text-white">Mensajes Enviados Desde la App</h3>
             <span className="text-xs font-mono text-slate-400">
-              {messages.length} Registros hoy
+              {messages.length} {messages.length === 1 ? 'registro' : 'registros'}
             </span>
           </div>
 
-          <div className="space-y-3">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className="p-4 rounded-xl bg-slate-900 border border-slate-700/80 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-white">
-                      {msg.destinatarioNombre}
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">
-                      ({msg.destinatarioTelefono})
-                    </span>
+          {messages.length === 0 ? (
+            <div className="text-center py-12 space-y-3">
+              <Send className="w-10 h-10 text-slate-600 mx-auto" />
+              <p className="font-bold text-white text-sm">Aún no envías mensajes hoy</p>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Cuando despaches un WhatsApp desde la app (Pedidos, Clientes o el botón
+                Enviar Mensaje), aparecerá aquí como registro de la sesión.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className="p-4 rounded-xl bg-slate-900 border border-slate-700/80 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs text-white">
+                        {msg.destinatarioNombre}
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        ({msg.destinatarioTelefono})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-slate-400">{msg.hora}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                        <CheckCheck className="w-3 h-3" /> {msg.estado}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono text-slate-400">{msg.hora}</span>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
-                      <CheckCheck className="w-3 h-3" /> {msg.estado}
-                    </span>
+
+                  <p className="text-xs text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 leading-relaxed font-sans">
+                    {msg.mensaje}
+                  </p>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
+                    <span>Plantilla: {msg.plantilla}</span>
+                    <span>Vía: wa.me</span>
                   </div>
                 </div>
-
-                <p className="text-xs text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 leading-relaxed font-sans">
-                  {msg.mensaje}
-                </p>
-
-                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
-                  <span>Plantilla: {msg.plantilla}</span>
-                  <span>ID: {msg.id}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -27,11 +27,30 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Pencil,
 } from 'lucide-react';
-import { Cliente, encolarAccionBot, _botCel, subirFotoPago } from '../services/firestore';
+import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
+import { useConfig } from '../hooks/useConfig';
 import { FotoEntregaModal } from './FotoEntregaModal';
+import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
+import { UbicarClienteModal } from './UbicarClienteModal';
+import { CronometroRuta } from './CronometroRuta';
+import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
+import { compartirQRWhatsApp } from '../utils/shareQR';
+import { Flag, MapPinned, ClipboardList, Copy, Check, Bike, Navigation as NavigationIcon } from 'lucide-react';
+// Fase 2.8: exportación a la app Circuit (formato de importación)
+import { exportarCircuitRuta } from '../utils/exportarExcel';
+// Fase 3.12: navegación GPS propia con voz (modal de pantalla completa)
+import { NavegacionGpsModal } from './navegacion/NavegacionGpsModal';
+import type { ParadaNav } from '../services/navegacionGps';
+// Fase 2.5: detección de direcciones por manzana / sin número (como la v1)
+import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
+import { esPagoEmpresa } from '../utils/realData';
+import { sonarPago } from '../services/notificaciones';
+// Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
+import { GRUPO_MATE_JID } from '../utils/chatBaileys';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -39,10 +58,11 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, guardarYCerrarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
+  const { config, guardar: guardarConfig } = useConfig();
 
   const [search, setSearch] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos'>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
   const [filtroDistrito, setFiltroDistrito] = useState<string>('');
   const [filtroProducto, setFiltroProducto] = useState<string>('');
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
@@ -51,12 +71,81 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 📋 Listado de verificación (Fase 2.5): mini-listado para cruzar
+  // con la página de la empresa — se filtra con la búsqueda/filtros
+  const [listadoVerifAbierto, setListadoVerifAbierto] = useState(false);
+  const [listadoCopiado, setListadoCopiado] = useState(false);
+
+  // Estado de optimización en curso (Fase 1.3 — progreso real)
+  const [optimizando, setOptimizando] = useState(false);
+  const [optimizandoMsg, setOptimizandoMsg] = useState('');
+
+  // 🚩 Inicio y fin de ruta (Fase 1.4)
+  const [rutaCardAbierta, setRutaCardAbierta] = useState(false);
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
+
+  // 📍 Ubicar cliente manualmente (Fase 1.4)
+  const [ubicarClienteId, setUbicarClienteId] = useState<string | number | null>(null);
+  const ubicarCliente = ubicarClienteId != null ? clientes.find((c) => c.id === ubicarClienteId) || null : null;
+
+  // ✏️ Editar datos del cliente: precio, dirección, teléfono, observaciones (Fase 2.4)
+  const [editarId, setEditarId] = useState<string | number | null>(null);
+  const editarCliente = editarId != null ? clientes.find((c) => c.id === editarId) || null : null;
+  const [editPrecio, setEditPrecio] = useState('');
+  const [editDir, setEditDir] = useState('');
+  const [editDist, setEditDist] = useState('');
+  const [editCel, setEditCel] = useState('');
+  const [editObs, setEditObs] = useState('');
+
+  const abrirEdicion = (c: Cliente) => {
+    setEditPrecio(String(parseFloat(String(c.cobrar || 0)) || ''));
+    setEditDir(c.dir || '');
+    setEditDist(c.dist || '');
+    setEditCel(c.cel || '');
+    setEditObs(c.obs || '');
+    setEditarId(c.id);
+  };
+
+  const guardarEdicion = () => {
+    if (!editarCliente || editarId == null) return;
+    const precioNum = parseFloat(editPrecio.replace(',', '.')) || 0;
+    const dirNueva = editDir.trim();
+    const dirCambio = dirNueva !== (editarCliente.dir || '');
+    const cambios: Partial<Cliente> = {
+      precio: precioNum,
+      cobrar: precioNum,
+      dir: dirNueva,
+      dist: editDist.trim(),
+      cel: editCel.trim(),
+      obs: editObs.trim(),
+    };
+    // Si la dirección cambió → olvidar la ubicación vieja para que la
+    // próxima optimización la re-ubique (el pin no queda en la casa anterior)
+    if (dirCambio) {
+      olvidarCoordenadasCliente(editarId);
+      cambios.lat = undefined;
+      cambios.lng = undefined;
+      cambios.latSrc = undefined;
+    }
+    actualizarCliente(editarId, cambios);
+    setEditarId(null);
+    onShowToast?.(
+      '✏️ Cliente actualizado',
+      dirCambio ? `${editarCliente.nombre}: se re-ubicará al optimizar` : `${editarCliente.nombre}: datos guardados`,
+      'success'
+    );
+  };
+
   // Estado para edición del número de orden (input local)
   const [editandoNumId, setEditandoNumId] = useState<string | number | null>(null);
   const [numTemporal, setNumTemporal] = useState('');
 
   // Estado para modal de foto de entrega
   const [fotoEntregaCliente, setFotoEntregaCliente] = useState<Cliente | null>(null);
+
+  // 🧭 (Fase 3.12) Navegación GPS propia con voz
+  const [navGpsAbierto, setNavGpsAbierto] = useState(false);
+  const [navGpsParadas, setNavGpsParadas] = useState<ParadaNav[]>([]);
 
   // Estados modal 🤖 Bot (12 botones)
   const [botModalId, setBotModalId] = useState<string | number | null>(null);
@@ -141,6 +230,37 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [nuevoDir, setNuevoDir] = useState('');
   const [nuevoDist, setNuevoDist] = useState('');
 
+  // 🚩 Guardar cambios parciales de la config de ruta (inicio/fin)
+  const guardarRuta = async (parcial: Partial<ConfigRuta>) => {
+    setGuardandoRuta(true);
+    try {
+      const nuevaRuta = { ...(config?.ruta ?? { inicio: null, fin: null, volverAlInicio: false }), ...parcial };
+      await guardarConfig({ ...config, ruta: nuevaRuta });
+      onShowToast?.(
+        '🚩 Ruta actualizada',
+        parcial.inicio ? 'Dirección de inicio guardada' :
+        parcial.fin ? 'Dirección de fin guardada' :
+        parcial.volverAlInicio !== undefined ? 'Preferencia de regreso guardada' :
+        'Dirección quitada',
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('❌ Error', 'No se pudo guardar. Revisa tu conexión.', 'error');
+    } finally {
+      setGuardandoRuta(false);
+    }
+  };
+
+  // 📍 Guardar la ubicación manual de un cliente (exacta para siempre)
+  const guardarUbicacion = (
+    clienteId: string | number,
+    coords: { lat: number; lng: number; src: 'manual' }
+  ) => {
+    actualizarCliente(clienteId, { lat: coords.lat, lng: coords.lng, latSrc: 'manual' });
+    // Recordarla también en el caché local anti-borrado
+    recordarCoordenadasCliente(clienteId, { ...coords, src: 'manual' });
+  };
+
   // Filtrar clientes
   const clientesFiltrados = useMemo(() => {
     let filtrados = clientes;
@@ -152,10 +272,22 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       filtrados = filtrados.filter(c =>
         ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st)
       );
-    } else if (filtroEstado === 'fallidos') {
+    } else if (filtroEstado === 'fallidos' || filtroEstado === 'noentreg') {
+      // "No entregados" = fallidos (fallida, rechazado, cancelado, ausente, no-contesta)
       filtrados = filtrados.filter(c =>
         ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
       );
+    } else if (filtroEstado === 'empresa') {
+      // 🏢 Pagos de la EMPRESA (Fase 3.14 fix): POS, Pago Link,
+      // Yape/Plin, Transferencia, José Smith y En Empresa — todos
+      // los cobra la empresa (el rider no recibe esa plata).
+      // Antes solo contaba st === 'empresa' y POS/Pago Link/Yape-Plin
+      // quedaban fuera del chip.
+      filtrados = filtrados.filter(c => esPagoEmpresa(c.st));
+    } else if (filtroEstado === 'mzsn') {
+      // ⚠️ Direcciones por manzana o sin número (Fase 2.5 — como la v1):
+      // verlos juntos para pedirles la ubicación exacta de una vez
+      filtrados = filtrados.filter(c => direccionIncompleta(c.dir, c.obs));
     }
 
     // Filtro por distrito
@@ -192,6 +324,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const productos = clientes.map(c => (c.prod || '').trim()).filter(Boolean);
     return [...new Set(productos)].sort();
   }, [clientes]);
+
+  // ⚠️ Fase 2.5: contadores para los chips nuevos — clientes con dirección
+  // por manzana / sin número (como la v1) y pagados por empresa
+  const nMzsn = useMemo(() => clientes.filter(c => direccionIncompleta(c.dir, c.obs)).length, [clientes]);
+  const nEmpresa = useMemo(() => clientes.filter(c => esPagoEmpresa(c.st)).length, [clientes]);
 
   // Botones de pago (iguales que RiderTrack Modular)
   const pagosList = [
@@ -234,6 +371,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     const failed = estadosFallidos.find(e => e[0] === st);
     if (failed) return `${failed[1]} ${failed[2]}`;
     return st;
+  };
+
+  // 🛵 Exportar la ruta a la app Circuit (Fase 2.8 — como la v1)
+  const handleExportarCircuit = async () => {
+    if (clientes.length === 0) {
+      onShowToast?.('Sin clientes', 'No hay clientes en la ruta para exportar', 'warning');
+      return;
+    }
+    const orden = [...clientes].sort((a, b) => (a.num || 0) - (b.num || 0));
+    await exportarCircuitRuta(orden, onShowToast);
   };
 
   // Importar Excel
@@ -287,6 +434,88 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     window.open(`https://wa.me/${telCompleto}`, '_blank');
   };
 
+  // 📞 Llamar al cliente (Fase 2.7 — como Circuit): botón rápido
+  // que abre el marcador del celular con el número listo.
+  const llamarCliente = (cliente: Cliente) => {
+    const tel = _botCel(cliente.cel || '');
+    if (!tel) {
+      onShowToast?.('Sin celular', `${cliente.nombre || 'El cliente'} no tiene celular válido`, 'warning');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = `tel:+${tel}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // 📲 Pedir ubicación exacta por WhatsApp DIRECTO (Fase 2.5 — estilo v1
+  // enviarMsgDirIA): para clientes con dirección por manzana o sin número.
+  // Abre wa.me con el mensaje listo — no depende del bot.
+  const pedirUbicacionDirecta = (cliente: Cliente) => {
+    const tel = _botCel(cliente.cel || '');
+    if (!tel) {
+      onShowToast?.('Sin celular', `${cliente.nombre} no tiene celular válido`, 'warning');
+      return;
+    }
+    const msg = mensajePedirUbicacion(cliente.nombre, config?.empresa?.nombre);
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank');
+    onShowToast?.('📲 Mensaje listo', `Pide a ${cliente.nombre} su dirección o 📍 ubicación`, 'info');
+  };
+
+  // ✅ Fase 2.6 (como la v1 "Registro en la Web"): checks para ir
+  // marcando cliente por cliente mientras revisas la página de la
+  // empresa. Persiste en el cliente (webReg) → sobrevive al sync
+  // con el Modular y a reinicios de la app.
+  const toggleVerificado = (c: Cliente) => {
+    actualizarCliente(c.id, { webReg: !c.webReg });
+  };
+  const marcarTodosVerificados = (valor: boolean) => {
+    marcarVerificacion(new Set(clientesFiltrados.map((c) => c.id)), valor);
+  };
+
+  // 📋 Copiar el listado de verificación (Fase 2.5): texto plano con
+  // cliente / S/ / método / hora para pegarlo y cruzarlo con la
+  // página de la empresa
+  const copiarListadoVerificacion = async () => {
+    const stTexto = (st: string) => {
+      if (!st || st === 'pendiente') return 'Pendiente';
+      const pagos: Record<string, string> = {
+        'efectivo': 'Efectivo', 'yape-rudy': 'Yape Rudy', 'yape-efectivo': 'Yape+Efectivo',
+        'yape-plin': 'Yape/Plin', 'transferencia': 'Transferencia', 'pos': 'POS',
+        'pago-link': 'Pago Link', 'jose-smith': 'J.Smith', 'cambio': 'Cambio', 'mixto': 'Mixto',
+        'empresa': 'Empresa', 'fallida': 'Fallida', 'reprogramar': 'Reprogramado',
+        'rechazado': 'Rechazado', 'ausente': 'Ausente', 'no-contesta': 'No contesta', 'cancelado': 'Cancelado',
+      };
+      return pagos[st] || st;
+    };
+    const lineas: string[] = [
+      `📋 VERIFICACIÓN DE RUTA — ${new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
+      `${clientesFiltrados.length} clientes · Cobrado S/ ${stats.cobrado.toFixed(2)} · Por cobrar S/ ${stats.porCobrar.toFixed(2)}`,
+      `${clientesFiltrados.filter((c) => c.webReg).length}/${clientesFiltrados.length} revisados en la página de la empresa`,
+      '',
+    ];
+    clientesFiltrados.forEach((c) => {
+      const hora = c.hora ? ` (${c.hora})` : '';
+      const check = c.webReg ? '✅' : '⬜';
+      lineas.push(`${check} ${c.num || '·'}. ${c.nombre || 'Cliente'} — S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)} — ${stTexto(c.st)}${hora}`);
+    });
+    const texto = lineas.join('\n');
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setListadoCopiado(true);
+    setTimeout(() => setListadoCopiado(false), 2000);
+    onShowToast?.('📋 Listado copiado', `${clientesFiltrados.length} clientes listos para pegar`, 'success');
+  };
+
   // 🤖 Enviar acción al bot de Baileys vía Firestore
   const enviarAccionBot = async (cliente: Cliente, tipo: string, extra?: Record<string, any>) => {
     if (!user) {
@@ -324,6 +553,36 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
   };
 
+  // 💚 Enviar QR de Plin DIRECTO (Fase 2.3) — RESPALDO sin usar por
+  // ahora (Fase 3.20: el botón del modal usa la vía del bot con
+  // plantilla). Se conserva por si algún día se quiere compartir
+  // directo desde tu WhatsApp (bot caído / sin parche).
+  const enviarPlinDirecto = async (cliente: Cliente) => {
+    const plin = config.plin;
+    const numero = (plin?.telefono || '').replace(/\D/g, '');
+    if (!numero || !plin?.nombre) {
+      onShowToast?.('💚 Plin sin configurar', 'Configura tu número y QR en "Mi QR Yape/Plin" → pestaña 💚 Plin', 'warning');
+      return;
+    }
+    const monto = parseFloat(String(cliente.cobrar || 0)) || 0;
+    const lineas = [
+      `Hola ${cliente.nombre} 💚`,
+      '',
+      'Puedes pagarme por *Plin*:',
+      `📱 Número: *${numero}*`,
+      `👤 Titular: ${plin.nombre}`,
+    ];
+    if (monto > 0) lineas.push(`💰 Monto: S/ ${monto.toFixed(2)}`);
+    lineas.push('', 'Escanea el QR que te adjunto desde la app de tu banco 🙏 ¡Gracias!');
+
+    await compartirQRWhatsApp({
+      dataUrl: plin.qrBase64 || '',
+      texto: lineas.join('\n'),
+      telefono: cliente.cel,
+      onShowToast,
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -332,6 +591,72 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       </div>
     );
   }
+
+  // 🧭 (Fase 3.12) Abrir la navegación GPS con voz: arma las
+  // paradas pendientes ORDENADAS por nº de ruta (las que ya
+  // tienen coordenada) y suelta el modal a pantalla completa.
+  const abrirNavegacionGps = () => {
+    const pendientes = clientes
+      .filter(
+        (c) =>
+          (c.st === 'pendiente' || !c.st) &&
+          typeof c.lat === 'number' &&
+          typeof c.lng === 'number' &&
+          !isNaN(c.lat!) &&
+          !isNaN(c.lng!)
+      )
+      .sort((a, b) => (a.num ?? 999) - (b.num ?? 999));
+
+    if (pendientes.length === 0) {
+      onShowToast?.(
+        '🧭 Sin paradas para navegar',
+        'Necesitas al menos 1 cliente PENDIENTE con ubicación (usa "Ruta" para ubicarlos primero)',
+        'warning'
+      );
+      return;
+    }
+
+    const paradas: ParadaNav[] = pendientes.map((c) => ({
+      id: c.id,
+      num: c.num ?? 0,
+      nombre: c.nombre,
+      dir: c.dir,
+      dist: c.dist,
+      cobrar: c.cobrar || 0,
+      lat: c.lat!,
+      lng: c.lng!,
+    }));
+
+    setNavGpsParadas(paradas);
+    setNavGpsAbierto(true);
+  };
+
+  // 🧭 (Fase 3.20) Navegar directo a UN cliente desde su ficha:
+  // abre la navegación con voz con esa única parada (da igual si
+  // está pendiente o ya entregado — tú decides cuándo ir).
+  const abrirNavegacionGpsCliente = (c: Cliente) => {
+    if (typeof c.lat !== 'number' || typeof c.lng !== 'number' || isNaN(c.lat!) || isNaN(c.lng!)) {
+      onShowToast?.(
+        '🧭 Primero ubícalo',
+        `${c.nombre} no tiene coordenada — tócale 📍 (Ubicar) o pídele su ubicación por WhatsApp`,
+        'warning'
+      );
+      return;
+    }
+    const paradas: ParadaNav[] = [{
+      id: c.id,
+      num: c.num ?? 1,
+      nombre: c.nombre,
+      dir: c.dir,
+      dist: c.dist,
+      cobrar: c.cobrar || 0,
+      lat: c.lat!,
+      lng: c.lng!,
+    }];
+    setBotModalId(null);
+    setNavGpsParadas(paradas);
+    setNavGpsAbierto(true);
+  };
 
   return (
     <div className="space-y-3 pb-12">
@@ -346,8 +671,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
       {/* Header con stats - Mobile optimized */}
       <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 sm:p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="mb-2.5">
             <h1 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
               <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
               Mi Ruta
@@ -361,55 +685,92 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               {new Date().toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' })} · {stats.total} clientes
             </p>
           </div>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importando}
-              className="flex items-center gap-1 px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
-            >
-              {importando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-              <span>Excel</span>
-            </button>
+          {/* (Fase 2.11) Botonera en UNA sola línea. (Fase 3.12) ahora
+              de 4 columnas: Sync | Ruta | GPS | Agregar — el botón GPS
+              abre la navegación propia con voz de la Fase 3.12. */}
+          <div className="grid grid-cols-4 gap-1.5 mb-3">
             <button
               onClick={async () => {
                 const count = await sincronizarDesdeModular();
                 onShowToast?.('🔄 Sincronizado', `${count} clientes sincronizados con el Modular`, 'success');
               }}
               disabled={sincronizando}
-              className="flex items-center gap-1 px-2.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50 min-w-0"
               title="Sincronizar con RiderTrack Modular"
             >
-              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <TrendingUp className="w-3.5 h-3.5" />}
-              <span>Sync</span>
+              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{sincronizando ? 'Sync…' : 'Sync'}</span>
             </button>
             <button
               onClick={async () => {
-                if (!confirm('🚀 ¿Optimizar ruta?\n\nSe ordenarán los clientes por distrito (mismo distrito juntos) para minimizar la distancia recorrida.\n\nSe reasignarán los números de orden (1, 2, 3...).')) return;
+                const tieneInicio = !!(config?.ruta?.inicio);
+                const tieneFin = !!(config?.ruta?.fin);
+                const origenTxt = tieneInicio
+                  ? `2. Google Maps las ordenará por CALLES REALES desde tu INICIO configurado${tieneFin ? ' y terminando en tu FIN' : ''}`
+                  : '2. Google Maps las ordenará por CALLES REALES desde tu posición GPS (configura un Inicio en "🚩 Inicio y fin de ruta" para partir siempre del mismo lugar)';
+                if (!confirm(`🚀 ¿Optimizar ruta con Google Maps?\n\n1. Se ubicarán las direcciones que falten (con Google Geocoding — la 1ª vez tarda un poco; si no halla la calle exacta, pone el centro del distrito marcado "aprox.")\n${origenTxt}\n3. Se reasignarán los números de orden (1, 2, 3...) con km y minutos REALES de manejo\n\nLas paradas "aprox." puedes precisarlas luego con el botón 📍 Ubicar de cada cliente.`)) return;
+                setOptimizando(true);
+                setOptimizandoMsg('Preparando…');
                 try {
-                  const count = await optimizarRuta();
-                  onShowToast?.('🚀 Ruta optimizada', `${count} clientes ordenados por distrito`, 'success');
+                  const res = await optimizarRuta((msg) => setOptimizandoMsg(msg), config?.ruta ?? null);
+                  if (!res) return;
+                  const partes: string[] = [];
+                  partes.push(
+                    res.motor === 'google'
+                      ? `${res.conUbicacion} paradas ordenadas por calles reales (Google)`
+                      : `${res.conUbicacion} paradas ordenadas (distancia estimada)`
+                  );
+                  if (res.geocodificadosAhora > 0) partes.push(`${res.geocodificadosAhora} ubicadas ahora`);
+                  if (res.desdeCache > 0) partes.push(`${res.desdeCache} de caché`);
+                  if (res.aproximados > 0) partes.push(`${res.aproximados} aprox. (distrito)`);
+                  if (res.distanciaDespuesKm > 0) partes.push(`~${res.distanciaDespuesKm} km · ${res.tiempoEstimadoMin} min${res.motor === 'google' ? ' reales' : ''}`);
+                  if (res.ahorroPct > 0) partes.push(`${res.ahorroPct}% menos que el orden anterior`);
+                  if (res.sinUbicacion > 0) partes.push(`⚠️ ${res.sinUbicacion} sin ubicar (van al final)`);
+                  partes.push(
+                    res.origen === 'inicio' ? 'Partiste de tu dirección de INICIO' :
+                    res.origen === 'gps' ? 'Partiste de tu posición GPS' :
+                    'Sin GPS ni inicio: partiste del centro de Lima'
+                  );
+                  onShowToast?.(
+                    res.motor === 'google' ? '🚀 Ruta optimizada con Google Maps' : '🚀 Ruta optimizada',
+                    partes.join(' · '),
+                    res.sinUbicacion > 0 ? 'warning' : 'success'
+                  );
                 } catch (e: any) {
                   onShowToast?.('❌ Error', e.message || 'No se pudo optimizar', 'error');
+                } finally {
+                  setOptimizando(false);
+                  setOptimizandoMsg('');
                 }
               }}
-              disabled={sincronizando || clientes.length === 0}
-              className="flex items-center gap-1 px-2.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50"
-              title="Optimizar ruta por distrito"
+              disabled={sincronizando || optimizando || clientes.length === 0}
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 disabled:opacity-50 min-w-0"
+              title="Optimizar ruta por distancia real (inicio/GPS + geocodificación)"
             >
-              {sincronizando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
-              <span>Ruta</span>
+              {optimizando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <MapPin className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{optimizando ? (optimizandoMsg || 'Optimizando…') : 'Ruta'}</span>
+            </button>
+            {/* 🧭 (Fase 3.12) Navegación GPS propia con voz */}
+            <button
+              onClick={abrirNavegacionGps}
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0"
+              title="Navegación GPS con voz: flechita sobre la ruta, giros anunciados en español y recálculo si te desvías"
+            >
+              <NavigationIcon className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">GPS</span>
             </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
-              className="flex items-center gap-1 px-2.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95"
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0"
+              title="Agregar un cliente a mano"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">Agregar</span>
             </button>
           </div>
-        </div>
 
-        {/* Stats rápidas - 4 columnas en móvil */}
-        <div className="grid grid-cols-4 gap-1.5">
+        {/* Stats rápidas - 5 columnas en móvil (Fase 2.5: + NO entregados) */}
+        <div className="grid grid-cols-5 gap-1.5">
           <div className="p-2 rounded-lg bg-slate-900 border border-slate-700/50 text-center">
             <div className="text-[9px] text-slate-500 uppercase">Total</div>
             <div className="text-sm font-black text-white">{stats.total}</div>
@@ -422,11 +783,138 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             <div className="text-[9px] text-amber-400/70 uppercase">Pend</div>
             <div className="text-sm font-black text-amber-400">{stats.pendientes}</div>
           </div>
+          <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
+            <div className="text-[9px] text-red-400/70 uppercase">No entreg</div>
+            <div className="text-sm font-black text-red-400">{stats.fallidos}</div>
+          </div>
           <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
             <div className="text-[9px] text-blue-400/70 uppercase">S/</div>
             <div className="text-sm font-black text-blue-400">{stats.cobrado.toFixed(0)}</div>
           </div>
         </div>
+
+        {/* ⏱ Cronómetro de ruta + aviso silencioso al bot (Fase 2.2) */}
+        <CronometroRuta
+          uid={user?.uid}
+          clientes={clientes}
+          riderNombre={profile?.nombre || user?.displayName || 'Rider'}
+          riderTelefono={config?.empresa?.telefono || ''}
+          empresa={config?.empresa?.nombre || 'MATE'}
+          onShowToast={onShowToast}
+        />
+      </div>
+
+      {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
+      <div className="rounded-xl bg-slate-800 border border-slate-700 overflow-hidden">
+        <button
+          onClick={() => setRutaCardAbierta(!rutaCardAbierta)}
+          className="w-full flex items-center gap-2.5 p-3 hover:bg-slate-700/40 transition-colors text-left"
+        >
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Flag className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-white flex items-center gap-2">
+              Inicio y fin de ruta
+              {(config?.ruta?.inicio || config?.ruta?.fin) && (
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold">
+                  configurado
+                </span>
+              )}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate">
+              {config?.ruta?.inicio
+                ? `Desde: ${config.ruta.inicio.nombre}`
+                : 'Sin inicio — se usa tu GPS al optimizar'}
+              {config?.ruta?.volverAlInicio && !config?.ruta?.fin ? ' · termina donde empezaste' : ''}
+              {config?.ruta?.fin ? ` · Hasta: ${config.ruta.fin.nombre}` : ''}
+            </p>
+          </div>
+          {rutaCardAbierta ? (
+            <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+          )}
+        </button>
+
+        {rutaCardAbierta && (
+          <div className="px-3 pb-3 space-y-3 border-t border-slate-700/50 pt-3">
+            <AddressAutocomplete
+              label="🟢 Dirección de INICIO (tu casa o almacén)"
+              placeholder="ej: av sucre 523…"
+              icono="inicio"
+              valorGuardado={
+                config?.ruta?.inicio
+                  ? {
+                      nombre: config.ruta.inicio.nombre,
+                      distrito: undefined,
+                      lat: config.ruta.inicio.lat,
+                      lng: config.ruta.inicio.lng,
+                    }
+                  : null
+              }
+              onElegir={(d) => guardarRuta({ inicio: { nombre: d.nombre, lat: d.lat, lng: d.lng } })}
+              onLimpiar={() => guardarRuta({ inicio: null })}
+              ayuda="Escribe la avenida/calle y elige de la lista. Se usa como punto de partida de la optimización y aparece en el mapa."
+            />
+
+            <AddressAutocomplete
+              label="🔴 Dirección de FIN (opcional)"
+              placeholder="ej: plaza vea bellavista…"
+              icono="fin"
+              valorGuardado={
+                config?.ruta?.fin
+                  ? {
+                      nombre: config.ruta.fin.nombre,
+                      distrito: undefined,
+                      lat: config.ruta.fin.lat,
+                      lng: config.ruta.fin.lng,
+                    }
+                  : null
+              }
+              onElegir={(d) => guardarRuta({ fin: { nombre: d.nombre, lat: d.lat, lng: d.lng } })}
+              onLimpiar={() => guardarRuta({ fin: null })}
+              ayuda="Si la defines, la ruta optimizada TERMINA ahí (última parada fija)."
+            />
+
+            {/* Toggle: terminar donde empezaste */}
+            <button
+              onClick={() => guardarRuta({ volverAlInicio: !config?.ruta?.volverAlInicio })}
+              disabled={!!config?.ruta?.fin}
+              className={`w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all active:scale-[0.98] disabled:opacity-40 ${
+                config?.ruta?.volverAlInicio
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-slate-900 border-slate-700 hover:border-slate-600'
+              }`}
+            >
+              <div className="text-left">
+                <p className="text-xs font-bold text-white">🔁 Terminar donde empezaste</p>
+                <p className="text-[10px] text-slate-400">
+                  {config?.ruta?.fin
+                    ? 'Desactivado: hay una dirección de FIN configurada'
+                    : 'La optimización cuenta el regreso a tu inicio'}
+                </p>
+              </div>
+              <div
+                className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 ${
+                  config?.ruta?.volverAlInicio ? 'bg-emerald-500' : 'bg-slate-600'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    config?.ruta?.volverAlInicio ? 'translate-x-4' : ''
+                  }`}
+                />
+              </div>
+            </button>
+
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              💡 El inicio/fin queda guardado en tu cuenta y lo usan la optimización de ruta
+              (botón “Ruta”) y el Mapa de Entregas. Ejemplo: escribe “av sucre” y elige
+              “Avenida Sucre — San Miguel”.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Formulario agregar manual */}
@@ -454,37 +942,171 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
       {/* Buscador y filtros - Mobile optimized */}
       <div className="flex flex-col gap-1.5">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar..."
-            className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
-          />
+        <div className="relative flex gap-1.5">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar..."
+              className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
+            />
+          </div>
+          {/* 📋 Listado de verificación (Fase 2.5) — para cruzar con la página de la empresa */}
+          <button
+            onClick={() => setListadoVerifAbierto(!listadoVerifAbierto)}
+            className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
+              listadoVerifAbierto
+                ? 'bg-blue-600 border-blue-500 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+            }`}
+            title="Listado de verificación para cruzar con la página de la empresa"
+          >
+            <ClipboardList className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Filtros por estado (chips) */}
+        {/* Filtros por estado (chips) — Fase 2.5: + No entregados, Empresa y Mz/SN */}
         <div className="flex gap-1 overflow-x-auto scrollbar-none">
           {[
             { id: 'todos', label: 'Todos', count: stats.total },
             { id: 'pendientes', label: 'Pend', count: stats.pendientes },
             { id: 'entregados', label: 'Entreg', count: stats.entregados },
-            { id: 'fallidos', label: 'Fall', count: stats.fallidos },
+            { id: 'fallidos', label: '❌ No entreg', count: stats.fallidos },
+            { id: 'empresa', label: '🏪 Empresa', count: nEmpresa, title: 'Pagos que cobra la empresa: POS, Pago Link, Yape/Plin, Transferencia, José Smith y En Empresa' },
+            { id: 'mzsn', label: '⚠️ Mz/SN', count: nMzsn },
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setFiltroEstado(tab.id as any)}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+              title={(tab as any).title}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all border ${
                 filtroEstado === tab.id
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : tab.id === 'fallidos'
+                  ? 'bg-red-500/10 text-red-400 border-red-500/25 hover:bg-red-500/20'
+                  : tab.id === 'empresa'
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/25 hover:bg-blue-500/20'
+                  : tab.id === 'mzsn'
+                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/25 hover:bg-orange-500/20'
+                  : 'bg-slate-800 text-slate-400 hover:text-white border-slate-700'
               }`}
             >
               {tab.label} ({tab.count})
             </button>
           ))}
         </div>
+
+        {/* 📋 Panel de verificación (Fase 2.5) — mini-listado para
+            contrastar con la página de la empresa; se filtra igual que la lista.
+            ✅ Fase 2.6: checks por cliente (como el "Registro en la Web"
+            de la v1) — toca la fila y queda marcado en verde. */}
+        {listadoVerifAbierto && (() => {
+          const nVerif = clientesFiltrados.filter((c) => c.webReg).length;
+          const pct = clientesFiltrados.length > 0 ? Math.round((nVerif / clientesFiltrados.length) * 100) : 0;
+          return (
+          <div className="rounded-xl bg-slate-800 border border-blue-500/30 overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-blue-500/10 border-b border-blue-500/20">
+              <div className="flex items-center gap-2 min-w-0">
+                <ClipboardList className="w-4 h-4 text-blue-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white">Verificación con la empresa</div>
+                  <div className="text-[9px] text-slate-400 truncate">
+                    {nVerif}/{clientesFiltrados.length} revisados · S/ {stats.cobrado.toFixed(2)} cobrado
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={copiarListadoVerificacion}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-95 border shrink-0 ${
+                  listadoCopiado
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-blue-600 hover:bg-blue-500 border-blue-500 text-white'
+                }`}
+              >
+                {listadoCopiado ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {listadoCopiado ? 'Copiado' : 'Copiar'}
+              </button>
+            </div>
+
+            {/* Barra de progreso de revisión */}
+            {clientesFiltrados.length > 0 && (
+              <div className="px-3 pt-2">
+                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Lista con checks — fila entera tocable, verde al marcar */}
+            <div className="max-h-56 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40 py-1">
+              {clientesFiltrados.length === 0 ? (
+                <p className="text-[11px] text-slate-400 text-center py-4">Nada con estos filtros</p>
+              ) : (
+                clientesFiltrados.map((c) => {
+                  const entregado = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st);
+                  const fallido = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st);
+                  const verif = c.webReg === true;
+                  return (
+                    <div
+                      key={String(c.id)}
+                      onClick={() => toggleVerificado(c)}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 cursor-pointer transition-colors ${
+                        verif ? 'bg-emerald-500/10' : 'hover:bg-slate-700/30'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 flex items-center gap-2">
+                        {/* Check (como v1: ⬜ → ✅) */}
+                        <span
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                            verif
+                              ? 'bg-emerald-500 border-emerald-500 text-white'
+                              : 'border-slate-600 text-transparent'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" strokeWidth={3} />
+                        </span>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entregado ? 'bg-emerald-500' : fallido ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span className={`text-[11px] font-bold truncate ${verif ? 'text-emerald-400' : 'text-white'}`}>
+                          {c.num ? `${c.num}. ` : ''}{c.nombre || 'Cliente'}
+                        </span>
+                        {c.hora && <span className="text-[9px] text-slate-500 shrink-0">{c.hora}</span>}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</span>
+                        <span className={`ml-1.5 text-[9px] font-bold ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
+                          {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Marcar / limpiar (como v1) */}
+            {clientesFiltrados.length > 0 && (
+              <div className="flex gap-1.5 px-2.5 py-2 border-t border-slate-700/50">
+                <button
+                  onClick={() => marcarTodosVerificados(true)}
+                  className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all active:scale-95"
+                >
+                  <Check className="w-3 h-3" /> Marcar todos
+                </button>
+                <button
+                  onClick={() => marcarTodosVerificados(false)}
+                  className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-red-500/10 border border-red-500/25 text-red-400 hover:bg-red-500/20 transition-all active:scale-95"
+                >
+                  <X className="w-3 h-3" /> Limpiar
+                </button>
+              </div>
+            )}
+          </div>
+          );
+        })()}
 
         {/* Filtros por distrito y producto */}
         {clientes.length > 0 && (
@@ -583,6 +1205,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-bold text-white truncate">{c.nombre || 'Cliente'}</span>
+                      {/* ✅ Fase 2.6: ya pasó a la página de la empresa (verificado) */}
+                      {c.webReg && (
+                        <span
+                          className="px-1 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[8px] font-bold shrink-0 leading-none"
+                          title="Ya pasó a la página de la empresa"
+                        >
+                          ✓ web
+                        </span>
+                      )}
+                      {/* ⚠️ Fase 2.5: badge de dirección incompleta (manzana / sin número) */}
+                      {tipoDireccion(c.dir, c.obs) !== 'ok' && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded border text-[8px] font-bold shrink-0 ${claseBadgeDireccion(tipoDireccion(c.dir, c.obs))}`}
+                          title={`Dirección por ${tipoDireccion(c.dir, c.obs) === 'mz' ? 'manzana' : tipoDireccion(c.dir, c.obs) === 'sn' ? 'SIN NÚMERO' : 'referencia'} — pídele su ubicación`}
+                        >
+                          {etiquetaDireccion(tipoDireccion(c.dir, c.obs))}
+                        </span>
+                      )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -593,7 +1233,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                   {/* Monto */}
                   <div className="text-right shrink-0">
-                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(0)}</div>
+                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                     <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
 
@@ -611,6 +1251,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       {c.dir && (
                         <div className="text-slate-400">
                           <span className="text-slate-500">📍</span> <span className="text-slate-300">{c.dir}</span>
+                          {typeof c.lat === 'number' && typeof c.lng === 'number' ? (
+                            c.latSrc === 'aprox' ? (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold">≈ aprox. (distrito)</span>
+                            ) : (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold">✓ ubicado</span>
+                            )
+                          ) : (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-700/60 border border-slate-600 text-slate-400 text-[9px] font-bold">sin ubicar</span>
+                          )}
                         </div>
                       )}
                       {c.cel && (
@@ -634,6 +1283,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               key={id}
                               onClick={() => {
                                 cambiarEstado(c.id, id);
+                                sonarPago(); // 🔔 Fase 3.14
                                 onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
                               }}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
@@ -674,6 +1324,48 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       {c.fotoUrl ? '📷 Ver/Cambiar foto de entrega' : '📷 Foto de entrega'}
                     </button>
 
+                    {/* Botón 📍 Ubicar en el mapa (Fase 1.4) */}
+                    <button
+                      onClick={() => setUbicarClienteId(c.id)}
+                      className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 border ${
+                        typeof c.lat === 'number' && c.latSrc !== 'aprox'
+                          ? 'bg-slate-700/40 hover:bg-slate-700/70 border-slate-600 text-slate-300'
+                          : 'bg-indigo-500/15 hover:bg-indigo-500/25 border-indigo-500/40 text-indigo-300'
+                      }`}
+                      title="Buscar la dirección exacta y guardarla (autocompletado con distritos)"
+                    >
+                      <MapPinned className="w-3 h-3" />
+                      {typeof c.lat === 'number'
+                        ? c.latSrc === 'aprox'
+                          ? '📍 Precisar ubicación (está aprox.)'
+                          : '📍 Cambiar ubicación en el mapa'
+                        : '📍 Ubicar en el mapa'}
+                    </button>
+
+                    {/* Botón ✏️ Editar datos (Fase 2.4 — precio, dirección, teléfono, observaciones) */}
+                    <button
+                      onClick={() => abrirEdicion(c)}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 rounded-md text-[10px] font-bold transition-all active:scale-95"
+                      title="Editar precio, dirección, teléfono, distrito y observaciones"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Editar datos
+                    </button>
+
+                    {/* 📲 Pedir ubicación exacta (Fase 2.5) — SOLO para direcciones
+                        por manzana o sin número, estilo v1: abre WhatsApp con el
+                        mensaje pidiendo la dirección o la 📍 ubicación */}
+                    {tipoDireccion(c.dir, c.obs) !== 'ok' && (
+                      <button
+                        onClick={() => pedirUbicacionDirecta(c)}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/40 text-orange-300 rounded-md text-[10px] font-bold transition-all active:scale-95"
+                        title="Su dirección es por manzana o no tiene número — pídele la ubicación exacta por WhatsApp"
+                      >
+                        <span className="text-[11px]">📲</span>
+                        Pedir ubicación exacta ({tipoDireccion(c.dir, c.obs) === 'mz' ? 'manzana' : tipoDireccion(c.dir, c.obs) === 'sn' ? 'sin número' : 'referencia'})
+                      </button>
+                    )}
+
                     {/* Botones de acción */}
                     <div className="flex gap-1 pt-1">
                       {/* Botones de mover (arriba/abajo) */}
@@ -712,6 +1404,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             WA
                           </button>
                           <button
+                            onClick={() => llamarCliente(c)}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
+                            title={`Llamar a ${c.nombre || 'el cliente'}`}
+                          >
+                            <Phone className="w-3 h-3" />
+                            Llamar
+                          </button>
+                          <button
                             onClick={() => setControlModalId(controlModalId === c.id ? null : c.id)}
                             className="flex items-center gap-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-[10px] font-bold transition-all active:scale-95"
                           >
@@ -748,8 +1448,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           </div>
 
                           <div className="grid grid-cols-2 gap-1.5">
-                            <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'yape_qr'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_yape'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📲</span> Enviar Yape
+                            </button>
+                            <button onClick={async () => { onShowToast?.('💚 Plin', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_plin'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95" title="Fase 3.20 — el bot envía tu QR de Plin con plantilla (parche extras_chat.js)">
+                              <span className="text-lg">💚</span> Enviar Plin
+                            </button>
+                            <button onClick={() => abrirNavegacionGpsCliente(c)} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 text-[11px] font-bold transition-all active:scale-95" title="Fase 3.20 — navegación GPS con voz directo a este cliente">
+                              <span className="text-lg">🧭</span> Navegar GPS
                             </button>
                             <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">🚀</span> Voy en camino
@@ -789,6 +1495,107 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           <button onClick={() => setBotModalId(null)} className="w-full mt-2 py-2 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 rounded-lg text-xs font-bold transition-all">
                             Cerrar
                           </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ═══ Modal ✏️ Editar datos del cliente (Fase 2.4 — como el Rider modular v1) ═══ */}
+                    {editarId === c.id && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setEditarId(null)}>
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-base font-bold text-white">✏️ Editar cliente</h3>
+                            <button onClick={() => setEditarId(null)} className="text-slate-400 hover:text-white">
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mb-3">
+                            <span className="text-white font-bold">{c.nombre}</span> · los cambios se sincronizan con la ruta y el bot
+                          </div>
+
+                          <div className="space-y-3">
+                            {/* Precio */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">💰 Precio / por cobrar (S/)</label>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.5"
+                                min="0"
+                                value={editPrecio}
+                                onChange={(e) => setEditPrecio(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm font-bold outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Dirección */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📍 Dirección</label>
+                              <input
+                                type="text"
+                                value={editDir}
+                                onChange={(e) => setEditDir(e.target.value)}
+                                placeholder="Av / Jr / Calle y número"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                              <p className="text-[9px] text-amber-400 mt-1">
+                                Si cambias la dirección, el cliente se re-ubica en el mapa al optimizar la ruta.
+                              </p>
+                            </div>
+
+                            {/* Distrito */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">🏙️ Distrito</label>
+                              <input
+                                type="text"
+                                value={editDist}
+                                onChange={(e) => setEditDist(e.target.value)}
+                                placeholder="Ej: San Miguel"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Teléfono */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📱 Teléfono</label>
+                              <input
+                                type="tel"
+                                inputMode="tel"
+                                value={editCel}
+                                onChange={(e) => setEditCel(e.target.value)}
+                                placeholder="9 dígitos"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors"
+                              />
+                            </div>
+
+                            {/* Observaciones */}
+                            <div>
+                              <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">📝 Observaciones</label>
+                              <textarea
+                                rows={3}
+                                value={editObs}
+                                onChange={(e) => setEditObs(e.target.value)}
+                                placeholder="Ej: dejar en recepción, llamar al llegar…"
+                                className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:border-blue-500 transition-colors resize-none custom-scrollbar"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 mt-4">
+                            <button
+                              onClick={() => setEditarId(null)}
+                              className="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-95"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={guardarEdicion}
+                              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-600/20"
+                            >
+                              💾 Guardar cambios
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1565,9 +2372,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 onClick={async () => {
                                   onShowToast?.('📤 MATE', 'Enviando reporte al grupo MATE...', 'info');
                                   // 📌 Usamos 'enviar_grupo_mate' que el bot YA conoce
-                                  // No necesitamos tocar el bot Baileys
+                                  // Fase 3.8: con grupoId + estado (payload idéntico a la
+                                  // v1) — sin grupoId el bot marcaba el doc como procesado
+                                  // pero NO enviaba nada al grupo de WhatsApp.
                                   await enviarAccionBot(c, 'enviar_grupo_mate', {
                                     texto: mensajeFinal,
+                                    grupoId: GRUPO_MATE_JID,
+                                    estado: mateEstadoSel || 'otros',
                                   });
                                   if (mateEstadoSel) {
                                     const mapeoEstado: Record<string, string> = { pendiente: 'pendiente', entregado: 'efectivo', fallido: 'fallida', reprogramar: 'pendiente', ausente: 'ausente', rechazo: 'rechazado', no_contesta: 'no-contesta', en_camino: 'pendiente', devolucion: 'cambio', cancelado: 'cancelado' };
@@ -1608,18 +2419,54 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         </div>
       )}
 
-      {/* 🏁 BOTONES DE GESTIÓN DE RUTA (Finalizar, Guardar, Limpiar) */}
+      {/* 🏁 BOTONES DE GESTIÓN DE RUTA — como la v1: cerrar (guarda
+          TODO y limpia) + limpiar sin guardar */}
       {clientes.length > 0 && (
         <div className="rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-2">
           <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">🏁 Gestión de ruta</div>
 
-          {/* Finalizar Ruta */}
+          {/* 📂 Importar Excel (Fase 2.10 — mudado del header aquí, junto
+              a Exportar a Circuit: los 2 Excel de la ruta viven juntos y
+              el header de Mi Ruta queda limpio: Sync | Ruta | +) */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importando}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
+            title="Cargar los clientes del día desde un Excel (.xlsx / .xls)"
+          >
+            {importando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            IMPORTAR EXCEL
+            <span className="text-[10px] font-medium text-emerald-400/70">· clientes del día</span>
+          </button>
+
+          {/* 🛵 Exportar a Circuit (Fase 2.8, movido aquí en la 2.9 para
+              no saturar el header) — Excel con el formato exacto de
+              importación de la app Circuit */}
+          <button
+            onClick={handleExportarCircuit}
+            disabled={clientes.length === 0}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300"
+            title="Genera el Excel con el formato exacto de importación de la app Circuit (direcciones, teléfonos y notas)"
+          >
+            <Bike className="w-4 h-4" />
+            EXPORTAR A CIRCUIT
+            <span className="text-[10px] font-medium text-indigo-400/70">· Excel de importación</span>
+          </button>
+
+          {/* Finalizar y Guardar Ruta (= cerrar de la v1) */}
           <button
             onClick={async () => {
-              if (!confirm('¿Finalizar ruta?\n\nSe guardará un resumen en el historial y la ruta se marcará como finalizada.\nLos clientes seguirán visibles para consulta.')) return;
+              if (!confirm(
+                '¿Finalizar y guardar la ruta?\n\n' +
+                'Como la versión 1:\n' +
+                '✅ Se guarda en el Historial (con tu plata y la de la empresa)\n' +
+                '☁️ Respaldo automático en la nube\n' +
+                '🧹 La lista queda LIMPIA para el día siguiente\n\n' +
+                '¿Continuar?'
+              )) return;
               try {
                 await finalizarRutaActual();
-                onShowToast?.('🏁 Ruta finalizada', 'Resumen guardado en historial', 'success');
+                onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial y en la nube — lista limpia para mañana', 'success');
               } catch (e: any) {
                 onShowToast?.('❌ Error', e.message || 'No se pudo finalizar', 'error');
               }
@@ -1628,25 +2475,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
           >
             {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '🏁'}
-            FINALIZAR RUTA
-          </button>
-
-          {/* Guardar y Cerrar Ruta */}
-          <button
-            onClick={async () => {
-              if (!confirm('¿Guardar y cerrar ruta?\n\nSe guardarán los clientes en clientes_registrados como respaldo histórico.\nLos clientes seguirán visibles en el panel.')) return;
-              try {
-                await guardarYCerrarRutaActual();
-                onShowToast?.('💾 Ruta guardada', 'Clientes guardados en historial', 'success');
-              } catch (e: any) {
-                onShowToast?.('❌ Error', e.message || 'No se pudo guardar', 'error');
-              }
-            }}
-            disabled={sincronizando}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all active:scale-95 disabled:opacity-50 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400"
-          >
-            {sincronizando ? <Loader2 className="w-4 h-4 animate-spin" /> : '💾'}
-            GUARDAR Y CERRAR RUTA
+            FINALIZAR Y GUARDAR RUTA
           </button>
 
           {/* Limpiar sin Guardar */}
@@ -1700,6 +2529,29 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         <FotoEntregaModal
           cliente={fotoEntregaCliente}
           onClose={() => setFotoEntregaCliente(null)}
+          onShowToast={onShowToast}
+        />
+      )}
+
+      {/* 📍 Ubicar cliente en el mapa (Fase 1.4) */}
+      {ubicarCliente && (
+        <UbicarClienteModal
+          cliente={ubicarCliente}
+          onClose={() => setUbicarClienteId(null)}
+          onGuardar={guardarUbicacion}
+          onShowToast={onShowToast}
+        />
+      )}
+
+      {/* 🧭 Navegación GPS propia con voz (Fase 3.12): flechita,
+          giros anunciados en español, recálculo y escape Waze/Google */}
+      {navGpsAbierto && (
+        <NavegacionGpsModal
+          paradas={navGpsParadas}
+          onClose={() => {
+            setNavGpsAbierto(false);
+            setNavGpsParadas([]);
+          }}
           onShowToast={onShowToast}
         />
       )}

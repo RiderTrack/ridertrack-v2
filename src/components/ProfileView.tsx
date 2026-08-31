@@ -1,10 +1,14 @@
-import React from 'react';
-import { User, ShieldCheck, Mail, Phone, Lock, CheckCircle2, LogOut } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, ShieldCheck, Mail, Phone, Lock, CheckCircle2, LogOut, Camera, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { cerrarSesion } from '../services/firebase';
+import { AvatarSvg, avatarPorId } from '../data/avatars';
+import { AvatarPicker } from './AvatarPicker';
+import { guardarAvatarRider } from '../services/firestore';
 
 export const ProfileView: React.FC = () => {
   const { profile, user } = useAuth();
+  const [pickerAbierto, setPickerAbierto] = useState(false);
 
   const handleLogout = async () => {
     if (confirm('¿Cerrar sesión?')) {
@@ -12,21 +16,36 @@ export const ProfileView: React.FC = () => {
     }
   };
 
+  const handleSeleccionarAvatar = async (avatarId: string) => {
+    if (!user) throw new Error('Sin sesión');
+    await guardarAvatarRider(user.uid, avatarId);
+    try {
+      localStorage.setItem('rt_avatar', avatarId);
+    } catch {
+      // sin storage
+    }
+    // refresco inmediato de la UI (el listener tarda un instante)
+    window.location.reload();
+  };
+
   return (
     <div className="space-y-6 pb-12 max-w-3xl">
       <div className="p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-xl space-y-4">
         <div className="flex items-center gap-4">
-          {profile?.foto ? (
-            <img
-              src={profile.foto}
-              alt={profile.nombre}
-              className="w-16 h-16 rounded-2xl object-cover ring-4 ring-blue-500/50 shadow-xl"
+          <div className="relative group">
+            <AvatarSvg
+              id={profile?.avatar}
+              className="w-16 h-16"
+              anillo="ring-4 ring-blue-500/50 shadow-xl"
             />
-          ) : (
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-600 to-emerald-600 flex items-center justify-center text-white text-2xl font-black shadow-xl">
-              {(profile?.nombre || 'U').charAt(0).toUpperCase()}
-            </div>
-          )}
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-600 border-2 border-slate-800 flex items-center justify-center hover:bg-blue-500 transition-colors"
+              title="Cambiar avatar"
+            >
+              <Camera className="w-3 h-3 text-white" />
+            </button>
+          </div>
           <div>
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               {profile?.nombre || 'Repartidor'}
@@ -38,6 +57,27 @@ export const ProfileView: React.FC = () => {
             <p className="text-xs text-emerald-400 font-medium flex items-center gap-1 mt-1">
               <ShieldCheck className="w-3.5 h-3.5" /> Estado: En línea
             </p>
+          </div>
+        </div>
+
+        {/* Sección de avatar — Fase 1.5 */}
+        <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-500/10 to-transparent border border-indigo-500/25 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-indigo-400" /> Mi avatar
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Ahora eres <b className="text-indigo-300">{avatarPorId(profile?.avatar).nombre}</b> —
+                se muestra en el menú, el header y el GPS del motorizado
+              </p>
+            </div>
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 transition-all active:scale-95 whitespace-nowrap"
+            >
+              Cambiar
+            </button>
           </div>
         </div>
 
@@ -64,6 +104,14 @@ export const ProfileView: React.FC = () => {
           Cerrar Sesión
         </button>
       </div>
+
+      {/* Picker de avatares estilo Netflix */}
+      <AvatarPicker
+        isOpen={pickerAbierto}
+        onClose={() => setPickerAbierto(false)}
+        avatarActual={profile?.avatar}
+        onSeleccionar={handleSeleccionarAvatar}
+      />
     </div>
   );
 };

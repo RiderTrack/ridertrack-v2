@@ -1,11 +1,22 @@
 export type NavigationTab =
   | 'dashboard'
   | 'ruta'
+  | 'seguimiento'
+  | 'yape'
   | 'pedidos'
   | 'clientes'
   | 'repartidores'
   | 'mapa'
+  | 'motorizados'
   | 'whatsapp'
+  | 'chatapi'
+  | 'catalogo'
+  | 'plantillas'
+  | 'broadcast'
+  | 'historial'
+  | 'stats'
+  | 'galeria'
+  | 'backups'
   | 'reportes'
   | 'estadisticas'
   | 'configuracion'
@@ -18,18 +29,26 @@ export type OrderStatus = 'pendiente' | 'en_camino' | 'entregado' | 'cancelado';
 
 export interface Order {
   id: string;
+  num?: number;          // Nº de orden en la ruta (1, 2, 3...)
   cliente: string;
   clienteTelefono: string;
   distrito: string;
   direccion: string;
   estado: OrderStatus;
+  stReal?: string;       // Estado real de Firestore (efectivo, yape-rudy, fallida...)
   repartidorId?: string;
   repartidorNombre?: string;
   repartidorFoto?: string;
-  hora: string;
+  hora: string;          // Hora de entrega (cuando st != pendiente)
   monto: number;
   metodoPago: 'Efectivo' | 'Yape/Plin' | 'Tarjeta' | 'Transferencia';
   productos: string[];
+  fotoUrl?: string;      // Foto de evidencia de entrega (Storage o base64)
+  nota?: string;         // Nota del pedido (visible en Evidencias)
+  obs?: string;          // Observación original del pedido
+  lat?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
+  lng?: number;          // Coordenada geocodificada (Fase 1.3, para el mapa)
+  latSrc?: 'google' | 'nominatim' | 'aprox' | 'manual'; // Origen de la coordenada (Fase 1.4)
 }
 
 export interface Driver {
@@ -55,13 +74,12 @@ export interface Customer {
   id: string;
   nombre: string;
   telefono: string;
-  email: string;
   distrito: string;
   direccionFrecuente: string;
-  totalPedidos: number;
-  totalGastado: number;
-  ultimoPedido: string;
-  estado: 'Activo' | 'Frecuente' | 'Nuevo' | 'VIP';
+  estadoDelDia: string;   // st real: pendiente, efectivo, fallida...
+  productos: string;
+  monto: number;
+  hora: string;
 }
 
 export interface ActivityItem {
@@ -100,4 +118,8 @@ export interface AppNotification {
   tiempo: string;
   leido: boolean;
   tipo: 'order' | 'driver' | 'whatsapp' | 'system';
+  /** Fase 3.17: si viene de un chat, lleva canal + teléfono —
+   *  la notificación se vuelve CLICKEABLE y te lleva al chat */
+  canalChat?: 'baileys' | 'meta';
+  telChat?: string;
 }

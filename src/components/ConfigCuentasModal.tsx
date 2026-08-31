@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect } from 'react';
-import { X, Save, Building2, Smartphone, Phone, MapPin, Loader2 } from 'lucide-react';
+import { X, Save, Building2, Smartphone, Phone, MapPin, Loader2, Heart } from 'lucide-react';
 import { ConfigCuentas, CONFIG_CUENTAS_DEFAULT } from '../services/firestore';
 import { useConfig } from '../hooks/useConfig';
 
@@ -25,6 +25,17 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
     setConfigLocal(prev => ({
       ...prev,
       [seccion]: { ...(prev[seccion] as any), [campo]: valor },
+    }));
+  };
+
+  // Fase 3.10: sección anidada ventas.{persona}.{campo}
+  const actualizarVentas = (persona: 'fabiana' | 'karla' | 'tocho', campo: string, valor: string) => {
+    setConfigLocal(prev => ({
+      ...prev,
+      ventas: {
+        ...prev.ventas,
+        [persona]: { ...(prev.ventas?.[persona] as any), [campo]: valor },
+      },
     }));
   };
 
@@ -121,6 +132,22 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <CampoInput label="CCI" value={configLocal.interbank?.cci || ''} onChange={v => actualizarCampo('interbank', 'cci', v)} placeholder="003-000-999999999-99" color="green" mono />
           </div>
 
+          {/* EQUIPO DE VENTAS (Fase 3.10 — los contactos que envía el bot con 🩷 Venta) */}
+          <div className="bg-slate-800 rounded-lg p-3 space-y-2">
+            <div className="text-[11px] text-pink-400 uppercase font-bold flex items-center gap-1">
+              <Heart className="w-3 h-3" /> Equipo de Ventas
+            </div>
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              Estos contactos se envían al cliente con el botón 🩷 Venta (el bot los manda como tarjeta de contacto). Sin celular configurado, ese botón no podrá enviar.
+            </p>
+            <CampoInput label="Fabiana — nombre" value={configLocal.ventas?.fabiana?.nombre || ''} onChange={v => actualizarVentas('fabiana', 'nombre', v)} placeholder="Fabiana" color="pink" />
+            <CampoInput label="Fabiana — celular" value={configLocal.ventas?.fabiana?.celular || ''} onChange={v => actualizarVentas('fabiana', 'celular', v)} placeholder="999999999" color="pink" mono />
+            <CampoInput label="Karla — nombre" value={configLocal.ventas?.karla?.nombre || ''} onChange={v => actualizarVentas('karla', 'nombre', v)} placeholder="Karla" color="pink" />
+            <CampoInput label="Karla — celular" value={configLocal.ventas?.karla?.celular || ''} onChange={v => actualizarVentas('karla', 'celular', v)} placeholder="999999999" color="pink" mono />
+            <CampoInput label="Tocho — nombre" value={configLocal.ventas?.tocho?.nombre || ''} onChange={v => actualizarVentas('tocho', 'nombre', v)} placeholder="Tocho" color="pink" />
+            <CampoInput label="Tocho — celular" value={configLocal.ventas?.tocho?.celular || ''} onChange={v => actualizarVentas('tocho', 'celular', v)} placeholder="999999999" color="pink" mono />
+          </div>
+
           {/* Botones */}
           <div className="flex gap-2 pt-2 sticky bottom-0 bg-slate-900 border-t border-slate-700 -mx-4 px-4 py-3">
             <button onClick={onClose} disabled={guardando} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all disabled:opacity-50">
@@ -151,6 +178,7 @@ const CampoInput: React.FC<{
     blue: 'focus:border-blue-500',
     sky: 'focus:border-sky-500',
     green: 'focus:border-green-500',
+    pink: 'focus:border-pink-500',
   };
   return (
     <div>

@@ -30,17 +30,20 @@ import { WhatsAppPanel } from './WhatsAppPanel';
 import { RoutePanel } from './RoutePanel';
 import { EvidencePanel } from './EvidencePanel';
 import { MoreActionsPanel } from './MoreActionsPanel';
+import { ETIQUETAS_ESTADO } from '../../utils/realData';
 
 interface OrderControlCenterProps {
   order: Order | null;
   isOpen: boolean;
   onClose: () => void;
   drivers: Driver[];
-  onUpdateOrderStatus: (orderId: string, newStatus: any) => void;
-  onUpdatePaymentMethod: (orderId: string, newMethod: string) => void;
+  onRegistrarPago: (orderId: string, metodoPanel: string) => void;
+  onCambiarEstado: (orderId: string, st: string) => void;
   onOpenWhatsAppModal: (phone?: string, name?: string) => void;
   onDeleteOrder: (orderId: string) => void;
   onDuplicateOrder: (order: Order) => void;
+  onGuardarFoto: (orderId: string, blob: Blob, dataUrl: string) => void;
+  onGuardarNota: (orderId: string, nota: string) => void;
   onShowToast?: (title: string, desc?: string, type?: any) => void;
 }
 
@@ -51,11 +54,13 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
   isOpen,
   onClose,
   drivers,
-  onUpdateOrderStatus,
-  onUpdatePaymentMethod,
+  onRegistrarPago,
+  onCambiarEstado,
   onOpenWhatsAppModal,
   onDeleteOrder,
   onDuplicateOrder,
+  onGuardarFoto,
+  onGuardarNota,
   onShowToast,
 }) => {
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
@@ -63,7 +68,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
 
   if (!order) return null;
 
-  const assignedDriver = drivers.find((d) => d.id === order.repartidorId);
+  const assignedDriver = drivers.find((d) => d.id === order.repartidorId) || drivers[0];
 
   const handleOpenCategory = (cat: PanelCategory) => {
     setActiveCategory(cat);
@@ -79,9 +84,12 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
     const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
     if (onShowToast) {
-      onShowToast(`WhatsApp Enviado: ${title}`, `Mensaje preparado para ${order.cliente}`, 'success');
+      onShowToast(`WhatsApp Preparado: ${title}`, `Mensaje listo para ${order.cliente} — confírmalo en WhatsApp`, 'success');
     }
   };
+
+  const estadoBadgeVariant =
+    order.estado === 'entregado' ? 'green' : order.estado === 'pendiente' ? 'amber' : 'red';
 
   return (
     <>
@@ -89,35 +97,18 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={`Centro de Control de Pedido: ${order.id}`}
-        subtitle="Panel operativo consolidado • Telemetría y gestión en tiempo real"
+        title={`Pedido #${order.num ?? order.id} — ${order.cliente}`}
+        subtitle="Panel operativo con acciones que se guardan en tu ruta"
         maxWidth="2xl"
         footer={
           <div className="w-full flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Badge
-                variant={
-                  order.estado === 'en_camino'
-                    ? 'blue'
-                    : order.estado === 'entregado'
-                    ? 'green'
-                    : order.estado === 'pendiente'
-                    ? 'amber'
-                    : 'red'
-                }
-                size="md"
-                dot
-                pulse={order.estado === 'en_camino'}
-              >
-                {order.estado === 'en_camino'
-                  ? 'En Camino'
-                  : order.estado === 'entregado'
-                  ? 'Entregado'
-                  : order.estado === 'pendiente'
-                  ? 'Pendiente'
-                  : 'Cancelado'}
+              <Badge variant={estadoBadgeVariant} size="md" dot>
+                {ETIQUETAS_ESTADO[order.stReal || ''] || order.stReal || 'Pendiente'}
               </Badge>
-              <span className="text-xs text-slate-400 font-mono">{order.hora}</span>
+              <span className="text-xs text-slate-400 font-mono">
+                {order.hora ? `Entregado ${order.hora}` : 'Sin hora de entrega'}
+              </span>
             </div>
 
             <Button
@@ -141,28 +132,30 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cliente</span>
               <p className="text-sm font-black text-white truncate">{order.cliente}</p>
               <p className="text-xs text-blue-400 font-mono flex items-center gap-1">
-                <Phone className="w-3 h-3" /> {order.clienteTelefono}
+                <Phone className="w-3 h-3" /> {order.clienteTelefono || 'sin teléfono'}
               </p>
             </div>
 
             <div className="space-y-0.5">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Ubicación</span>
-              <p className="text-xs font-bold text-white line-clamp-1">{order.direccion}</p>
+              <p className="text-xs font-bold text-white line-clamp-1">{order.direccion || 'sin dirección'}</p>
               <p className="text-xs text-slate-300 flex items-center gap-1">
-                <MapPin className="w-3 h-3 text-red-400" /> {order.distrito}
+                <MapPin className="w-3 h-3 text-red-400" /> {order.distrito || '—'}
               </p>
             </div>
 
             <div className="space-y-0.5 sm:text-right">
-              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cobro Total</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
+                {order.estado === 'entregado' ? 'Cobrado' : 'Por Cobrar'}
+              </span>
               <p className="text-lg font-black text-emerald-400">S/ {order.monto.toFixed(2)}</p>
               <Badge variant="purple" size="sm">
-                {order.metodoPago}
+                {order.estado === 'entregado' ? order.metodoPago : 'Pendiente de pago'}
               </Badge>
             </div>
           </div>
 
-          {/* Assigned Driver Card */}
+          {/* Rider Card */}
           <Card padding="sm" className="bg-slate-900 border-slate-700/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -170,33 +163,35 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                   <Bike className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Repartidor Asignado</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Repartidor</span>
                   <span className="font-bold text-sm text-white">
-                    {assignedDriver ? assignedDriver.nombre : order.repartidorNombre || 'Sin Repartidor Asignado'}
+                    {assignedDriver ? assignedDriver.nombre : order.repartidorNombre || 'RiderTrack'}
                   </span>
                   {assignedDriver && (
-                    <span className="text-xs text-slate-400 block font-mono">
-                      {assignedDriver.vehiculo} • Placa: {assignedDriver.placa}
+                    <span className="text-xs text-slate-400 block">
+                      Entregas hoy: {assignedDriver.entregasHoy}
                     </span>
                   )}
                 </div>
               </div>
 
-              {assignedDriver && (
-                <Badge variant="green" size="sm" dot pulse>
-                  GPS {assignedDriver.velocidadActual} km/h
-                </Badge>
-              )}
+              <Badge variant="blue" size="sm">
+                Ruta activa
+              </Badge>
             </div>
           </Card>
 
           {/* Products / Items List */}
           <div>
             <label className="block text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider flex items-center justify-between">
-              <span>Detalle de Productos ({order.productos.length})</span>
-              <span className="text-[10px] text-slate-400">Verificado</span>
+              <span>Productos del Pedido ({order.productos.length})</span>
             </label>
             <div className="space-y-1.5 rounded-xl bg-slate-900 p-3 border border-slate-700/60">
+              {order.productos.length === 0 && (
+                <p className="text-xs text-slate-400 py-2 text-center">
+                  Sin detalle de productos registrado
+                </p>
+              )}
               {order.productos.map((prod, idx) => (
                 <div
                   key={idx}
@@ -226,14 +221,10 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
             }}
             className="group relative flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 text-white font-extrabold text-sm shadow-2xl hover:shadow-blue-500/30 transition-all transform hover:scale-105 active:scale-95 border border-blue-400/40"
           >
-            {/* Soft Ripple Glow Effect */}
             <span className="absolute -inset-1 rounded-full bg-blue-500/30 blur-md group-hover:bg-blue-400/50 transition-all pointer-events-none animate-pulse" />
-            
+
             <Zap className="w-5 h-5 relative z-10 fill-current text-amber-300 animate-bounce" />
             <span className="relative z-10 tracking-tight">Acciones del Pedido</span>
-            <Badge variant="purple" size="sm" className="relative z-10 ml-1">
-              PRO
-            </Badge>
           </button>
         </div>
       )}
@@ -244,16 +235,16 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
         onClose={() => setIsBottomSheetOpen(false)}
         title={
           activeCategory === 'categories'
-            ? `Acciones de Pedido ${order.id}`
+            ? `Acciones de Pedido #${order.num ?? order.id}`
             : activeCategory === 'pago'
             ? '💰 Panel de Pago & Estado'
             : activeCategory === 'whatsapp'
-            ? '💬 Panel de WhatsApp API'
+            ? '💬 Panel de WhatsApp'
             : activeCategory === 'ruta'
             ? '📍 Panel de Navegación & Ruta'
             : activeCategory === 'evidencias'
-            ? '📷 Panel de Evidencias de Entrega'
-            : '⚙ Panel de Más Acciones'
+            ? '📷 Evidencias de Entrega'
+            : '⚙ Más Acciones'
         }
         subtitle={
           activeCategory === 'categories'
@@ -287,7 +278,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                   <h4 className="font-extrabold text-sm text-white group-hover:text-emerald-400 transition-colors">
                     💰 Pago & Resoluciones
                   </h4>
-                  <p className="text-xs text-slate-400">Efectivo, Yape, POS, Vuelto y Cancelaciones</p>
+                  <p className="text-xs text-slate-400">Cobrar, cambiar método o marcar incidencia</p>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors" />
@@ -306,7 +297,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                   <h4 className="font-extrabold text-sm text-white group-hover:text-teal-400 transition-colors">
                     💬 WhatsApp Rápidos
                   </h4>
-                  <p className="text-xs text-slate-400">QR Yape, Voy en camino, Llamar y Chat</p>
+                  <p className="text-xs text-slate-400">Cuentas banco, en camino, llamar y chat</p>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors" />
@@ -325,7 +316,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                   <h4 className="font-extrabold text-sm text-white group-hover:text-blue-400 transition-colors">
                     📍 Ruta & GPS
                   </h4>
-                  <p className="text-xs text-slate-400">Google Maps, Waze, Compartir Link</p>
+                  <p className="text-xs text-slate-400">Google Maps, Waze, Copiar y Compartir</p>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors" />
@@ -342,9 +333,9 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                 </div>
                 <div>
                   <h4 className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
-                    📷 Evidencias & Firma
+                    📷 Evidencias & Notas
                   </h4>
-                  <p className="text-xs text-slate-400">Fotos de entrega, Firma digital, Boleta</p>
+                  <p className="text-xs text-slate-400">Foto de entrega (cámara) y notas del pedido</p>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors" />
@@ -353,7 +344,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
             {/* Card 5: Más Acciones */}
             <button
               onClick={() => handleOpenCategory('mas_acciones')}
-              className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700/80 hover:border-amber-500/50 text-left flex items-center justify-between sm:col-span-2 transition-all group hover:scale-[1.01]"
+              className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700/80 hover:border-amber-500/50 text-left flex items-center justify-between transition-all group hover:scale-[1.01] sm:col-span-2"
             >
               <div className="flex items-center gap-3">
                 <div className="p-3 rounded-2xl bg-amber-500/15 text-amber-400 border border-amber-500/30 group-hover:bg-amber-500 group-hover:text-white transition-colors">
@@ -363,7 +354,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
                   <h4 className="font-extrabold text-sm text-white group-hover:text-amber-400 transition-colors">
                     ⚙ Más Acciones & Herramientas
                   </h4>
-                  <p className="text-xs text-slate-400">Duplicar, Exportar PDF/Excel, Imprimir Ticket, Auditoría</p>
+                  <p className="text-xs text-slate-400">Duplicar, copiar ficha, reabrir, ver datos técnicos</p>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors" />
@@ -375,8 +366,8 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
         {activeCategory === 'pago' && (
           <PaymentPanel
             order={order}
-            onUpdatePaymentMethod={(m) => onUpdatePaymentMethod(order.id, m)}
-            onUpdateOrderStatus={(s) => onUpdateOrderStatus(order.id, s)}
+            onRegistrarPago={(m) => onRegistrarPago(order.id, m)}
+            onCambiarEstado={(s) => onCambiarEstado(order.id, s)}
             onUploadPhoto={() => {
               setIsBottomSheetOpen(false);
               setActiveCategory('evidencias');
@@ -417,6 +408,8 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
         {activeCategory === 'evidencias' && (
           <EvidencePanel
             order={order}
+            onGuardarFoto={(orderId, blob, dataUrl) => onGuardarFoto(orderId, blob, dataUrl)}
+            onGuardarNota={(orderId, nota) => onGuardarNota(orderId, nota)}
             onShowToast={onShowToast}
           />
         )}
@@ -429,6 +422,7 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
               onDuplicateOrder(ord);
               setIsBottomSheetOpen(false);
             }}
+            onCambiarEstado={(st) => onCambiarEstado(order.id, st)}
             onShowToast={onShowToast}
           />
         )}

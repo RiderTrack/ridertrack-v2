@@ -13,6 +13,8 @@ export interface UserProfile {
   nombre: string;
   email: string;
   foto?: string;
+  /** Avatar ilustrado elegido en el picker (Fase 1.5) */
+  avatar?: string;
 }
 
 export function useAuth() {
@@ -33,6 +35,7 @@ export function useAuth() {
           nombre: firebaseUser.displayName || 'Repartidor',
           email: firebaseUser.email || '',
           foto: firebaseUser.photoURL || undefined,
+          avatar: undefined,
         });
 
         // Escuchar datos del usuario en Firestore
@@ -48,6 +51,7 @@ export function useAuth() {
                   nombre: data.nombre || firebaseUser.displayName || 'Repartidor',
                   email: data.email || firebaseUser.email || '',
                   foto: data.foto || firebaseUser.photoURL || undefined,
+                  avatar: data.avatar || undefined,
                 });
               }
             },

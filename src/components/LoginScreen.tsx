@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════════════════
 // 📱 LOGIN SCREEN - RiderTrack V2
-// Pantalla de login con Google Auth + Email/Password
+// Login con Google (web popup + APK nativo) + email/registro/recuperar
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   loginConGoogleWeb,
   loginConGoogleAPK,
@@ -16,6 +17,22 @@ interface LoginScreenProps {
   onSuccess?: () => void;
 }
 
+// Interpretar código de error de Google a causa conocida para mensaje user-friendly
+const interpretarError = (code: string, msg: string): string => {
+  const m = msg.toLowerCase();
+  if (code === '10' || m.includes('developer_error'))
+    return 'Configuración OAuth del APK incompleta. Contacta al administrador.';
+  if (code === '12500') return 'Configuración OAuth rechazada por Google.';
+  if (code === '12501' || m.includes('cancel')) return 'Inicio de sesión cancelado.';
+  if (code === '7') return 'Sin conexión a internet.';
+  if (code === '4') return 'Necesitas una cuenta Google activa en el dispositivo.';
+  if (code === '12502') return 'Ya hay un login en progreso. Espera un momento.';
+  if (m.includes('something went wrong')) return 'Google rechazó la configuración OAuth.';
+  if (m.includes('not implemented')) return 'Plugin nativo no instalado.';
+  if (m.includes('network')) return 'Sin conexión a internet.';
+  return 'No se pudo iniciar sesión con Google. Intenta de nuevo.';
+};
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -26,37 +43,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [showForgot, setShowForgot] = useState(false);
-  const [isAPK, setIsAPK] = useState(false);
 
-  // Detectar si es APK
-  useEffect(() => {
-    const apk = typeof (window as any).Capacitor !== 'undefined' && (window as any).Capacitor?.isNative;
-    setIsAPK(!!apk);
-  }, []);
-
-  // Login con Google
+  // Login con Google (web popup o APK nativo)
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError('');
 
     try {
-      if (isAPK) {
-        // APK: usar Capacitor GoogleAuth plugin
+      const apk = Capacitor.isNativePlatform();
+
+      if (apk) {
+        // APK: Capacitor GoogleAuth plugin (flujo nativo)
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-        await GoogleAuth.signOut().catch(() => {});
+        try { await GoogleAuth.signOut(); } catch { /* sin sesión previa */ }
         const googleUser = await GoogleAuth.signIn();
         const result = await loginConGoogleAPK(googleUser);
         if (!result.success) throw new Error(result.error);
       } else {
-        // Web: usar popup
+        // Web: popup
         const result = await loginConGoogleWeb();
         if (!result.success) throw new Error(result.error);
       }
     } catch (e: any) {
-      let msg = 'Error al iniciar con Google';
-      if (e.message?.includes('cancel')) msg = 'Inicio cancelado';
-      if (e.message?.includes('network')) msg = 'Sin conexión a internet';
-      setError(msg);
+      const code = e?.code !== undefined && e?.code !== null ? String(e.code) : '—';
+      const rawMsg = String(e?.message ?? JSON.stringify(e ?? e));
+      setError(interpretarError(code, rawMsg));
     } finally {
       setLoading(false);
     }
@@ -136,7 +147,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                 <button
                   onClick={() => { setTab('login'); setError(''); }}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                    tab === 'login' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+                    tab === 'login' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-[#0f172a]'
                   }`}
                 >
                   Iniciar Sesión
@@ -144,7 +155,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                 <button
                   onClick={() => { setTab('register'); setError(''); }}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                    tab === 'register' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+                    tab === 'register' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-[#0f172a]'
                   }`}
                 >
                   Crear Cuenta
@@ -155,7 +166,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
               <button
                 onClick={handleGoogleLogin}
                 disabled={loading}
-                className="w-full mb-4 flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-slate-100 text-slate-800 rounded-xl font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+                className="w-full mb-4 flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-[#f1f5f9] text-[#1e293b] rounded-xl font-bold text-sm transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -163,19 +174,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
-                Continuar con Google
+                {loading ? '⏳ Conectando...' : 'Continuar con Google'}
               </button>
 
               {/* Divisor */}
               <div className="flex items-center gap-3 mb-4">
                 <div className="flex-1 h-px bg-slate-800" />
-                <span className="text-xs text-slate-600">o con email</span>
+                <span className="text-xs text-[#64748b]">o con email</span>
                 <div className="flex-1 h-px bg-slate-800" />
               </div>
 
-              {/* Error */}
+              {/* Error user-friendly */}
               {error && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400">
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 break-words">
                   ⚠️ {error}
                 </div>
               )}
@@ -203,7 +214,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#0f172a]"
                     >
                       {showPassword ? '🙈' : '👁️'}
                     </button>
@@ -254,7 +265,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#0f172a]"
                     >
                       {showPassword ? '🙈' : '👁️'}
                     </button>
@@ -311,7 +322,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
           )}
         </div>
 
-        <p className="text-center text-xs text-slate-600 mt-4">
+        <p className="text-center text-xs text-[#64748b] mt-4">
           RiderTrack V2 · MATE Pharmacy © 2026
         </p>
       </div>

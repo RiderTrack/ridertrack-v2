@@ -18,6 +18,7 @@ import {
   limit,
   getDocs,
   getDoc,
+  getDocFromCache,
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
@@ -53,6 +54,15 @@ export interface Cliente {
   nota: string;
   fotoUrl?: string;
   respondioInicioRuta?: boolean;
+  /** ✅ Registro en la web (Fase 2.6 — como la v1): ya pasó a la
+   *  página de la empresa. Se marca desde el panel de Verificación. */
+  webReg?: boolean;
+  /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
+   *  no volver a geocodificar la misma dirección nunca más */
+  lat?: number;
+  lng?: number;
+  /** Origen de la coordenada: google | nominatim | aprox | manual (Fase 1.4) */
+  latSrc?: 'google' | 'nominatim' | 'aprox' | 'manual';
 }
 
 export interface RutaActiva {
@@ -68,6 +78,70 @@ export interface RutaActiva {
   clienteActualIdx?: number;
   totalClientes?: number;
   pendientes?: number;
+}
+
+/** Registro del historial de rutas (Fase 2.5) — un doc por cierre de ruta */
+export interface RegistroHistorial {
+  id: string;
+  uid: string;
+  fecha: string;            // YYYY-MM-DD
+  iniciadaAt?: string;
+  finalizadaAt?: string;
+  totalClientes: number;
+  entregados: number;
+  fallidos: number;
+  pendientes: number;
+  cobradoTotal: number;
+  /** Desglose de S/ por método (efectivo, yape-rudy, empresa...) */
+  porMetodo?: Record<string, number>;
+  /** S/ pagados por empresa (st=empresa, pos, transferencia... + mEmp de mixto) */
+  totalEmpresa?: number;
+  /** S/ que quedan para el rider (efectivo, yape-rudy... + mEf de mixto) */
+  totalRider?: number;
+  clientes?: any[];
+  /** Fase 2.6: ruta importada del historial de la versión 1 */
+  origen?: 'v1';
+  /** id original del registro v1 (timestamp ms) — para no importar 2 veces */
+  v1Id?: number;
+  /** km recorridos (solo rutas v1 — la v1 lo guardaba al cerrar) */
+  km?: number;
+  /** duración de la ruta en ms (solo rutas v1) */
+  tiempoRuta?: number;
+}
+
+/** Entrada del historial de la v1 (D.hist en el Rider Modular v1) */
+export interface RutaV1 {
+  id?: number;
+  fechaId?: string;   // YYYY-MM-DD
+  fecha?: string;     // "23 may. 2026"
+  fechaL?: string;    // "sábado, 23 de mayo de 2026"
+  total?: number;
+  ent?: number;
+  fal?: number;
+  pen?: number;
+  tT?: number;        // total LO TUYO (S/)
+  tE?: number;        // total EMPRESA (S/)
+  km?: number;
+  tiempoRuta?: number;
+  /** desglose v1: ef, yr, ye, mT, po, tr, yp, pl, js, em */
+  dg?: Record<string, number>;
+  cl?: any[];
+}
+
+/** Backup en la nube (Fase 2.5) — snapshot completo de la ruta */
+export interface BackupNube {
+  id: string;
+  uid: string;
+  creadoAt: string;
+  fecha: string;            // YYYY-MM-DD
+  hora: string;             // HH:MM
+  totalClientes: number;
+  entregados: number;
+  pendientes: number;
+  fallidos: number;
+  cobradoTotal: number;
+  clientes: Cliente[];
+  auto?: boolean;           // creado automáticamente
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -222,12 +296,19 @@ export async function finalizarRutaActiva(userId: string): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * FINALIZAR RUTA:
- * Marca la ruta como finalizada, guarda un resumen en historial_rutas
- * y MANTIENE los clientes visibles en ruta_activa para consulta.
- * Útil cuando terminaste todas las entregas del día.
+ * FINALIZAR Y GUARDAR RUTA (= cerrar() de la v1):
+ * 1. Guarda el registro completo en historial_rutas (con tu plata
+ *    y la de la empresa, como D.hist de la v1)
+ * 2. Backup automático a la nube (usuarios/{uid}/backups/auto_{fecha},
+ *    como _backupAutoAlCerrar de la v1)
+ * 3. Registra los clientes en clientes_registrados (respaldo)
+ * 4. LIMPIA ruta_activa y usuarios/{uid}.clientes → la lista queda
+ *    vacía para el día siguiente (v1: D.cl=[] tras cerrar)
+ * ⚠️ Fase 2.6 (fix): ANTES dejaba los clientes en ruta_activa “para
+ * consulta” y “Guardar y cerrar” ni siquiera guardaba en historial —
+ * el usuario se quedaba con la lista vieja y sin historial.
  */
-export async function finalizarRuta(userId: string, clientes: Cliente[]): Promise<void> {
+export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
   if (!db || !userId) return;
   try {
     // 1. Calcular resumen del día
@@ -238,13 +319,79 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
     const fallidos = clientes.filter(c =>
       ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
     ).length;
-    const cobrado = clientes
-      .filter(c => ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st))
-      .reduce((sum, c) => sum + parseFloat(String(c.cobrar || 0)), 0);
 
-    // 2. Guardar resumen en historial_rutas
+    // 2. Guardar registro en historial_rutas
+    // (Fase 2.5: ID único por cierre con timestamp — antes era
+    //  `${uid}_${fecha}` con merge y dos cierres el mismo día se
+    //  fusionaban. Se agregan desgloses por método y rider/empresa.)
+    // (Fase 2.6: mixto se divide como en la v1 — mEf para ti, mEmp
+    //  para la empresa — y yape-efectivo descuenta el vuelto. El
+    //  snapshot de clientes ahora guarda mEf/mYp/mEmp/mVt para el
+    //  Excel y el detalle.)
     const fechaHoy = new Date().toISOString().split('T')[0];
-    await setDoc(doc(db, 'historial_rutas', `${userId}_${fechaHoy}`), {
+
+    // Desglose por método de pago (reglas del cierre de la v1)
+    const porMetodo: Record<string, number> = {};
+    const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+    const ST_EMPRESA = ['empresa', 'pos', 'transferencia', 'pago-link', 'jose-smith'];
+    let totalEmpresa = 0;
+    let totalRider = 0;
+    for (const c of clientes) {
+      if (!ST_ENTREGADOS.includes(c.st)) continue;
+      const cobrar = parseFloat(String(c.cobrar || 0));
+      if (c.st === 'mixto') {
+        // Como la v1: la parte en efectivo es tuya, la parte
+        // digital la paga la empresa (tE += mEmp)
+        const mEf = parseFloat(String(c.mEf || 0));
+        const mEmp = parseFloat(String(c.mEmp || 0));
+        porMetodo['mixto'] = (porMetodo['mixto'] || 0) + mEf;
+        totalRider += mEf;
+        totalEmpresa += mEmp;
+      } else if (c.st === 'yape-efectivo') {
+        // Como la v1: efectivo + yape − vuelto entregado
+        const m = Math.max(0, parseFloat(String(c.mEf || 0)) + parseFloat(String(c.mYp || 0)) - parseFloat(String(c.mVt || 0)));
+        porMetodo['yape-efectivo'] = (porMetodo['yape-efectivo'] || 0) + m;
+        totalRider += m;
+      } else if (ST_EMPRESA.includes(c.st)) {
+        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
+        totalEmpresa += cobrar;
+      } else {
+        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
+        totalRider += cobrar;
+      }
+    }
+    const cobrado = totalRider + totalEmpresa;
+
+    // Snapshot de clientes (mismo formato que viaja al historial,
+    // al backup de la nube y a clientes_registrados)
+    const clientesSnapshot = clientes.map(c => ({
+      id: c.id,
+      num: c.num || null,
+      nombre: c.nombre || 'Cliente',
+      cel: c.cel || '',
+      prod: c.prod || '',
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      mEf: parseFloat(String(c.mEf || 0)),
+      mYp: parseFloat(String(c.mYp || 0)),
+      mEmp: parseFloat(String(c.mEmp || 0)),
+      mVt: parseFloat(String(c.mVt || 0)),
+      dir: c.dir || '',
+      dist: c.dist || '',
+      st: c.st || 'pendiente',
+      hora: c.hora || '',
+      obs: c.obs || '',
+      nota: c.nota || '',
+      // 📸 Fase 2.16: la foto de evidencia viaja al historial — así la
+      // Galería de Entregas puede mostrar las fotos de rutas cerradas
+      // (antes el snapshot la omitía y la foto quedaba huérfana en Storage)
+      fotoUrl: c.fotoUrl,
+      // ✅ el check de verificación con la empresa viaja al historial
+      webReg: c.webReg === true,
+    }));
+
+    // 2a. Escribir el registro en historial_rutas
+    // (limpiarUndefined: ningún campo `undefined` puede entrar — Firestore lo rechaza)
+    await setDoc(doc(db, 'historial_rutas', `${userId}_${Date.now()}`), limpiarUndefined({
       uid: userId,
       fecha: fechaHoy,
       iniciadaAt: new Date().toISOString(),
@@ -254,53 +401,41 @@ export async function finalizarRuta(userId: string, clientes: Cliente[]): Promis
       fallidos: fallidos,
       pendientes: total - entregados - fallidos,
       cobradoTotal: cobrado,
-      clientes: clientes.map(c => ({
-        id: c.id,
-        nombre: c.nombre,
-        cel: c.cel,
-        prod: c.prod,
-        cobrar: parseFloat(String(c.cobrar || 0)),
-        dir: c.dir,
-        dist: c.dist,
-        st: c.st || 'pendiente',
-        hora: c.hora || '',
-      })),
-    }, { merge: true });
+      porMetodo,
+      totalEmpresa,
+      totalRider,
+      // ⏱ duración de la ruta medida por el cronómetro (como la v1)
+      tiempoRuta: tiempoRutaMs && tiempoRutaMs > 0 ? tiempoRutaMs : null,
+      clientes: clientesSnapshot,
+    }));
 
-    // 3. Marcar ruta_activa como finalizada (pero MANTENER los clientes)
-    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
-      activa: false,
-      finalizadaAt: new Date().toISOString(),
-      actualizadaAt: new Date().toISOString(),
-      resumen: { total, entregados, fallidos, cobradoTotal: cobrado },
-    }, { merge: true });
+    // 2b. ☁️ Backup automático a la nube (v1: _backupAutoAlCerrar).
+    //     Si falla, NO bloquea el cierre — el historial ya está guardado.
+    try {
+      await setDoc(doc(db, 'usuarios', userId, 'backups', `auto_${fechaHoy}`), limpiarUndefined({
+        cl: clientesSnapshot,
+        registro: { fecha: fechaHoy, total, entregados, fallidos, cobradoTotal: cobrado, totalRider, totalEmpresa, porMetodo },
+        fecha: fechaHoy,
+        hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+        clientes: total,
+        auto: true,
+        tipo: 'cierre-ruta',
+        creadoAt: new Date().toISOString(),
+      }), { merge: true });
+      console.log('☁️ Backup automático de cierre guardado (auto_' + fechaHoy + ')');
+    } catch (e) {
+      console.warn('⚠️ Backup de cierre falló (el historial SÍ se guardó):', (e as Error).message);
+    }
 
-    console.log('🏁 Ruta finalizada y guardada en historial');
-  } catch (e) {
-    console.error('❌ Error finalizando ruta:', e);
-    throw e;
-  }
-}
-
-/**
- * GUARDAR Y CERRAR RUTA:
- * Guarda los clientes actuales en ruta_activa y en clientes_registrados
- * (como respaldo histórico) y marca la ruta como inactiva.
- * Los clientes siguen visibles en el panel para consulta.
- */
-export async function guardarYCerrarRuta(userId: string, clientes: Cliente[]): Promise<void> {
-  if (!db || !userId) return;
-  try {
-    // 1. Guardar en ruta_activa
-    await publicarClientesEnRutaActiva(userId, clientes);
-
-    // 2. Guardar cada cliente en clientes_registrados (respaldo histórico)
-    const batch = writeBatch(db);
-    clientes.forEach((c) => {
-      const tel = String(c.cel || '').replace(/\D/g, '');
-      if (tel) {
-        const ref = doc(db, 'clientes_registrados', tel);
-        batch.set(ref, {
+    // 2c. Registrar clientes (respaldo histórico — como hacía
+    //     “Guardar y cerrar”). Si falla, no bloquea el cierre.
+    try {
+      const batch = writeBatch(db);
+      let enBatch = 0;
+      clientes.forEach((c) => {
+        const tel = String(c.cel || '').replace(/\D/g, '');
+        if (!tel) return;
+        batch.set(doc(db, 'clientes_registrados', tel), {
           telefono: tel,
           nombre: c.nombre || '',
           prod: c.prod || '',
@@ -309,23 +444,52 @@ export async function guardarYCerrarRuta(userId: string, clientes: Cliente[]): P
           dist: c.dist || '',
           st: c.st || 'pendiente',
           ultimaVisita: new Date().toISOString(),
+          registradoAt: new Date().toISOString(),
         }, { merge: true });
-      }
-    });
-    await batch.commit();
+        enBatch++;
+      });
+      if (enBatch > 0) await batch.commit();
+    } catch (e) {
+      console.warn('⚠️ clientes_registrados falló (no bloquea el cierre):', (e as Error).message);
+    }
 
-    // 3. Marcar ruta como inactiva pero manteniendo los clientes
-    await setDoc(doc(db, 'ruta_activa', 'K8wx9X5GGOfindI1RGtIIQN3UGr1'), {
+    // 3. 🧹 LIMPIAR la ruta para el día siguiente (v1: D.cl=[]).
+    //    El bot también deja de reconocer clientes (ruta inactiva).
+    await setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+      clientes: [],
+      totalClientes: 0,
+      pendientes: 0,
       activa: false,
-      guardadaAt: new Date().toISOString(),
+      finalizadaAt: new Date().toISOString(),
       actualizadaAt: new Date().toISOString(),
+      resumen: { total, entregados, fallidos, cobradoTotal: cobrado },
     }, { merge: true });
 
-    console.log('💾 Ruta guardada y cerrada (clientes preservados)');
+    // 4. Limpiar también el respaldo local de clientes
+    try {
+      await setDoc(doc(db, 'usuarios', userId), {
+        clientes: [],
+        rutaLimpiadaAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn('⚠️ No se pudo limpiar usuarios/{uid}.clientes:', (e as Error).message);
+    }
+
+    console.log('🏁 Ruta finalizada: historial + backup nube + lista limpia');
   } catch (e) {
-    console.error('❌ Error guardando ruta:', e);
+    console.error('❌ Error finalizando ruta:', e);
     throw e;
   }
+}
+
+/**
+ * GUARDAR Y CERRAR RUTA — ⚠️ Fase 2.6 (fix): ahora hace EXACTAMENTE
+ * lo mismo que finalizarRuta (= cerrar() de la v1: historial + nube
+ * + lista limpia). Antes guardaba en clientes_registrados pero NO en
+ * el historial y dejaba la lista sucia — confundía al usuario.
+ */
+export async function guardarYCerrarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
+  return finalizarRuta(userId, clientes, tiempoRutaMs);
 }
 
 /**
@@ -374,7 +538,7 @@ const UID_BOT_MODULAR = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
  * Esto permite que RiderTrack V2 vea los clientes del Modular automáticamente.
  */
 export function subscribeToRutaActiva(
-  onUpdate: (clientes: Cliente[]) => void,
+  onUpdate: (clientes: Cliente[], meta?: { existe: boolean }) => void,
   onError?: (err: Error) => void
 ): () => void {
   if (!db) {
@@ -412,11 +576,21 @@ export function subscribeToRutaActiva(
             nota: c.nota || '',
             fotoUrl: c.fotoUrl,
             respondioInicioRuta: c.respondioInicioRuta,
+            // ✅ Registro web (verificación con la empresa — Fase 2.6)
+            webReg: c.webReg === true,
+            // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
+            // el cliente para no volver a geocodificar nunca
+            ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+              ? { lat: c.lat, lng: c.lng }
+              : {}),
+            ...(c.latSrc ? { latSrc: c.latSrc } : {}),
           }));
           console.log('🔄 Clientes del Modular cargados:', clientes.length);
-          onUpdate(clientes);
+          onUpdate(clientes, { existe: true });
         } else {
-          onUpdate([]);
+          // El doc NO existe → la app puede mostrar el respaldo
+          // (clientes_registrados) si lo hay
+          onUpdate([], { existe: false });
         }
       },
       (err) => {
@@ -536,9 +710,15 @@ export async function publicarClientesEnRutaActiva(
   if (!db) return;
   try {
     const rutaRef = doc(db, 'ruta_activa', UID_BOT_MODULAR);
+    // ⚠️ FIX FASE 1.4: antes este formateo DESCARTABA num/lat/lng,
+    // con lo cual la optimización de ruta se perdía al instante
+    // (el mapa quedaba en "0 de N ubicados"). Ahora las
+    // coordenadas viajan con el cliente. Los campos extra son
+    // aditivos: el Modular y el bot los ignoran sin problema.
     const clientesFormateados = clientes.map((c, idx) => ({
       idx: idx,
       id: c.id,
+      num: c.num || (idx + 1),
       nombre: c.nombre || 'Cliente',
       cel: _botCel(c.cel || ''),
       cobrar: parseFloat(String(c.cobrar || 0)),
@@ -550,6 +730,11 @@ export async function publicarClientesEnRutaActiva(
       nota: c.nota || '',
       obs: c.obs || '',
       hora: c.hora || '',
+      ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
+      ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+        ? { lat: c.lat, lng: c.lng }
+        : {}),
+      ...(c.latSrc ? { latSrc: c.latSrc } : {}),
     }));
 
     await setDoc(rutaRef, {
@@ -570,13 +755,53 @@ export async function publicarClientesEnRutaActiva(
 // 🏦 CONFIGURACIÓN DE CUENTAS BANCARIAS
 // ═══════════════════════════════════════════════════════════
 
+/** Un punto de ruta guardado con autocompletado (Fase 1.4) */
+export interface DireccionRuta {
+  nombre: string;   // etiqueta legible: "Avenida Sucre 523, San Miguel"
+  lat: number;
+  lng: number;
+}
+
+/** Configuración de inicio/fin de ruta (Fase 1.4) */
+export interface ConfigRuta {
+  /** Dónde empieza la ruta (tu casa/almacén). Si no hay, se usa el GPS. */
+  inicio?: DireccionRuta | null;
+  /** Dónde termina la ruta. Si es null, termina en la última parada (o vuelve al inicio). */
+  fin?: DireccionRuta | null;
+  /** true = la ruta termina donde empezó (ciclo cerrado) */
+  volverAlInicio?: boolean;
+}
+
 export interface ConfigCuentas {
   yape?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   bcp?: { titular: string; cci: string; numero: string; };
   bbva?: { titular: string; cci: string; numero: string; };
   interbank?: { titular: string; cci: string; numero: string; };
-  plin?: { nombre: string; telefono: string; };
+  /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
+  plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
+  /** Fase 3.10: equipo de ventas — contactos que envía el bot (chicos_venta) */
+  ventas?: {
+    fabiana?: { nombre: string; celular: string; };
+    karla?: { nombre: string; celular: string; };
+    tocho?: { nombre: string; celular: string; };
+  };
+  /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
+  ruta?: ConfigRuta;
+  /** Fase 3.14: WhatsApp oficial de Meta (Cloud API) — config del
+   *  número de negocio para enviar mensajes por el canal oficial.
+   *  Convive con el Rider chat (Baileys): el bot de WhatsApp sigue
+   *  siendo el canal diario; esto es la base del canal oficial. */
+  whatsappMeta?: {
+    /** Phone Number ID que da Meta (WhatsApp Manager → API Setup) */
+    phoneNumberId: string;
+    /** Token de acceso permanente (System User del negocio) */
+    token: string;
+    /** Número verificado en formato internacional, ej. 51987654321 */
+    numero?: string;
+    /** Nombre verificado del negocio (lo devuelve la prueba de conexión) */
+    nombreVerificado?: string;
+  };
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -584,44 +809,376 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   bcp: { titular: 'Rudy Alen', cci: '002-999-999999999999-99', numero: '999-99999999-9-99' },
   bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
-  plin: { nombre: 'Rudy Alen', telefono: '999999999' },
+  plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
+  ventas: {
+    fabiana: { nombre: 'Fabiana', celular: '' },
+    karla: { nombre: 'Karla', celular: '' },
+    tocho: { nombre: 'Tocho', celular: '' },
+  },
+  ruta: { inicio: null, fin: null, volverAlInicio: false },
+  whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
 };
 
+// ── Fase 2.1: utilidades a prueba de red muerta ─────────────
+// Un getDoc/setDoc sin límite de tiempo queda PENDIENTE PARA SIEMPRE
+// cuando la red está muerta (0 KB/s) — así se colgaba la pantalla
+// del QR. Estas envolturas ponen tope y degradan con elegancia.
+
+/** Carrera entre una promesa Firestore y un timeout */
+function conTimeout<T>(promesa: Promise<T>, ms: number, mensaje = 'sin-conexion'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(mensaje)), ms);
+    promesa.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
+}
+
+/** Fusiona un doc crudo de config_empresa con los defaults */
+function fusionarConfig(data: any): ConfigCuentas {
+  return {
+    ...CONFIG_CUENTAS_DEFAULT,
+    ...data,
+    yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data?.yape },
+    bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data?.bcp },
+    bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
+    interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
+    plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
+    empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
+    ventas: {
+      fabiana: { ...CONFIG_CUENTAS_DEFAULT.ventas!.fabiana, ...data?.ventas?.fabiana },
+      karla: { ...CONFIG_CUENTAS_DEFAULT.ventas!.karla, ...data?.ventas?.karla },
+      tocho: { ...CONFIG_CUENTAS_DEFAULT.ventas!.tocho, ...data?.ventas?.tocho },
+    },
+    ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
+    whatsappMeta: { ...CONFIG_CUENTAS_DEFAULT.whatsappMeta, ...data?.whatsappMeta },
+  };
+}
+
+/**
+ * Carga la config (Fase 2.1 — NUNCA se cuelga):
+ *   1. Caché local de Firestore (instantáneo, funciona SIN internet)
+ *   2. Servidor con tope de 9 s
+ *   3. Defaults — la pantalla siempre se muestra
+ */
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
   if (!db || !userId) return CONFIG_CUENTAS_DEFAULT;
+
+  const ref = doc(db, 'config_empresa', userId);
+
+  // 1) Caché local primero — instantáneo y offline
   try {
-    const ref = doc(db, 'config_empresa', userId);
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      const data = snap.data();
-      return {
-        ...CONFIG_CUENTAS_DEFAULT,
-        ...data,
-        yape: { ...CONFIG_CUENTAS_DEFAULT.yape, ...data.yape },
-        bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data.bcp },
-        bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data.bbva },
-        interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data.interbank },
-        plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data.plin },
-        empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data.empresa },
-      };
-    }
+    const snapCache = await getDocFromCache(ref);
+    if (snapCache.exists()) return fusionarConfig(snapCache.data());
+  } catch {
+    // No está en caché todavía (primera vez) — seguir al servidor
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    if (snap.exists()) return fusionarConfig(snap.data());
     return CONFIG_CUENTAS_DEFAULT;
   } catch (e: any) {
-    console.error('❌ Error cargando config de cuentas:', e);
+    console.warn('⚠️ Config sin conexión al servidor (usando defaults):', e?.message || e);
     return CONFIG_CUENTAS_DEFAULT;
   }
 }
 
+/**
+ * Guarda la config (Fase 2.1): con red muerta el setDoc queda
+ * pendiente indefinidamente → tope de 9 s. Firestore encola la
+ * escritura localmente (IndexedDB) y la sincroniza solo cuando
+ * vuelve la conexión, así que tras el tope el guardado SE CONSIDERA
+ * hecho (llegará al servidor al reconectar).
+ */
 export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<void> {
   if (!db || !userId) return;
   try {
     const ref = doc(db, 'config_empresa', userId);
-    await setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true });
+    await conTimeout(
+      setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
     console.log('🏦 Config de cuentas guardada');
   } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('🏦 Config guardada LOCALMENTE — se sincronizará al reconectar');
+      return; // optimista: Firestore la envía cuando haya red
+    }
     console.error('❌ Error guardando config de cuentas:', e);
     throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 💜 QR YAPE — SINCRONIZACIÓN CON EL BOT
+// ═══════════════════════════════════════════════════════════
+// El bot (rudy-bot, index.js → enviarYapeConImagen) lee el QR
+// desde Firestore: ruta_activa/{uid}.yape.qrBase64 / .qrUrl
+// y lo envía como imagen + plantilla yapeQR por WhatsApp.
+// Este shape es EXACTAMENTE el mismo que usaba el Rider modular.
+
+export interface YapeBotConfig {
+  qrBase64?: string;   // imagen del QR (data URI, máx ~900KB para Firestore)
+  qrUrl?: string;      // alternativa: URL pública del QR
+  numero: string;      // número Yape (9 dígitos)
+  titular: string;     // nombre del titular
+  cci?: string;        // CCI opcional (compatible con el modular)
+  bancos?: string;     // info de bancos opcional (compatible con el modular)
+}
+
+/**
+ * Sincroniza la config de Yape (QR + datos) a ruta_activa/{uid}.yape
+ * para que el bot pueda enviar el QR por WhatsApp.
+ * Usa merge:true → NO toca clientes ni otros campos de la ruta.
+ * Fase 2.1: con tope de tiempo — offline queda encolada localmente.
+ */
+export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', userId), {
+        yape: {
+          qrBase64: yape.qrBase64 || '',
+          qrUrl: yape.qrUrl || '',
+          numero: yape.numero || '',
+          titular: yape.titular || '',
+          cci: yape.cci || '',
+          bancos: yape.bancos || '',
+        },
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
+  } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('💜 Yape sincronizado LOCALMENTE — llegará al bot al reconectar');
+      return; // optimista: se envía cuando vuelva la red
+    }
+    console.error('❌ Error sincronizando Yape al bot:', e);
+    throw e;
+  }
+}
+
+/**
+ * Lee la config de Yape que el bot ve (ruta_activa/{uid}.yape).
+ * Sirve para mostrar el estado de sincronización en la pantalla de QR.
+ * Fase 2.1: caché primero + servidor con tope — NUNCA se cuelga
+ * (antes, con red muerta, la pantallita de sync quedaba girando
+ * para siempre).
+ */
+export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig | null> {
+  if (!db || !userId) return null;
+
+  const ref = doc(db, 'ruta_activa', userId);
+  const extraer = (data: any): YapeBotConfig | null => {
+    if (!data?.yape) return null;
+    const y = data.yape;
+    return {
+      qrBase64: y.qrBase64 || '',
+      qrUrl: y.qrUrl || '',
+      numero: y.numero || '',
+      titular: y.titular || '',
+      cci: y.cci || '',
+      bancos: y.bancos || '',
+    };
+  };
+
+  // 1) Caché local (instantáneo, offline)
+  try {
+    const snapCache = await getDocFromCache(ref);
+    const yapeCache = extraer(snapCache.exists() ? snapCache.data() : null);
+    if (yapeCache) return yapeCache;
+  } catch {
+    // sin caché todavía
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    return extraer(snap.exists() ? snap.data() : null);
+  } catch (e: any) {
+    console.warn('⚠️ Yape del bot no disponible (sin conexión):', e?.message || e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🔷 QR PLIN — SINCRONIZACIÓN CON EL BOT (Fase 2.2)
+// ═══════════════════════════════════════════════════════════
+// Mismo mecanismo que Yape, pero en ruta_activa/{uid}.plin:
+// el bot podrá leer el QR de Plin y mandarlo por WhatsApp con
+// la acción "enviar_plin" (cuando el bot tenga su handler —
+// la app ya deja todo listo en Firebase).
+
+export interface PlinBotConfig {
+  qrBase64?: string;   // imagen del QR (data URI, máx ~900KB para Firestore)
+  qrUrl?: string;      // alternativa: URL pública del QR
+  numero: string;      // número de celular asociado a Plin (9 dígitos)
+  titular: string;     // nombre del titular
+}
+
+/**
+ * Sincroniza la config de Plin (QR + datos) a ruta_activa/{uid}.plin
+ * Usa merge:true → NO toca clientes ni otros campos de la ruta.
+ * Fase 2.2: con tope de tiempo — offline queda encolada localmente.
+ */
+export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<void> {
+  if (!db || !userId) throw new Error('Firebase no disponible');
+  try {
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', userId), {
+        plin: {
+          qrBase64: plin.qrBase64 || '',
+          qrUrl: plin.qrUrl || '',
+          numero: plin.numero || '',
+          titular: plin.titular || '',
+        },
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
+  } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('🔷 Plin sincronizado LOCALMENTE — llegará al bot al reconectar');
+      return; // optimista: se envía cuando vuelva la red
+    }
+    console.error('❌ Error sincronizando Plin al bot:', e);
+    throw e;
+  }
+}
+
+/**
+ * Lee la config de Plin que el bot ve (ruta_activa/{uid}.plin).
+ * Fase 2.2: caché primero + servidor con tope — NUNCA se cuelga.
+ */
+export async function obtenerPlinDelBot(userId: string): Promise<PlinBotConfig | null> {
+  if (!db || !userId) return null;
+
+  const ref = doc(db, 'ruta_activa', userId);
+  const extraer = (data: any): PlinBotConfig | null => {
+    if (!data?.plin) return null;
+    const p = data.plin;
+    return {
+      qrBase64: p.qrBase64 || '',
+      qrUrl: p.qrUrl || '',
+      numero: p.numero || '',
+      titular: p.titular || '',
+    };
+  };
+
+  // 1) Caché local (instantáneo, offline)
+  try {
+    const snapCache = await getDocFromCache(ref);
+    const plinCache = extraer(snapCache.exists() ? snapCache.data() : null);
+    if (plinCache) return plinCache;
+  } catch {
+    // sin caché todavía
+  }
+
+  // 2) Servidor con tope de tiempo
+  try {
+    const snap = await conTimeout(getDoc(ref), 9000);
+    return extraer(snap.exists() ? snap.data() : null);
+  } catch (e: any) {
+    console.warn('⚠️ Plin del bot no disponible (sin conexión):', e?.message || e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ⏱ CRONÓMETRO DE RUTA → AVISO SILENCIOSO AL BOT (Fase 2.2)
+// ═══════════════════════════════════════════════════════════
+// Recuperado del Rider modular: al INICIAR el cronómetro se
+// publica la ruta completa en ruta_activa/{UID_BOT} con
+// activa:true + iniciadaAt + rider + clientes. Con eso, cuando
+// un cliente escribe por WhatsApp, el bot lo reconoce por su
+// número y le habla por su nombre ("Hola José…"). Al TERMINAR
+// la ruta se marca activa:false y el bot vuelve al modo
+// genérico ("Hola cliente…").
+
+/**
+ * Publica la ruta activa COMPLETA (al iniciar el cronómetro).
+ * Mismo shape que usaba el Rider modular → el bot no necesita
+ * ningún cambio. merge:true conserva yape/plin ya guardados.
+ */
+export async function iniciarRutaConBot(
+  clientes: Cliente[],
+  rider: { nombre: string; telefono: string; empresa: string }
+): Promise<void> {
+  if (!db) throw new Error('Firebase no disponible');
+  await conTimeout(
+    setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+      activa: true,
+      iniciadaAt: new Date().toISOString(),
+      actualizadaAt: new Date().toISOString(),
+      rider: rider,
+      clientes: clientes.map((c, idx) => ({
+        idx: idx,
+        id: c.id,
+        num: c.num || (idx + 1),
+        nombre: c.nombre || 'Cliente',
+        cel: _botCel(c.cel || ''),
+        cobrar: parseFloat(String(c.cobrar || 0)),
+        precio: parseFloat(String(c.precio || 0)),
+        prod: c.prod || '',
+        dir: c.dir || '',
+        dist: c.dist || '',
+        st: c.st || 'pendiente',
+        nota: c.nota || '',
+        obs: c.obs || '',
+        hora: c.hora || '',
+        ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+          ? { lat: c.lat, lng: c.lng }
+          : {}),
+        ...(c.latSrc ? { latSrc: c.latSrc } : {}),
+      })),
+      clienteActualIdx: -1,
+      totalClientes: clientes.length,
+      pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
+    }, { merge: true }),
+    9000,
+    'guardado-local'
+  ).catch((e: any) => {
+    if (e?.message === 'guardado-local') {
+      console.warn('⏱ Ruta publicada LOCALMENTE — llegará al bot al reconectar');
+      return;
+    }
+    console.error('❌ Error publicando ruta para el bot:', e);
+    throw e;
+  });
+}
+
+/**
+ * Marca la ruta como finalizada para el bot (al terminar la ruta
+ * desde el cronómetro). El bot deja de reconocer clientes por
+ * nombre hasta la próxima publicación.
+ */
+export async function finalizarRutaActivaBot(): Promise<void> {
+  if (!db) return;
+  try {
+    await conTimeout(
+      setDoc(doc(db, 'ruta_activa', UID_BOT_MODULAR), {
+        activa: false,
+        finalizadaAt: new Date().toISOString(),
+        actualizadaAt: new Date().toISOString(),
+      }, { merge: true }),
+      9000,
+      'guardado-local'
+    );
+    console.log('✅ Ruta marcada como finalizada para el bot');
+  } catch (e: any) {
+    if (e?.message === 'guardado-local') {
+      console.warn('⏱ Finalización guardada LOCALMENTE — llegará al bot al reconectar');
+      return;
+    }
+    console.warn('Error finalizando ruta para el bot:', e);
   }
 }
 
@@ -830,30 +1387,494 @@ export async function subirFotoPago(
 /**
  * Sube una foto de evidencia de entrega a Firebase Storage.
  * Ruta: entregas/{uid}/{clienteId}_{timestamp}.jpg
+ *
+ * Fallback (Fase 1.2): si Storage no está disponible o las reglas
+ * rechazan la escritura, devuelve el dataURL base64 comprimido para
+ * guardar directo en Firestore (mismo patrón que usaba el Modular /
+ * ClienteTrack con base64 inline).
  */
 export async function subirFotoEntrega(
   uid: string,
   clienteId: string | number,
-  file: File | Blob
+  file: File | Blob,
+  dataUrlFallback?: string
 ): Promise<string> {
-  if (!storage) throw new Error('Storage no inicializado');
-
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
-  const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
-  const refImg = storageRef(storage, ruta);
 
-  await uploadBytes(refImg, file, {
-    contentType: 'image/jpeg',
-    customMetadata: {
-      clienteId: String(clienteId),
-      uid: uid,
-      fecha: new Date().toISOString(),
-      tipo: 'entrega',
-    },
-  });
+  if (storage) {
+    try {
+      const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
+      const refImg = storageRef(storage, ruta);
 
-  const url = await getDownloadURL(refImg);
-  console.log('✅ Foto de entrega subida:', ruta);
-  return url;
+      await uploadBytes(refImg, file, {
+        contentType: 'image/jpeg',
+        customMetadata: {
+          clienteId: String(clienteId),
+          uid: uid,
+          fecha: new Date().toISOString(),
+          tipo: 'entrega',
+        },
+      });
+
+      const url = await getDownloadURL(refImg);
+      console.log('✅ Foto de entrega subida a Storage:', ruta);
+      return url;
+    } catch (e) {
+      console.warn('⚠️ Storage no disponible, usando base64 en Firestore:', e);
+    }
+  }
+
+  // Fallback: base64 directo en Firestore (como el Modular/ClienteTrack)
+  if (dataUrlFallback) {
+    return dataUrlFallback;
+  }
+  throw new Error('No se pudo subir la foto (Storage y base64 no disponibles)');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🛵 AVATAR DEL RIDER + POSICIÓN GPS (Fase 1.5, re-integrada 2.3)
+// Guarda el avatar elegido en usuarios/{uid} para que aparezca
+// en todas las sesiones, y publica la posición GPS del motorizado
+// en ruta_activa/{uid}.posicion — la base del panel de flota futuro
+// y del seguimiento web para clientes (ambos en standby).
+// ═══════════════════════════════════════════════════════════
+
+export async function guardarAvatarRider(userId: string, avatarId: string): Promise<void> {
+  try {
+    const ref = doc(db, 'usuarios', userId);
+    await setDoc(ref, { avatar: avatarId, avatarActualizadoAt: serverTimestamp() }, { merge: true });
+  } catch (e) {
+    console.error('❌ Error guardando avatar del rider:', e);
+    throw e;
+  }
+}
+
+export interface PosicionRider {
+  lat: number;
+  lng: number;
+  velocidadKmh?: number;
+  rumbo?: number;
+  /** ISO — cuándo se tomó la posición */
+  timestamp?: string;
+  /** ISO — cuándo se publicó por última vez en Firestore */
+  actualizadoAt?: string;
+}
+
+export async function publicarPosicionRider(userId: string, pos: PosicionRider): Promise<void> {
+  try {
+    const ref = doc(db, 'ruta_activa', userId);
+    await setDoc(ref, {
+      posicion: {
+        lat: pos.lat,
+        lng: pos.lng,
+        velocidadKmh: pos.velocidadKmh ?? 0,
+        rumbo: pos.rumbo ?? null,
+        timestamp: pos.timestamp || new Date().toISOString(),
+        actualizadoAt: pos.actualizadoAt || new Date().toISOString(),
+      },
+    }, { merge: true });
+  } catch (e) {
+    // Silencioso: la posición es best-effort (se reintenta en el próximo tick)
+    console.warn('⚠️ No se pudo publicar posición GPS:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📖 HISTORIAL DE RUTAS (Fase 2.5)
+// Colección: historial_rutas — un doc por cada ruta finalizada.
+// Compatibilidad: los docs viejos ({uid}_{fecha}, sin finalizadaAt
+// en algunos casos) también se listan — se ordenan por fecha desc.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Lee el historial de rutas del usuario (las últimas rutas).
+ * Ordena localmente por finalizadaAt/fecha desc para soportar
+ * docs viejos y nuevos sin depender de índices compuestos.
+ * (2.6: max 300 por defecto — el calendario necesita todas las
+ * fechas con ruta, incluidas las importadas de la v1.)
+ */
+export async function leerHistorial(userId: string, max = 300): Promise<RegistroHistorial[]> {
+  if (!db || !userId) return [];
+  try {
+    const ref = collection(db, 'historial_rutas');
+    const q = query(ref, limit(400));
+    const snap = await getDocs(q);
+    const registros: RegistroHistorial[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      // Solo docs de este usuario (ID empieza con su uid o campo uid igual)
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      registros.push({
+        id: d.id,
+        uid: data.uid || userId,
+        fecha: data.fecha || d.id.replace(`${userId}_`, '').slice(0, 10),
+        iniciadaAt: data.iniciadaAt,
+        finalizadaAt: data.finalizadaAt,
+        totalClientes: data.totalClientes || 0,
+        entregados: data.entregados || 0,
+        fallidos: data.fallidos || 0,
+        pendientes: data.pendientes || 0,
+        cobradoTotal: data.cobradoTotal || 0,
+        porMetodo: data.porMetodo,
+        totalEmpresa: data.totalEmpresa,
+        totalRider: data.totalRider,
+        clientes: data.clientes || [],
+        origen: data.origen,
+        v1Id: data.v1Id,
+        km: data.km,
+        tiempoRuta: data.tiempoRuta,
+      });
+    });
+    registros.sort((a, b) => {
+      const ka = a.finalizadaAt || a.iniciadaAt || a.fecha || '';
+      const kb = b.finalizadaAt || b.iniciadaAt || b.fecha || '';
+      return kb.localeCompare(ka);
+    });
+    return registros.slice(0, max);
+  } catch (e) {
+    console.error('❌ Error leyendo historial:', e);
+    return [];
+  }
+}
+
+/** Elimina una ruta del historial */
+export async function eliminarRutaHistorial(userId: string, registroId: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'historial_rutas', registroId));
+    console.log('🗑️ Ruta eliminada del historial');
+  } catch (e) {
+    console.error('❌ Error eliminando ruta del historial:', e);
+    throw e;
+  }
+}
+
+/** Cambia la fecha de una ruta del historial (útil si cerraste después de medianoche) */
+export async function cambiarFechaHistorial(registroId: string, nuevaFecha: string): Promise<void> {
+  if (!db) throw new Error('Sin conexión');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha)) throw new Error('Fecha inválida (usa AAAA-MM-DD)');
+  try {
+    await updateDoc(doc(db, 'historial_rutas', registroId), { fecha: nuevaFecha });
+    console.log('📅 Fecha de ruta actualizada:', registroId, '→', nuevaFecha);
+  } catch (e) {
+    console.error('❌ Error cambiando fecha del historial:', e);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📥 IMPORTAR HISTORIAL DE LA V1 (Fase 2.6)
+// La v1 (Rider Modular) guardaba TODO su historial (D.hist) en
+// el MISMO Firebase y con el MISMO usuario:
+//   · usuarios/{uid}.hist              → auto-sync (sv(), autoSync:true)
+//   · usuarios/{uid}/backups/{doc}.hist → backups manual + cierre de ruta
+// Este módulo lee la fuente más completa, convierte cada ruta al
+// formato de historial_rutas (docs `v1_{id}`) y NO repite las que
+// ya se importaron (campo v1Id).
+// ═══════════════════════════════════════════════════════════
+
+/** Equivalencia desglose v1 (dg) → estados v2 (porMetodo) */
+const MAPA_DG_V1: Record<string, string> = {
+  ef: 'efectivo',
+  yr: 'yape-rudy',
+  ye: 'yape-efectivo',
+  mT: 'mixto',
+  po: 'pos',
+  tr: 'transferencia',
+  yp: 'yape-plin',
+  pl: 'pago-link',
+  js: 'jose-smith',
+  em: 'empresa',
+};
+
+/**
+ * Busca el historial v1 más completo en la nube:
+ * doc vivo usuarios/{uid}.hist + los backups de usuarios/{uid}/backups.
+ * Gana la fuente con MÁS rutas (el hist v1 era acumulativo).
+ */
+export async function leerHistorialV1(userId: string): Promise<{ entradas: RutaV1[]; fuente: string }> {
+  if (!db || !userId) return { entradas: [], fuente: '' };
+  let mejor: RutaV1[] = [];
+  let fuente = '';
+
+  // 1) Doc vivo (auto-sync de la v1)
+  try {
+    const snap = await getDoc(doc(db, 'usuarios', userId));
+    if (snap.exists()) {
+      const hist = (snap.data() as any)?.hist;
+      if (Array.isArray(hist) && hist.length > mejor.length) {
+        mejor = hist as RutaV1[];
+        fuente = 'sincronización automática';
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ No se pudo leer usuarios/{uid}.hist:', (e as Error).message);
+  }
+
+  // 2) Backups de la v1 (cada uno trae el hist completo hasta su fecha)
+  try {
+    const snap = await getDocs(query(collection(db, 'usuarios', userId, 'backups'), limit(40)));
+    snap.forEach((d) => {
+      const hist = (d.data() as any)?.hist;
+      if (Array.isArray(hist) && hist.length > mejor.length) {
+        mejor = hist as RutaV1[];
+        fuente = `backup ${d.id}`;
+      }
+    });
+  } catch (e) {
+    console.warn('⚠️ No se pudieron leer los backups v1:', (e as Error).message);
+  }
+
+  return { entradas: mejor, fuente };
+}
+
+/**
+ * Limpia recursivamente los valores `undefined` de un objeto.
+ * Firestore RECHAZA undefined en WriteBatch.set()/setDoc() con el error
+ * "Unsupported field value: undefined" — por eso, antes de escribir
+ * docs importados de la v1 (que traen huecos), se pasan por aquí.
+ * Devuelve una copia nueva (no muta el original).
+ */
+function limpiarUndefined<T>(valor: T): T {
+  if (Array.isArray(valor)) {
+    return valor
+      .filter((v) => v !== undefined)
+      .map((v) => limpiarUndefined(v)) as unknown as T;
+  }
+  if (valor && typeof valor === 'object' && !(valor instanceof Date)) {
+    const limpio: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) {
+      if (v === undefined) continue; // ← se omite la clave completa
+      limpio[k] = limpiarUndefined(v);
+    }
+    return limpio as T;
+  }
+  return valor;
+}
+
+/** Convierte una ruta del historial v1 al formato de historial_rutas (v2) */
+function convertirRutaV1(h: RutaV1, userId: string): Record<string, any> | null {
+  const cl = Array.isArray(h.cl) ? h.cl : [];
+  const id = Number(h.id) || 0;
+  const fecha = h.fechaId || (id ? new Date(id).toISOString().slice(0, 10) : '');
+  if (!id || !fecha) return null; // sin id/fecha no se puede deduplicar ni ubicar
+
+  // Desglose: dg v1 → porMetodo v2 (si no hay dg, se calcula de cl)
+  const porMetodo: Record<string, number> = {};
+  if (h.dg && Object.keys(h.dg).length > 0) {
+    for (const [k, v] of Object.entries(h.dg)) {
+      const st = MAPA_DG_V1[k];
+      if (st && Number(v) > 0) porMetodo[st] = (porMetodo[st] || 0) + Number(v);
+    }
+  } else {
+    const ST_ENT = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+    for (const c of cl) {
+      const k = c?.st;
+      if (!k || !ST_ENT.includes(k)) continue;
+      if (k === 'mixto') {
+        porMetodo['mixto'] = (porMetodo['mixto'] || 0) + parseFloat(String(c.mEf || 0));
+      } else {
+        porMetodo[k] = (porMetodo[k] || 0) + parseFloat(String(c.cobrar || 0));
+      }
+    }
+  }
+
+  const totalRider = Number(h.tT) || 0;
+  const totalEmpresa = Number(h.tE) || 0;
+
+  return {
+    uid: userId,
+    origen: 'v1',
+    v1Id: id,
+    fecha,
+    finalizadaAt: id ? new Date(id).toISOString() : '',
+    totalClientes: Number(h.total) || cl.length,
+    entregados: Number(h.ent) || 0,
+    fallidos: Number(h.fal) || 0,
+    pendientes: Number(h.pen) || 0,
+    cobradoTotal: totalRider + totalEmpresa,
+    porMetodo,
+    totalEmpresa,
+    totalRider,
+    km: h.km || null,
+    // ⚠️ FIX: antes era `|| undefined` y Firestore lo rechazaba con
+    // "Unsupported field value: undefined (found in field tiempoRuta)"
+    // al importar rutas de la v1 que nunca guardaron ese campo.
+    // null SÍ es un valor válido para Firestore.
+    tiempoRuta: h.tiempoRuta || null,
+    clientes: cl.map((c: any, i: number) => ({
+      id: c.id != null ? c.id : `v1c_${id}_${i}`,
+      num: c.num != null ? c.num : i + 1,
+      nombre: c.nombre || 'Cliente',
+      cel: c.cel || '',
+      prod: c.prod || '',
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      mEf: parseFloat(String(c.mEf || 0)),
+      mYp: parseFloat(String(c.mYp || 0)),
+      mEmp: parseFloat(String(c.mEmp || 0)),
+      mVt: parseFloat(String(c.mVt || 0)),
+      dir: c.dir || '',
+      dist: c.dist || '',
+      st: c.st || 'pendiente',
+      hora: c.hora || '',
+      obs: c.obs || '',
+      nota: c.nota || '',
+      motivo: c.motivo || '',
+    })),
+  };
+}
+
+/**
+ * IMPORTA el historial de la v1 a historial_rutas (docs `v1_{id}`).
+ * No repite las que ya están (campo v1Id). Devuelve cuántas importó.
+ */
+export async function importarHistorialV1(userId: string): Promise<{ importadas: number; totalV1: number; fuente: string }> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const { entradas, fuente } = await leerHistorialV1(userId);
+  if (entradas.length === 0) return { importadas: 0, totalV1: 0, fuente };
+
+  // Qué v1Id ya están importadas
+  const yaImportadas = new Set<number>();
+  try {
+    const snap = await getDocs(query(collection(db, 'historial_rutas'), limit(400)));
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      if (data?.origen === 'v1' && typeof data.v1Id === 'number') yaImportadas.add(data.v1Id);
+    });
+  } catch (e) {
+    console.warn('⚠️ No se pudo leer historial_rutas para deduplicar:', (e as Error).message);
+  }
+
+  // Convertir solo las nuevas
+  const nuevas: Record<string, any>[] = [];
+  for (const h of entradas) {
+    if (yaImportadas.has(Number(h.id))) continue;
+    const datos = convertirRutaV1(h, userId);
+    if (datos) nuevas.push(datos);
+  }
+
+  // Escribir por lotes (batch máx 500 → usamos 400 por margen)
+  let escritas = 0;
+  for (let i = 0; i < nuevas.length; i += 400) {
+    const lote = nuevas.slice(i, i + 400);
+    const batch = writeBatch(db);
+    for (const datos of lote) {
+      // Doble protección: ni un solo undefined puede entrar al batch
+      // (la v1 guardaba huecos en cl, km, tiempoRuta...)
+      batch.set(doc(db, 'historial_rutas', `v1_${datos.v1Id}`), limpiarUndefined(datos));
+    }
+    await batch.commit();
+    escritas += lote.length;
+  }
+
+  console.log(`📥 Historial v1 importado: ${escritas} rutas nuevas de ${entradas.length} (fuente: ${fuente})`);
+  return { importadas: escritas, totalV1: entradas.length, fuente };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 💾 BACKUPS EN LA NUBE (Fase 2.5)
+// Colección: backups_v2 — snapshot completo de la ruta actual.
+// El usuario puede guardarlo, verlo, volver a cargarlo o borrarlo
+// desde el menú hamburguesa (como el backup de la v1, pero en
+// la nube de Firebase — nada de archivos descargados).
+// ═══════════════════════════════════════════════════════════
+
+/** Guarda un backup de la ruta actual en la nube */
+export async function guardarBackupNube(
+  userId: string,
+  clientes: Cliente[],
+  opts?: { auto?: boolean }
+): Promise<string> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+  const ST_FALLIDOS = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta', 'reprogramar'];
+  const ahora = new Date();
+  const entregados = clientes.filter(c => ST_ENTREGADOS.includes(c.st)).length;
+  const fallidos = clientes.filter(c => ST_FALLIDOS.includes(c.st)).length;
+  const cobrado = clientes
+    .filter(c => ST_ENTREGADOS.includes(c.st))
+    .reduce((s, c) => s + parseFloat(String(c.cobrar || 0)), 0);
+
+  const id = `${userId}_${ahora.getTime()}`;
+  const backup: Omit<BackupNube, 'id'> & { id?: string } = {
+    uid: userId,
+    creadoAt: ahora.toISOString(),
+    fecha: ahora.toISOString().split('T')[0],
+    hora: ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+    totalClientes: clientes.length,
+    entregados,
+    pendientes: clientes.length - entregados - fallidos,
+    fallidos,
+    cobradoTotal: cobrado,
+    clientes: JSON.parse(JSON.stringify(clientes)),
+    auto: opts?.auto || false,
+  };
+
+  await setDoc(doc(db, 'backups_v2', id), backup);
+  console.log('💾 Backup guardado en la nube:', id);
+  return id;
+}
+
+/** Lista los backups del usuario (los últimos 40) */
+export async function listarBackupsNube(userId: string, max = 40): Promise<BackupNube[]> {
+  if (!db || !userId) return [];
+  try {
+    const ref = collection(db, 'backups_v2');
+    const q = query(ref, limit(200));
+    const snap = await getDocs(q);
+    const backups: BackupNube[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      backups.push({
+        id: d.id,
+        uid: data.uid || userId,
+        creadoAt: data.creadoAt || '',
+        fecha: data.fecha || '',
+        hora: data.hora || '',
+        totalClientes: data.totalClientes || 0,
+        entregados: data.entregados || 0,
+        pendientes: data.pendientes || 0,
+        fallidos: data.fallidos || 0,
+        cobradoTotal: data.cobradoTotal || 0,
+        clientes: data.clientes || [],
+        auto: data.auto,
+      });
+    });
+    backups.sort((a, b) => (b.creadoAt || '').localeCompare(a.creadoAt || ''));
+    return backups.slice(0, max);
+  } catch (e) {
+    console.error('❌ Error listando backups:', e);
+    return [];
+  }
+}
+
+/** Elimina un backup de la nube */
+export async function eliminarBackupNube(backupId: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, 'backups_v2', backupId));
+    console.log('🗑️ Backup eliminado');
+  } catch (e) {
+    console.error('❌ Error eliminando backup:', e);
+    throw e;
+  }
+}
+
+/**
+ * CARGAR un backup: restaura los clientes a ruta_activa + respaldo V2.
+ * La ruta actual se PISA con los clientes del backup (por eso pide
+ * confirmación en la UI antes de llamar).
+ */
+export async function cargarBackupNube(userId: string, backup: BackupNube): Promise<number> {
+  if (!db || !userId) throw new Error('Sin conexión');
+  const clientes = backup.clientes || [];
+  if (clientes.length === 0) throw new Error('El backup no tiene clientes');
+  // Publicar en ruta_activa (fuente de verdad del bot) + respaldo V2
+  await publicarClientesEnRutaActiva(userId, clientes);
+  await guardarClientes(userId, clientes);
+  console.log('⬆️ Backup cargado:', backup.id, clientes.length, 'clientes');
+  return clientes.length;
 }

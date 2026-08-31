@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   Route,
@@ -6,7 +6,6 @@ import {
   Users,
   Bike,
   MapPin,
-  MessageSquare,
   BarChart2,
   Settings,
   User,
@@ -15,8 +14,23 @@ import {
   X,
   Music,
   PieChart,
+  QrCode,
+  Radar,
+  Camera,
+  History,
+  Megaphone,
+  Cloud,
+  Navigation,
+  TrendingUp,
+  Images,
+  Bot,
+  SlidersHorizontal,
+  MessageSquare,
+  Store,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
+import { AvatarSvg } from '../data/avatars';
+import { AvatarPicker } from './AvatarPicker';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -27,6 +41,16 @@ interface SidebarProps {
   onCloseMobile: () => void;
   activeOrdersCount: number;
   activeDriversCount: number;
+  /** Fase 3.1: chats sin leer del bot de Baileys (badge del menú) */
+  chatNoLeidos?: number;
+  /** Fase 3.15: chats sin leer del Rider Chat Oficial (badge del menú) */
+  riderChatNoLeidos?: number;
+  /** Nombre real del rider (perfil) */
+  riderName?: string;
+  /** Avatar ilustrado elegido (Fase 1.5) */
+  riderAvatar?: string;
+  onSeleccionarAvatar?: (avatarId: string) => Promise<void>;
+  onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
 interface MenuItem {
@@ -51,7 +75,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   activeOrdersCount,
   activeDriversCount,
+  chatNoLeidos = 0,
+  riderChatNoLeidos = 0,
+  riderName = 'Rider',
+  riderAvatar,
+  onSeleccionarAvatar,
+  onShowToast,
 }) => {
+  const [pickerAbierto, setPickerAbierto] = useState(false);
+
   // Secciones del menú
   const secciones: MenuSection[] = [
     {
@@ -64,39 +96,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
+        {
+          id: 'seguimiento',
+          label: 'Seguimiento de ruta',
+          icon: Navigation,
+          badge: activeOrdersCount > 0 ? `${activeOrdersCount}` : undefined,
+          badgeColor: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+        },
+        { id: 'yape', label: 'Mi QR Yape/Plin', icon: QrCode },
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
-        {
-          id: 'repartidores',
-          label: 'Repartidores',
-          icon: Bike,
-          badge: `${activeDriversCount}`,
-          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-        },
+        { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
       ],
     },
     {
       titulo: 'Operación',
       items: [
-        { id: 'mapa', label: 'Mapa en tiempo real', icon: MapPin },
+        { id: 'mapa', label: 'Mapa de Entregas', icon: MapPin },
+        { id: 'motorizados', label: 'GPS del Motorizado', icon: Radar },
+        { id: 'broadcast', label: 'Broadcast WhatsApp', icon: Megaphone },
+        { id: 'galeria', label: 'Galería de Entregas', icon: Images },
         {
           id: 'whatsapp',
-          label: 'WhatsApp API',
-          icon: MessageSquare,
-          badge: 'PRO',
-          badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+          label: 'Chat Baileys',
+          icon: Bot,
+          badge: chatNoLeidos > 0 ? `${chatNoLeidos}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
+        {
+          id: 'chatapi',
+          label: 'Rider Chat Oficial',
+          icon: MessageSquare,
+          badge: riderChatNoLeidos > 0 ? `${riderChatNoLeidos}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
+        { id: 'catalogo', label: 'Catálogo', icon: Store },
+        { id: 'plantillas', label: 'Centro del Bot', icon: SlidersHorizontal },
       ],
     },
     {
       titulo: 'Análisis',
       items: [
+        { id: 'stats', label: 'Estadísticas', icon: TrendingUp },
         { id: 'estadisticas', label: 'Resumen del día', icon: PieChart },
+        { id: 'historial', label: 'Historial de rutas', icon: History },
       ],
     },
     {
       titulo: 'Sistema',
       items: [
+        { id: 'backups', label: 'Backups en la nube', icon: Cloud },
         { id: 'configuracion', label: 'Configuración', icon: Settings },
         { id: 'medios', label: 'Medios', icon: Music },
         { id: 'perfil', label: 'Perfil', icon: User },
@@ -112,7 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-slate-900 dark:bg-slate-900 light:bg-slate-900 text-slate-300 select-none">
+    <div className="flex flex-col h-full bg-slate-900 text-slate-300 select-none">
       {/* Top Collapse toggle header for desktop */}
       <div className="hidden lg:flex items-center justify-between p-4 border-b border-slate-800">
         {!isCollapsed && (
@@ -129,9 +178,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
-      {/* Mobile drawer header */}
+      {/* Mobile drawer header — Fase 3.5: número de fase visible para
+          saber SIEMPRE qué build se está probando en el teléfono */}
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
-        <span className="font-bold text-white text-base">RiderTrack V2</span>
+        <div className="flex flex-col">
+          <span className="font-bold text-white text-base">RiderTrack V2</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.20</span>
+        </div>
         <button
           onClick={onCloseMobile}
           className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
@@ -197,28 +250,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
       </nav>
 
-      {/* Bottom Profile Section */}
+      {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
-        <div
-          onClick={() => handleTabClick('perfil')}
-          className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 cursor-pointer transition-colors ${
-            isCollapsed ? 'justify-center' : ''
-          }`}
-        >
-          <div className="relative">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
-              alt="Alejandro Ruiz"
-              className="w-10 h-10 rounded-xl object-cover ring-2 ring-blue-500/40"
-            />
-            <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900 animate-pulse" />
+        <div className={`flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 transition-colors`}>
+          <div className="relative group/avatar">
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="block rounded-2xl focus:outline-none"
+              title="Cambiar mi avatar"
+            >
+              <AvatarSvg id={riderAvatar} className="w-10 h-10" anillo="ring-2 ring-blue-500/40" />
+            </button>
+            <button
+              onClick={() => setPickerAbierto(true)}
+              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-600 border-2 border-slate-900 flex items-center justify-center hover:bg-blue-500 transition-colors"
+              title="Cambiar avatar"
+            >
+              <Camera className="w-2.5 h-2.5 text-white" />
+            </button>
+            <span className="absolute -top-0.5 -left-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900 animate-pulse" />
           </div>
 
           {!isCollapsed && (
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-sm font-bold text-white truncate">
-                Alejandro Ruiz
-              </span>
+            <div
+              className="flex flex-col min-w-0 flex-1 cursor-pointer"
+              onClick={() => handleTabClick('perfil')}
+            >
+              <span className="text-sm font-bold text-white truncate">{riderName}</span>
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span className="text-emerald-400 font-medium text-[11px]">En línea</span>
@@ -227,6 +285,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Selector de avatar estilo Netflix */}
+      <AvatarPicker
+        isOpen={pickerAbierto}
+        onClose={() => setPickerAbierto(false)}
+        avatarActual={riderAvatar}
+        onSeleccionar={async (id) => {
+          if (onSeleccionarAvatar) await onSeleccionarAvatar(id);
+        }}
+        onShowToast={onShowToast}
+      />
     </div>
   );
 
@@ -241,14 +310,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {sidebarContent}
       </aside>
 
-      {/* Mobile Overlay & Drawer */}
+      {/* Mobile Overlay & Drawer — z-[1200]: por encima de los controles
+          del mapa (Leaflet/Google), fix Fase 2.2 "la leyenda tapa la hamburguesa" */}
       {isMobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <div className="lg:hidden fixed inset-0 z-[1200] flex">
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
             onClick={onCloseMobile}
           />
-          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-50">
+          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl z-[1201]">
             {sidebarContent}
           </div>
         </div>

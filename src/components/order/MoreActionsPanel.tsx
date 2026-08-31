@@ -1,64 +1,79 @@
 import React, { useState } from 'react';
 import {
   Copy,
-  FileText,
-  FileSpreadsheet,
-  Printer,
   StickyNote,
   History,
-  ShieldCheck,
   Code,
   Check,
+  RotateCcw,
 } from 'lucide-react';
 import { Order } from '../../types';
 import { Button, Card, Badge } from '../ui';
+import { ETIQUETAS_ESTADO, horaLimpia } from '../../utils/realData';
 
 interface MoreActionsPanelProps {
   order: Order;
   onDuplicateOrder: (order: Order) => void;
+  onCambiarEstado: (st: string) => void;
   onShowToast?: (title: string, desc?: string, type?: any) => void;
 }
 
 export const MoreActionsPanel: React.FC<MoreActionsPanelProps> = ({
   order,
   onDuplicateOrder,
+  onCambiarEstado,
   onShowToast,
 }) => {
-  const [internalNotes, setInternalNotes] = useState('Cliente solicitó entrega sin timbre.');
+  const [copiado, setCopiado] = useState(false);
   const [showJson, setShowJson] = useState(false);
 
   const handleDuplicate = () => {
     onDuplicateOrder(order);
     if (onShowToast) {
-      onShowToast('Pedido Duplicado', `Nuevo borrador generado con los datos de ${order.cliente}`, 'success');
+      onShowToast('Pedido Duplicado', `Nuevo pedido con los datos de ${order.cliente}`, 'success');
     }
   };
 
-  const handleExportPDF = () => {
-    if (onShowToast) {
-      onShowToast('Exportando PDF', `Generando Guía de Remisión #${order.id}.pdf`, 'info');
-    }
-  };
+  const fichaPedido = () =>
+    [
+      `🧾 Ficha de Pedido #${order.num ?? order.id}`,
+      `👤 Cliente: ${order.cliente}`,
+      order.clienteTelefono ? `📱 Teléfono: ${order.clienteTelefono}` : '',
+      `📍 Dirección: ${order.direccion || '—'}, ${order.distrito || '—'}`,
+      `📦 Productos: ${order.productos.join(', ') || '—'}`,
+      `💵 Monto: S/ ${order.monto.toFixed(2)}`,
+      `🔖 Estado: ${ETIQUETAS_ESTADO[order.stReal || ''] || order.stReal || 'Pendiente'}`,
+      order.hora ? `🕒 Entregado: ${order.hora}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
-  const handleExportExcel = () => {
-    if (onShowToast) {
-      onShowToast('Exportando Excel', `Hoja de despacho de ${order.id}.xlsx`, 'info');
+  const handleCopiarFicha = async () => {
+    try {
+      await navigator.clipboard.writeText(fichaPedido());
+    } catch {
+      // Fallback para WebView
+      const ta = document.createElement('textarea');
+      ta.value = fichaPedido();
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
     }
-  };
-
-  const handlePrintTicket = () => {
+    setCopiado(true);
     if (onShowToast) {
-      onShowToast('Imprimiendo Ticket', 'Enviado a impresora térmica POS 80mm', 'info');
+      onShowToast('Ficha Copiada', 'Lista para pegar en WhatsApp o notas', 'success');
     }
+    setTimeout(() => setCopiado(false), 2000);
   };
 
   return (
     <div className="space-y-4">
-      {/* Utilities Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+      {/* Utilities Grid — acciones reales */}
+      <div className="grid grid-cols-2 gap-2.5">
         <button
           onClick={handleDuplicate}
-          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-blue-500 hover:bg-slate-800 text-left flex flex-col items-center justify-center gap-2 transition-all group"
+          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-blue-500 hover:bg-slate-800 flex flex-col items-center justify-center gap-2 transition-all group"
         >
           <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
             <Copy className="w-5 h-5" />
@@ -67,83 +82,71 @@ export const MoreActionsPanel: React.FC<MoreActionsPanelProps> = ({
         </button>
 
         <button
-          onClick={handleExportPDF}
-          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-red-500 hover:bg-slate-800 text-left flex flex-col items-center justify-center gap-2 transition-all group"
-        >
-          <div className="p-2.5 rounded-xl bg-red-500/10 text-red-400 group-hover:scale-110 transition-transform">
-            <FileText className="w-5 h-5" />
-          </div>
-          <span className="text-xs font-bold text-white text-center">Guía PDF</span>
-        </button>
-
-        <button
-          onClick={handleExportExcel}
-          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-emerald-500 hover:bg-slate-800 text-left flex flex-col items-center justify-center gap-2 transition-all group"
+          onClick={handleCopiarFicha}
+          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-emerald-500 hover:bg-slate-800 flex flex-col items-center justify-center gap-2 transition-all group"
         >
           <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition-transform">
-            <FileSpreadsheet className="w-5 h-5" />
+            {copiado ? <Check className="w-5 h-5" /> : <StickyNote className="w-5 h-5" />}
           </div>
-          <span className="text-xs font-bold text-white text-center">Excel Export</span>
-        </button>
-
-        <button
-          onClick={handlePrintTicket}
-          className="p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-amber-500 hover:bg-slate-800 text-left flex flex-col items-center justify-center gap-2 transition-all group"
-        >
-          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 group-hover:scale-110 transition-transform">
-            <Printer className="w-5 h-5" />
-          </div>
-          <span className="text-xs font-bold text-white text-center">Ticket Térmico</span>
+          <span className="text-xs font-bold text-white text-center">
+            {copiado ? '¡Copiado!' : 'Copiar Ficha'}
+          </span>
         </button>
       </div>
 
-      {/* Internal Notes Section */}
-      <Card padding="sm" className="space-y-2 bg-slate-900 border-slate-700">
-        <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-          <StickyNote className="w-3.5 h-3.5 text-blue-400" /> Notas Internas de Administración
-        </span>
-        <textarea
-          rows={2}
-          value={internalNotes}
-          onChange={(e) => setInternalNotes(e.target.value)}
-          placeholder="Notas visibles únicamente para despachadores y administradores..."
-          className="w-full p-2.5 text-xs rounded-xl bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500 resize-none"
-        />
-      </Card>
+      {/* Reabrir pedido (solo si no está pendiente) */}
+      {order.estado !== 'pendiente' && (
+        <button
+          onClick={() => {
+            onCambiarEstado('pendiente');
+            if (onShowToast) {
+              onShowToast('Pedido Reabierto', `${order.cliente} volvió a estado Pendiente`, 'info');
+            }
+          }}
+          className="w-full p-3 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-blue-500 hover:bg-slate-800 flex items-center justify-center gap-2 transition-all group"
+        >
+          <RotateCcw className="w-4 h-4 text-blue-400 group-hover:rotate-[-180deg] transition-transform" />
+          <span className="text-xs font-bold text-white">Reabrir Pedido (volver a Pendiente)</span>
+        </button>
+      )}
 
-      {/* Audit Log / History Summary */}
+      {/* Datos del pedido (reales) */}
       <Card padding="sm" className="space-y-2 bg-slate-900 border-slate-700">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-            <History className="w-3.5 h-3.5 text-purple-400" /> Audit Log & Trazabilidad
+            <History className="w-3.5 h-3.5 text-purple-400" /> Datos del Pedido
           </span>
-          <Badge variant="purple" size="sm">Sistema v2.4</Badge>
+          <Badge variant="purple" size="sm">Firestore</Badge>
         </div>
 
         <div className="space-y-1.5 text-[11px] font-mono text-slate-400 pt-1">
           <div className="flex items-center justify-between">
-            <span>• Registro inicial: {order.hora}</span>
-            <span className="text-slate-500">Despachador Admin</span>
+            <span>• Orden en ruta: #{order.num ?? '—'}</span>
+            <span className="text-blue-400">ruta_activa</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>• Asignación repartidor: {order.repartidorNombre || 'S/A'}</span>
-            <span className="text-blue-400">AutoDispatch</span>
+            <span>• Estado actual: {ETIQUETAS_ESTADO[order.stReal || ''] || order.stReal || 'pendiente'}</span>
+            <span className="text-emerald-400">sincronizado</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>• Estado actual: {order.estado.toUpperCase()}</span>
-            <span className="text-emerald-400">OK</span>
+            <span>• Hora de entrega: {order.hora ? horaLimpia(order.hora) : '—'}</span>
+            <span className="text-slate-500">{order.hora ? 'registrada' : 'pendiente'}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>• Evidencia foto: {order.fotoUrl ? 'sí' : 'no'}</span>
+            <span className="text-slate-500">{order.fotoUrl ? 'guardada' : 'sin foto'}</span>
           </div>
         </div>
       </Card>
 
-      {/* Technical Information / JSON */}
+      {/* Información técnica / JSON (datos reales) */}
       <div>
         <button
           onClick={() => setShowJson(!showJson)}
           className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1.5 transition-colors"
         >
           <Code className="w-3.5 h-3.5 text-cyan-400" />
-          {showJson ? 'Ocultar Información Técnica JSON' : 'Ver Información Técnica & Telemetría Raw'}
+          {showJson ? 'Ocultar Información Técnica' : 'Ver Información Técnica (JSON real)'}
         </button>
 
         {showJson && (
