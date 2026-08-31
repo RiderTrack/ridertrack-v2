@@ -12,6 +12,16 @@
 //   - cola_envio/campanas  → los broadcasts masivos 📢
 //                            (+ notas de voz 🎙️ Fase 3.3)
 //
+// FASE 3.22:
+//   ✅ FICHA DEL CLIENTE EN EL CHAT — sin salir de la conversación ves
+//      la posición del cliente en la ruta de hoy (3/12), su dirección,
+//      el producto y el monto por cobrar. Tira colapsable bajo la
+//      cabecera (abre sola en pantallas anchas, 1 línea en el móvil).
+//      En VIVO: se actualiza al momento cuando marcas entregado/pagado
+//      desde RutaView. Insignia 📍 3/12 · S/ x en cada conversación de
+//      la lista, con color según estado (ámbar pendiente, verde pagado,
+//      rojo fallido). UNA sola suscripción a ruta_activa alimenta todo.
+//
 // FASE 3.8:
 //   ✅ Gracias por tu compra por la VÍA DEL ROBOT (avisar_entrega
 //      con enviar_imagen — igual que el Control de la v1): el bot
@@ -71,6 +81,10 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Home,
+  Package,
+  Wallet,
+  Navigation,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -124,6 +138,9 @@ import {
   FondoChat,
   borrarChatCompleto,
   estadoTicks,
+  suscribirRutaClientes,
+  InfoClienteRuta,
+  stColorRuta,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
 import {
@@ -404,13 +421,115 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
   );
 };
 
+// ═══════════════════════════════════════════════════════════
+// FASE 3.22 — FICHA DEL CLIENTE EN EL CHAT
+// Tira viva entre la cabecera y los mensajes: posición en la
+// ruta, dirección, producto y monto. Colapsable a 1 línea para
+// que no coma espacio en pantallas chicas.
+// ═══════════════════════════════════════════════════════════
+
+const TarjetaRutaCliente: React.FC<{
+  info: InfoClienteRuta;
+  /** colapsada por defecto en pantallas chicas */
+}> = ({ info }) => {
+  const [abierta, setAbierta] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 640 : true));
+  const color = stColorRuta(info.estado);
+  const colorChip =
+    color === 'pagado'
+      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+      : color === 'fallido'
+        ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+        : color === 'otro'
+          ? 'bg-slate-500/15 text-slate-300 border-slate-500/40'
+          : 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+  const dot =
+    color === 'pagado' ? 'bg-emerald-400' : color === 'fallido' ? 'bg-rose-400' : color === 'otro' ? 'bg-slate-400' : 'bg-amber-400';
+  const borde =
+    color === 'pagado' ? 'border-emerald-500/40' : color === 'fallido' ? 'border-rose-500/40' : color === 'otro' ? 'border-slate-500/40' : 'border-amber-500/40';
+  const monto = info.cobrar > 0 ? `S/ ${parseFloat(String(info.cobrar)).toFixed(2)}` : null;
+
+  return (
+    <div className={`flex-shrink-0 mx-2 sm:mx-3 mt-2 rounded-xl border overflow-hidden ${borde} bg-slate-900/70 backdrop-blur-sm`}>
+      {/* Fila 1 — siempre visible: posición + estado + toggle */}
+      <button
+        type="button"
+        onClick={() => setAbierta((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-800/40 transition-colors"
+        title={abierta ? 'Ocultar detalle de la ruta' : 'Ver dirección, producto y monto'}
+      >
+        <span className="flex items-center gap-1.5 flex-shrink-0">
+          <Navigation className={`w-3.5 h-3.5 ${color === 'pagado' ? 'text-emerald-400' : color === 'fallido' ? 'text-rose-400' : 'text-amber-400'}`} />
+          <span className="text-[11px] font-black text-white tabular-nums">
+            {info.posicion}/{info.total}
+          </span>
+        </span>
+        <span className="text-[11px] text-slate-400 flex-shrink-0">en la ruta</span>
+        <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${colorChip}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+          {info.estadoTexto}
+        </span>
+        <span className="flex-1" />
+        {monto && !abierta && (
+          <span className="text-[11px] font-black text-emerald-300 tabular-nums flex-shrink-0">{monto}</span>
+        )}
+        {abierta ? <ChevronUp className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
+      </button>
+
+      {/* Detalle — dirección · producto · monto · contexto */}
+      {abierta && (
+        <div className="px-3 pb-2 pt-0.5 flex flex-col gap-1">
+          {info.dir ? (
+            <div className="flex items-start gap-2 text-[11px] text-slate-300 leading-snug">
+              <Home className="w-3.5 h-3.5 text-sky-400 flex-shrink-0 mt-[1px]" />
+              <span className="break-words min-w-0">
+                {info.dir}
+                {info.dist ? <span className="text-slate-500"> · {info.dist}</span> : null}
+              </span>
+            </div>
+          ) : null}
+          {info.prod ? (
+            <div className="flex items-start gap-2 text-[11px] text-slate-300 leading-snug">
+              <Package className="w-3.5 h-3.5 text-orange-400 flex-shrink-0 mt-[1px]" />
+              <span className="break-words min-w-0">{info.prod}</span>
+            </div>
+          ) : null}
+          {monto ? (
+            <div className="flex items-center gap-2 text-[11px] text-slate-300">
+              <Wallet className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+              <span className="font-black text-emerald-300 tabular-nums">{monto}</span>
+              <span className="text-slate-500">por cobrar</span>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 pt-0.5 flex-wrap">
+            <span className="tabular-nums">{info.entregados} de {info.total} listos</span>
+            <span>·</span>
+            <span>
+              {info.faltanAntes === 0
+                ? 'eres el siguiente 🎯'
+                : `faltan ${info.faltanAntes} entrega${info.faltanAntes === 1 ? '' : 's'} antes`}
+            </span>
+            {info.nombreRuta ? (
+              <>
+                <span>·</span>
+                <span className="truncate max-w-[140px]">{info.nombreRuta}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Item de la lista de conversaciones */
 const ItemConversacion: React.FC<{
   conv: Conversacion;
   activo: boolean;
   fijado: boolean;
+  /** Fase 3.22 — insignia viva de la ruta (posición · monto) */
+  infoRuta?: InfoClienteRuta;
   onAbrir: () => void;
-}> = ({ conv, activo, fijado, onAbrir }) => {
+}> = ({ conv, activo, fijado, infoRuta, onAbrir }) => {
   const ultimo = conv.ultimoMensaje;
   const prefijo = !ultimo
     ? ''
@@ -484,6 +603,27 @@ const ItemConversacion: React.FC<{
           <span className={`text-xs truncate ${conv.noLeidos > 0 ? 'font-semibold text-slate-300' : 'text-slate-500'}`}>
             {prefijo}{preview}
           </span>
+          {/* Fase 3.22 — insignia viva de la ruta: posición · monto */}
+          {infoRuta && (
+            <span
+              className={`ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex-shrink-0 ${
+                stColorRuta(infoRuta.estado) === 'pagado'
+                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
+                  : stColorRuta(infoRuta.estado) === 'fallido'
+                    ? 'bg-rose-500/15 text-rose-300 border border-rose-500/40'
+                    : stColorRuta(infoRuta.estado) === 'otro'
+                      ? 'bg-slate-500/15 text-slate-300 border border-slate-500/40'
+                      : 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
+              }`}
+              title={`Posición ${infoRuta.posicion} de ${infoRuta.total} en la ruta · ${infoRuta.estadoTexto}${infoRuta.dir ? ` · ${infoRuta.dir}` : ''}${infoRuta.prod ? ` · ${infoRuta.prod}` : ''}${infoRuta.cobrar > 0 ? ` · S/ ${parseFloat(String(infoRuta.cobrar)).toFixed(2)}` : ''}`}
+            >
+              <MapPin className="w-2.5 h-2.5" />
+              <span className="tabular-nums">{infoRuta.posicion}/{infoRuta.total}</span>
+              {infoRuta.cobrar > 0 && (
+                <span className="tabular-nums opacity-80">· S/ {parseFloat(String(infoRuta.cobrar)).toFixed(0)}</span>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </button>
@@ -595,6 +735,8 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
   // Fase 3.20 — presencia «escribiendo…» del cliente del chat abierto
   const [presencia, setPresencia] = useState<PresenciaChat | null>(null);
+  // Fase 3.22 — ficha viva de la ruta: t9 → posición/dirección/producto/monto
+  const [mapaRuta, setMapaRuta] = useState<Map<string, InfoClienteRuta>>(new Map());
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -630,7 +772,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
       console.warn('[ChatBaileys] plantillas:', e.message)
     );
     const unsubEstadoGrupo = suscribirEstadoGrupo(setEstadoGrupo);
-    return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); unsubEstadoGrupo(); };
+    // Fase 3.22 — UNA suscripción a ruta_activa alimenta la insignia de la
+    // lista y la ficha del chat abierto (se actualiza al marcar entregado)
+    const unsubRutaClientes = suscribirRutaClientes((mapa) => setMapaRuta(mapa));
+    return () => { sub.cancelar(); unsubCampanas(); unsubPlantillas(); unsubEstadoGrupo(); unsubRutaClientes(); };
   }, []);
 
   // ── Marcar leído al abrir un chat (y cerrar el menú de rápidos) ──
@@ -715,6 +860,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const convActiva = useMemo(
     () => conversaciones.find((c) => c.tel === telActivo) || null,
     [conversaciones, telActivo]
+  );
+
+  // Fase 3.22 — ficha de ruta del chat abierto (null si no está en la ruta
+  // de hoy o es el grupo: no se pinta nada, el chat queda idéntico)
+  const infoRutaActiva = useMemo(
+    () => (!convActiva || convActiva.esGrupo ? undefined : mapaRuta.get(convActiva.tel)),
+    [convActiva, mapaRuta]
   );
 
   // ── Mensajes + historial local de notas de voz e imágenes (merge) ──
@@ -1309,6 +1461,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       conv={c}
                       activo={c.tel === telActivo}
                       fijado={fijados.has(c.tel)}
+                      infoRuta={c.esGrupo ? undefined : mapaRuta.get(c.tel)}
                       onAbrir={() => abrirChat(c.tel)}
                     />
                   ))
@@ -1486,6 +1639,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* 🧭 Fase 3.22 — FICHA DEL CLIENTE: posición en la ruta,
+                  dirección, producto y monto (viva, colapsable) */}
+              {infoRutaActiva && <TarjetaRutaCliente info={infoRutaActiva} />}
 
               {/* Mensajes (con el fondo elegido) */}
               <div
