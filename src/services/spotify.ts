@@ -1,9 +1,14 @@
 // ═══════════════════════════════════════════════════════════
-// 🎵 MEDIOS — SPOTIFY (Fase 3.11)
+// 🎵 MEDIOS — SPOTIFY (Fase 3.11 · fix redirect Fase 3.23)
 // Port fiel de la v1 (main.js L4199-4700) a TypeScript:
-//   • OAuth Authorization Code + PKCE (mismo client_id y
-//     redirect_uri ridertrack://callback de la v1 → NO hay que
-//     tocar nada en el dashboard de Spotify)
+//   • OAuth Authorization Code + PKCE (mismo client_id de la v1)
+//   • F3.23 FIX: en la APK la v2 ya NO usa ridertrack://callback —
+//     ese deep link lo resuelve Android abriendo la V1 (que es su
+//     dueña) y la v2 se quedaba esperando el código para siempre.
+//     Ahora, en nativo, el redirect es el scheme PROPIO de la v2:
+//     com.ridertrack.v2://callback (el que la APK ya escucha vía
+//     appUrlOpen). Solo falta añadirlo 1 vez en el dashboard de
+//     Spotify (Redirect URIs) — ver LEEME-FASE-3-23.md.
 //   • Web Playback SDK: la app se vuelve un dispositivo Spotify
 //     Connect ("RiderTrack 🛵") y reproduce DIRECTO (Premium)
 //   • El login abre Spotify en el navegador del sistema; al
@@ -14,8 +19,16 @@
 //     empezar a sonar desde la propia app
 // ═══════════════════════════════════════════════════════════
 
+import { Capacitor } from '@capacitor/core';
+
 export const SPOTIFY_CLIENT_ID = '9542b79ff46f44aa9ce31a7450497af6';
-export const SPOTIFY_REDIRECT = 'ridertrack://callback';
+
+// En la APK (nativo) → scheme propio de la v2, que Android ya resuelve
+// a ESTA app. En web (dev/navegador) se mantiene el de la v1 por
+// compatibilidad con lo que ya pudiera estar registrado.
+export const SPOTIFY_REDIRECT: string = Capacitor.isNativePlatform()
+  ? 'com.ridertrack.v2://callback'
+  : 'ridertrack://callback';
 export const SPOTIFY_SCOPES =
   'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state user-library-read user-library-modify';
 
