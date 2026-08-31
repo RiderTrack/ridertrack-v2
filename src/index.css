@@ -138,6 +138,69 @@
   }
 }
 
+/* ═══ F3.25 — CHAT BAILEYS: FIX MODO CLARO + COLOR DE FUENTE ═══
+   1) FIX CONTRASTE: las burbujas SALIENTES con opacidad
+      (bg-emerald-800/90, bg-emerald-700/80, bg-teal-900/80) no
+      estaban en la lista blanca del tema claro. En modo claro la
+      burbuja seguía verde OSCURA pero el text-white se invertía a
+      NEGRO (#0f1a2e) → letra negra sobre verde oscuro: ilegible
+      (reportado 01/09/2026: "en modo claro las letras están color
+      negro y no se puede distinguir"). Se fuerza letra blanca,
+      como en el resto de burbujas de color sólido. */
+.light .bg-emerald-800\/90,
+.light .bg-emerald-700\/80,
+.light .bg-teal-900\/80 {
+  color: #ffffff;
+}
+/* La etiqueta "Bot · …" (emerald-200) sobre esas burbujas oscuras
+   se mantiene legible en ambos modos tal cual está. */
+
+/* 2) SELECTOR DE COLOR DE FUENTE (F3.25) — el botón "Aa" de la
+   cabecera del chat aplica una de estas clases al contenedor de
+   mensajes. Las burbujas llevan la clase base .rt-burbuja y el
+   marcador -entrante / -saliente:
+   • .rt-fuente-blanca → TODA la letra del chat blanca; las
+     burbujas ENTRANTES se oscurecen para que el blanco se lea
+     (look "chat oscuro" aunque la app esté en claro).
+   • .rt-fuente-tinta  → TODA la letra oscura; las burbujas
+     SALIENTES se aclaran para que la tinta se lea. */
+.rt-fuente-blanca .rt-burbuja,
+.rt-fuente-blanca .rt-burbuja * {
+  color: #ffffff !important;
+}
+.rt-fuente-blanca .rt-burbuja-entrante {
+  background-color: #1f2937 !important;   /* gris oscuro WhatsApp */
+  border-color: #374151 !important;
+}
+/* chips internos de las burbujas (nombre del participante / "Bot ·
+   respondió solo") — se oscurecen para que el blanco se lea */
+.rt-fuente-blanca .rt-burbuja .bg-slate-950\/60 {
+  background-color: rgba(15, 23, 42, 0.55) !important;
+}
+
+.rt-fuente-tinta .rt-burbuja,
+.rt-fuente-tinta .rt-burbuja * {
+  color: #0f1a2e !important;
+}
+.rt-fuente-tinta .rt-burbuja-saliente {
+  background-color: #d1fae5 !important;   /* verde claro */
+  border-color: #6ee7b7 !important;
+}
+/* entrantes también se aclaran (si la app está en OSCURO, la
+   burbuja slate-800 quedaría oscura y la tinta no se leería) */
+.rt-fuente-tinta .rt-burbuja-entrante {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+.rt-fuente-tinta .rt-burbuja-saliente .text-emerald-200\/90,
+.rt-fuente-tinta .rt-burbuja-saliente .text-teal-200\/90 {
+  color: #047857 !important;
+}
+/* chips internos en modo tinta: fondo claro */
+.rt-fuente-tinta .rt-burbuja .bg-slate-950\/60 {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+
 /* ═══ PULSO DEL CRONÓMETRO / GPS EN VIVO (Fase 1.5) ═══ */
 @keyframes rtPulso {
   0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
