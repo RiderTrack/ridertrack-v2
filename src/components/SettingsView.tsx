@@ -3,7 +3,7 @@
 // Sección de configuración con tarjetas
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Shield,
@@ -26,12 +26,18 @@ import {
   LogOut,
   User,
   Mail,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ConfigCuentasModal } from './ConfigCuentasModal';
 import { WhatsAppApiModal } from './WhatsAppApiModal';
 import { useAuth } from '../hooks/useAuth';
 import { cerrarSesion } from '../services/firebase';
+import {
+  cargarConfigCuentas,
+  guardarConfigCuentas,
+  ConfigCuentas,
+} from '../services/firestore';
 import {
   getGoogleApiKey,
   setGoogleApiKey,
@@ -103,6 +109,111 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
 
   // ── Seguridad (Fase 3.14 — sesión) ──
   const [segAbierto, setSegAbierto] = useState(false);
+
+  // ── Icono de la App (Fase 3.21 — logo que representa a RiderTrack V2) ──
+  const [iconoAbierto, setIconoAbierto] = useState(false);
+  const [logoApp, setLogoApp] = useState<string>('');
+  const [logoGuardado, setLogoGuardado] = useState<string>('');
+  const [subiendoLogo, setSubiendoLogo] = useState(false);
+  const [guardandoLogo, setGuardandoLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // Al abrir la tarjeta: primero localStorage (instantáneo — así lo ve el
+  // login antes de entrar) y luego Firestore (fuente de verdad)
+  useEffect(() => {
+    if (!iconoAbierto) return;
+    try {
+      setLogoApp(localStorage.getItem('rt2_logo_app') || '');
+    } catch { /* sin storage */ }
+    if (!user) return;
+    cargarConfigCuentas(user.uid)
+      .then((cfg) => {
+        const logo = cfg.apariencia?.logoBase64 || '';
+        setLogoApp(logo);
+        setLogoGuardado(logo);
+        try {
+          if (logo) localStorage.setItem('rt2_logo_app', logo);
+          else localStorage.removeItem('rt2_logo_app');
+        } catch { /* sin storage */ }
+      })
+      .catch(() => { /* sin conexión — queda lo local */ });
+  }, [iconoAbierto, user]);
+
+  // Comprime una imagen a JPEG base64 (mismo approach del QR de Yape/Plin)
+  const comprimirLogo = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Imagen inválida'));
+        img.onload = () => {
+          const MAX = 512; // cuadrado pequeño: es un logo, no una foto
+          let { width, height } = img;
+          const escala = Math.min(1, MAX / Math.max(width, height));
+          width = Math.round(width * escala);
+          height = Math.round(height * escala);
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('Canvas no disponible')); return; }
+          ctx.fillStyle = '#020617'; // slate-950 (fondo de la app)
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = String(e.target?.result || '');
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const elegirLogo = async (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      onShowToast?.('⚠️ No es una imagen', 'Elige una foto o un PNG/JPG del logo', 'warning');
+      return;
+    }
+    setSubiendoLogo(true);
+    try {
+      const b64 = await comprimirLogo(file);
+      setLogoApp(b64);
+      onShowToast?.('✅ Logo cargado', 'Se ve en la vista previa — toca “Guardar logo” para confirmarlo', 'success');
+    } catch (err: any) {
+      onShowToast?.('❌ Error', err.message || 'No se pudo procesar la imagen', 'error');
+    } finally {
+      setSubiendoLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const guardarLogo = async () => {
+    if (!user) {
+      onShowToast?.('⚠️ Sin sesión', 'Inicia sesión para guardar el logo en la nube', 'warning');
+      return;
+    }
+    setGuardandoLogo(true);
+    try {
+      // merge:true → solo se escribe apariencia, el resto de la config no se toca
+      await guardarConfigCuentas(user.uid, { apariencia: { logoBase64: logoApp } } as ConfigCuentas);
+      setLogoGuardado(logoApp);
+      try {
+        if (logoApp) localStorage.setItem('rt2_logo_app', logoApp);
+        else localStorage.removeItem('rt2_logo_app');
+      } catch { /* sin storage */ }
+      onShowToast?.(
+        logoApp ? '🛡️ Logo guardado' : '🔄 Logo restaurado',
+        logoApp
+          ? 'Ya aparece en el login de este dispositivo y quedará en la nube'
+          : 'Vuelve al logo de fábrica de RiderTrack V2',
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('❌ Error al guardar', e.message || 'Intenta de nuevo', 'error');
+    } finally {
+      setGuardandoLogo(false);
+    }
+  };
 
   const handleLogout = async () => {
     if (confirm('¿Cerrar sesión de RiderTrack?')) {
@@ -226,6 +337,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
               <div className="text-[11px] text-slate-400">Radio, Spotify y YouTube</div>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
+          </div>
+        </button>
+
+        {/* Icono de la App (Fase 3.21 — el logo que representa a
+            RiderTrack V2: se ve en el login y se guarda en la nube) */}
+        <button
+          onClick={() => setIconoAbierto((v) => !v)}
+          className="text-left p-4 rounded-2xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 transition-all active:scale-95 group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center overflow-hidden">
+              {logoGuardado ? (
+                <img src={logoGuardado} alt="Logo" className="w-full h-full object-cover" />
+              ) : (
+                <ImageIcon className="w-5 h-5 text-orange-400" />
+              )}
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">Icono de la App</div>
+              <div className="text-[11px] text-slate-400">
+                {logoGuardado ? 'Logo personalizado activo' : 'Logo de fábrica · escudo RiderTrack'}
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-orange-400 transition-colors ${iconoAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
 
@@ -669,6 +804,112 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
           >
             🔄 Restaurar valores de fábrica (moto en Lima)
           </button>
+        </div>
+      )}
+
+      {/* Panel Icono de la App (Fase 3.21) */}
+      {iconoAbierto && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-800 border border-orange-500/30 space-y-4">
+          <div>
+            <h3 className="font-bold text-white text-sm">🛡️ Icono de la App</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              La imagen que representa a RiderTrack V2. Se muestra en el login y queda
+              guardada en la nube (config_empresa).
+            </p>
+          </div>
+
+          {/* Vista previa: cuadrada (launcher) + redonda (adaptativa) */}
+          <div className="flex items-center gap-5 justify-center py-2">
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-2xl overflow-hidden border border-slate-600 shadow-lg bg-slate-900 flex items-center justify-center">
+                {logoApp ? (
+                  <img src={logoApp} alt="Logo app" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-purple-600 to-emerald-600 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="currentColor">
+                      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                )}
+              </div>
+              <p className="text-[9px] text-slate-500 mt-1">Cuadrada</p>
+            </div>
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-full overflow-hidden border border-slate-600 shadow-lg bg-slate-900 flex items-center justify-center">
+                {logoApp ? (
+                  <img src={logoApp} alt="Logo app redondo" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-purple-600 to-emerald-600 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="currentColor">
+                      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                )}
+              </div>
+              <p className="text-[9px] text-slate-500 mt-1">Redonda</p>
+            </div>
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-2xl overflow-hidden border border-slate-700 shadow-lg bg-slate-950 flex flex-col items-center justify-center gap-1 p-2">
+                <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
+                  {logoApp ? (
+                    <img src={logoApp} alt="Logo mini" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-purple-600 to-emerald-600" />
+                  )}
+                </div>
+                <div className="text-[8px] font-black text-white leading-none">RiderTrack V2</div>
+                <div className="text-[7px] text-slate-400 leading-none">Panel de entregas</div>
+              </div>
+              <p className="text-[9px] text-slate-500 mt-1">En el login</p>
+            </div>
+          </div>
+
+          {/* Botones */}
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => elegirLogo(e.target.files?.[0])}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => logoInputRef.current?.click()}
+              disabled={subiendoLogo}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs font-bold transition-all active:scale-95"
+            >
+              {subiendoLogo ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+              {subiendoLogo ? 'Procesando…' : 'Subir imagen'}
+            </button>
+            <button
+              onClick={() => setLogoApp('')}
+              disabled={!logoApp}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-xs font-bold transition-all active:scale-95"
+            >
+              <Trash2 className="w-4 h-4" /> Quitar logo
+            </button>
+          </div>
+          <button
+            onClick={guardarLogo}
+            disabled={guardandoLogo || logoApp === logoGuardado}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold transition-all active:scale-95"
+          >
+            {guardandoLogo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {guardandoLogo ? 'Guardando…' : logoApp === logoGuardado ? 'Guardado ✓' : 'Guardar logo'}
+          </button>
+
+          {/* Nota: qué es fijo y qué es dinámico */}
+          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60 space-y-1.5">
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              📱 <b className="text-slate-300">Icono del APK (en el escritorio del celular):</b> el escudo
+              de RiderTrack v1 ya viene integrado en el build (carpeta android-icons del repo) — ese se
+              pone al compilar la app.
+            </p>
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              🖼️ <b className="text-slate-300">Este logo:</b> la imagen que verás DENTRO de la app (login),
+              editable aquí mismo sin recompilar. Se guarda comprimida (máx 512 px) en tu cuenta.
+            </p>
+          </div>
         </div>
       )}
 

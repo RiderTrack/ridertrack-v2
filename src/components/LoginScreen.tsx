@@ -3,7 +3,7 @@
 // Login con Google (web popup + APK nativo) + email/registro/recuperar
 // ═══════════════════════════════════════════════════════════
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
   loginConGoogleWeb,
@@ -43,6 +43,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [showForgot, setShowForgot] = useState(false);
+  // Fase 3.21: logo personalizado (Configuración → Icono de la App).
+  // Se lee de localStorage porque el login aparece ANTES de iniciar
+  // sesión — al guardarlo en Configuración queda cacheado aquí.
+  const [logoApp, setLogoApp] = useState<string>('');
+  useEffect(() => {
+    try { setLogoApp(localStorage.getItem('rt2_logo_app') || ''); } catch { /* sin storage */ }
+  }, []);
 
   // Login con Google (web popup o APK nativo)
   const handleGoogleLogin = async () => {
@@ -127,13 +134,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
 
       {/* Contenedor del login */}
       <div className="relative w-full max-w-md">
-        {/* Logo */}
+        {/* Logo (Fase 3.21: usa el personalizado si está configurado) */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-purple-600 to-emerald-600 mb-4 shadow-2xl">
-            <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="currentColor">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
+          {logoApp ? (
+            <img
+              src={logoApp}
+              alt="RiderTrack V2"
+              className="w-20 h-20 rounded-3xl object-cover mx-auto mb-4 shadow-2xl border border-slate-700"
+            />
+          ) : (
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-purple-600 to-emerald-600 mb-4 shadow-2xl">
+              <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="currentColor">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+          )}
           <h1 className="text-3xl font-black text-white tracking-tight">RiderTrack V2</h1>
           <p className="text-sm text-slate-400 mt-1">Panel profesional de entregas</p>
         </div>
