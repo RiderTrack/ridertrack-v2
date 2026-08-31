@@ -103,6 +103,11 @@ export interface MensajeChat {
   /** para poder borrar entradas de mensajes_clientes */
   borrableDocId?: string;
   nombre?: string;
+  /** Fase 3.26 — número de quien escribe en el GRUPO MATE,
+   * listo para mostrar: "+51 987 654 321". Solo para mensajes
+   * entrantes del grupo (los normales de 1 a 1 ya son del cliente
+   * de esa conversación, no hace falta). */
+  autorNumero?: string;
 }
 
 export interface Conversacion {
@@ -133,6 +138,51 @@ const TIPOS_GRUPO_MATE = [
 
 function esAccionGrupoMate(tipo?: string): boolean {
   return !!tipo && TIPOS_GRUPO_MATE.includes(tipo);
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 3.26 — QUIÉN ESCRIBE EN EL GRUPO (nombre + número)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Convierte el JID del participante que el bot guarda en el doc
+ * (`participante`, p.ej. "51987654321@s.whatsapp.net") — o el campo
+ * `numero` que guarda el parche v3 — en un texto listo para mostrar
+ * junto al nombre: "+51 987 654 321".
+ *
+ * Casos:
+ *  - "51987654321@s.whatsapp.net" → "+51 987 654 321"
+ *  - "51987654321"                 → "+51 987 654 321"
+ *  - "987654321" (sin 51)          → "+51 987 654 321"
+ *  - "...@lid" (número interno de WhatsApp, no es teléfono real)
+ *    → "" (mejor no mostrar nada que mostrar un número falso)
+ */
+export function formatearAutorGrupo(participante?: unknown, numero?: unknown): string {
+  const crudo = String(numero ?? '').trim() || String(participante ?? '').trim();
+  if (!crudo || crudo.includes('@lid')) return '';
+  const digitos = crudo.replace(/\D/g, '');
+  if (digitos.length < 9) return '';
+  // Peruano: 9 dígitos (a veces llega con el 51 delante)
+  const t9 = digitos.startsWith('51') && digitos.length >= 11 ? digitos.slice(2, 11) : digitos.slice(-9);
+  return `+51 ${t9.slice(0, 3)} ${t9.slice(3, 6)} ${t9.slice(6, 9)}`;
+}
+
+/** Color determinístico para el nombre del autor en el grupo
+ * (como WhatsApp: cada compañero tiene "su" color fijo) */
+export function colorAutorGrupo(semilla: string): string {
+  const paleta = [
+    'text-sky-300',
+    'text-amber-300',
+    'text-emerald-300',
+    'text-rose-300',
+    'text-violet-300',
+    'text-cyan-300',
+    'text-orange-300',
+    'text-teal-300',
+  ];
+  let h = 0;
+  for (let i = 0; i < semilla.length; i++) h = (h * 31 + semilla.charCodeAt(i)) >>> 0;
+  return paleta[h % paleta.length];
 }
 
 export interface CampanaBot {
@@ -282,6 +332,59 @@ export function estadoTicks(
  * (Incluye la conversación sintética "Grupo MATE · Trabajo" y las
  * fotos de perfil reales de clientes_registrados.foto_perfil.)
  */
+// ═══════════════════════════════════════════════════════════
+// FASE 3.26 — 🧹 LIMPIAR HISTORIAL DEL CHAT (sin borrar el chat)
+// ═══════════════════════════════════════════════════════════
+// ¿Qué es? Como el "Limpiar chat" de WhatsApp: los mensajes que
+// ya se mostraron se OCULTAN y la pantalla queda limpia, pero la
+// conversación NO se borra — sigue en la lista, abierta, y los
+// mensajes nuevos que lleguen después de la limpieza se ven
+// normal (el corte es por fecha/hora).
+//
+// ¿Por qué LOCAL (localStorage) y no borrando Firestore? Porque
+// acá el requisito es "limpiar la vista sin borrar el chat": no
+// hay que tocar los datos del servidor (los mensajes siguen en
+// mensajes_clientes por si algún día se quieren ver de nuevo),
+// funciona instantáneo incluso sin internet y NO obliga a pedir
+// permisos de borrado nuevos al bot. Si algún día se quiere una
+// limpieza global (que borre de verdad los docs), es otra fase.
+// ───────────────────────────────────────────────────────────
+const KEY_LIMPIEZA_CHAT = 'rt2_chat_limpiado_';
+
+/** Suscripciones vivas — para re-pintar al instante cuando se limpia */
+const _emitersChat = new Set<() => void>();
+
+/** Lee la marca de tiempo del último "Limpiar historial" de un chat */
+export function corteLimpiezaChat(tel: string): number {
+  try {
+    return Number(localStorage.getItem(KEY_LIMPIEZA_CHAT + telKey(tel))) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 🧹 Limpia el historial VISIBLE de una conversación (cualquiera,
+ * incluido el grupo MATE). Oculta todo lo anterior a AHORA; el chat
+ * queda abierto y los mensajes que lleguen después se ven normal.
+ * Devuelve el corte aplicado (timestamp en ms) para poder testearlo.
+ */
+export function limpiarHistorialChat(tel: string): number {
+  const t9 = telKey(tel) || (tel === TEL_GRUPO_MATE ? TEL_GRUPO_MATE : '');
+  if (!t9) return 0;
+  const corte = Date.now();
+  try {
+    localStorage.setItem(KEY_LIMPIEZA_CHAT + t9, String(corte));
+  } catch {
+    /* sin espacio — igual re-emitimos para la sesión actual */
+  }
+  // re-pintar TODAS las vistas suscritas AHORA (no esperar un snapshot)
+  _emitersChat.forEach((fn) => {
+    try { fn(); } catch { /* noop */ }
+  });
+  return corte;
+}
+
 export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   const convs = new Map<string, Conversacion>();
   let silenciados = new Set<string>();
@@ -315,7 +418,15 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     // de mensajes mientras el chat estaba abierto. Ahora cada emisión
     // entrega copias nuevas (la conversación y su array de mensajes):
     // mensajes, ticks ⏳→✓→✓✓→azul y fotos se pintan EN VIVO.
-    const lista = Array.from(convs.values()).map((c) => ({ ...c, mensajes: [...c.mensajes] }));
+    //
+    // Fase 3.26 — además, cada copia aplica el CORTE de "Limpiar
+    // historial": si limpiaste un chat, sus mensajes viejos no se
+    // emiten (queda vacío pero vivo; los nuevos pasan igual).
+    const lista = Array.from(convs.values()).map((c) => {
+      const corte = corteLimpiezaChat(c.tel);
+      const mensajes = corte > 0 ? c.mensajes.filter((m) => m.timestamp > corte) : c.mensajes;
+      return { ...c, mensajes };
+    });
     lista.forEach((c) => {
       c.noLeidos = c.mensajes.filter((m) => m.origen === 'cliente' && !m.leido).length;
       c.mensajes.sort((a, b) => a.timestamp - b.timestamp);
@@ -436,6 +547,10 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
           leido: !!m.leido,
           enviado: null,
           nombre: m.nombre || 'Grupo',
+          // Fase 3.26 — número de quien escribe: el parche del bot
+          // guarda `participante` (JID) desde la 3.9 y `numero` (limpio)
+          // desde la v3. Con cualquiera de los dos se arma el "+51 …".
+          autorNumero: formatearAutorGrupo(m.participante, m.numero),
         });
         return;
       }
@@ -722,8 +837,16 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     )
   );
 
+  // Fase 3.26 — registrar el re-pintado de esta suscripción para
+  // que "Limpiar historial" se vea al instante (limpiarHistorialChat
+  // dispara todos los emiters registrados). Se quita en cancelar().
+  _emitersChat.add(emitir);
+
   return {
-    cancelar: () => unsubs.forEach((u) => { try { u(); } catch { /* noop */ } }),
+    cancelar: () => {
+      _emitersChat.delete(emitir);
+      unsubs.forEach((u) => { try { u(); } catch { /* noop */ } });
+    },
   };
 }
 
