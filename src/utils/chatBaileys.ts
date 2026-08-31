@@ -64,7 +64,7 @@ export const UID_BOT = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
 // ─────────────────────────────────────────────────────────────
 
 export type OrigenMensaje = 'cliente' | 'rudy' | 'rudyAuto' | 'bot' | 'campana';
-export type TipoContenido = 'texto' | 'imagen' | 'audio' | 'documento' | 'ubicacion' | 'yape_qr';
+export type TipoContenido = 'texto' | 'imagen' | 'audio' | 'documento' | 'ubicacion' | 'yape_qr' | 'plin_qr';
 
 /** Mensaje unificado de la línea de tiempo */
 export interface MensajeChat {
@@ -735,6 +735,7 @@ export function etiquetaAccionBot(tipo?: string): string {
     case 'avisar_posicion': return '📍 Posición del rider compartida';
     case 'solicitar_ubicacion': return '📍 Pedido de ubicación enviado';
     case 'enviar_yape': return '💰 QR de Yape enviado';
+    case 'enviar_plin': return '💚 QR de Plin enviado';
     case 'broadcast_inicio': return '📢 Aviso de inicio de ruta';
     case 'enviar_texto_directo': return '💬 Mensaje del bot';
     case 'enviar_grupo_mate': return '👥 Reporte al grupo MATE';
@@ -877,6 +878,88 @@ export async function enviarYapeQRChat(tel: string, nombre: string): Promise<voi
     jidOriginal: '',
     uid: UID_BOT,
   });
+}
+
+/** 💚 Enviar QR de Plin (fase 3.20 — igual que el Yape: el bot saca el
+ *  QR y el titular de ruta_activa.plin y lo manda con su plantilla).
+ *  Requiere el parche extras_chat.js v1.0 en el bot. */
+export async function enviarPlinQRChat(tel: string, nombre: string): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9) throw new Error('Número inválido');
+  await addDoc(collection(db!, 'respuestas_manuales'), {
+    telefono: t9,
+    nombre: nombre || 'Cliente',
+    texto: '📲 QR de Plin',
+    tipoContenido: 'plin_qr',
+    enviado: false,
+    timestamp: Date.now(),
+    creadoPor: 'clienteTrack',
+    jidOriginal: '',
+    uid: UID_BOT,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// ✍️ PRESENCIA «escribiendo…» (fase 3.20)
+// ═══════════════════════════════════════════════════════════
+// Flujo (con el parche extras_chat.js instalado en el bot):
+//   1. Al abrir un chat, el panel deja el teléfono observado en
+//      presencia_watch/{UID_BOT} (el bot se suscribe a la
+//      presencia de WhatsApp de ese número).
+//   2. Cuando el cliente escribe, Baileys emite «presence.update»
+//      y el bot lo guarda en presencia_chat/{tel}:
+//        { estado: 'composing' | 'paused', actualizadoEn: ISO }
+//   3. El panel escucha ese doc y muestra «escribiendo…».
+
+export interface PresenciaChat {
+  estado?: string;        // 'composing' | 'paused' | 'available'
+  actualizadoEn?: string; // ISO
+}
+
+/** ¿La presencia dice que está escribiendo AHORA? (pura — testeable) */
+export function presenciaViva(p: PresenciaChat | null | undefined, ahora: number = Date.now()): boolean {
+  if (!p || p.estado !== 'composing') return false;
+  const ts = Date.parse(p.actualizadoEn || '');
+  if (!ts || isNaN(ts)) return false;
+  return ahora - ts < 30_000; // 30 s de vida (margen generoso)
+}
+
+/** Dejar en Firestore el chat que estás viendo (para que el bot
+ *  vigile si ese cliente empieza a escribir). */
+export async function observarPresenciaChat(tel: string): Promise<void> {
+  const t9 = telKey(tel);
+  if (!t9 || !db) return;
+  try {
+    await setDoc(doc(db, 'presencia_watch', UID_BOT), {
+      telefono: t9,
+      actualizadoEn: new Date().toISOString(),
+    }, { merge: true });
+  } catch {
+    // optimista: si no hay red, no hay «escribiendo…» y nada más pasa
+  }
+}
+
+/** Escuchar la presencia del chat activo (escribiendo… / pausó). */
+export function suscribirPresenciaChat(
+  tel: string,
+  cb: (p: PresenciaChat | null) => void
+): () => void {
+  const t9 = telKey(tel);
+  if (!t9 || !db) {
+    cb(null);
+    return () => undefined;
+  }
+  try {
+    const unsub = onSnapshot(
+      doc(db, 'presencia_chat', t9),
+      (snap) => cb(snap.exists() ? (snap.data() as PresenciaChat) : null),
+      () => cb(null)
+    );
+    return unsub;
+  } catch {
+    cb(null);
+    return () => undefined;
+  }
 }
 
 /**
