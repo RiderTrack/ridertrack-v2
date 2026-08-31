@@ -553,11 +553,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
   };
 
-  // 💚 Enviar QR de Plin DIRECTO (Fase 2.3)
-  // Comparte la imagen del QR Plin + mensaje desde tu propio WhatsApp —
-  // NO depende del bot (el handler 'enviar_plin' de RudyBot sigue pendiente).
-  // Es el respaldo por si se cae Yape: el QR y los datos salen de
-  // "Mi QR Yape/Plin" (config_empresa).
+  // 💚 Enviar QR de Plin DIRECTO (Fase 2.3) — RESPALDO sin usar por
+  // ahora (Fase 3.20: el botón del modal usa la vía del bot con
+  // plantilla). Se conserva por si algún día se quiere compartir
+  // directo desde tu WhatsApp (bot caído / sin parche).
   const enviarPlinDirecto = async (cliente: Cliente) => {
     const plin = config.plin;
     const numero = (plin?.telefono || '').replace(/\D/g, '');
@@ -628,6 +627,33 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       lng: c.lng!,
     }));
 
+    setNavGpsParadas(paradas);
+    setNavGpsAbierto(true);
+  };
+
+  // 🧭 (Fase 3.20) Navegar directo a UN cliente desde su ficha:
+  // abre la navegación con voz con esa única parada (da igual si
+  // está pendiente o ya entregado — tú decides cuándo ir).
+  const abrirNavegacionGpsCliente = (c: Cliente) => {
+    if (typeof c.lat !== 'number' || typeof c.lng !== 'number' || isNaN(c.lat!) || isNaN(c.lng!)) {
+      onShowToast?.(
+        '🧭 Primero ubícalo',
+        `${c.nombre} no tiene coordenada — tócale 📍 (Ubicar) o pídele su ubicación por WhatsApp`,
+        'warning'
+      );
+      return;
+    }
+    const paradas: ParadaNav[] = [{
+      id: c.id,
+      num: c.num ?? 1,
+      nombre: c.nombre,
+      dir: c.dir,
+      dist: c.dist,
+      cobrar: c.cobrar || 0,
+      lat: c.lat!,
+      lng: c.lng!,
+    }];
+    setBotModalId(null);
     setNavGpsParadas(paradas);
     setNavGpsAbierto(true);
   };
@@ -1425,8 +1451,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <button onClick={async () => { onShowToast?.('📲 Yape', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_yape'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📲</span> Enviar Yape
                             </button>
-                            <button onClick={() => { setBotModalId(null); enviarPlinDirecto(c); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95" title="Se envía directo desde tu WhatsApp con la imagen del QR (no necesita el bot)">
+                            <button onClick={async () => { onShowToast?.('💚 Plin', 'Enviando QR...', 'info'); await enviarAccionBot(c, 'enviar_plin'); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95" title="Fase 3.20 — el bot envía tu QR de Plin con plantilla (parche extras_chat.js)">
                               <span className="text-lg">💚</span> Enviar Plin
+                            </button>
+                            <button onClick={() => abrirNavegacionGpsCliente(c)} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 text-[11px] font-bold transition-all active:scale-95" title="Fase 3.20 — navegación GPS con voz directo a este cliente">
+                              <span className="text-lg">🧭</span> Navegar GPS
                             </button>
                             <button onClick={() => { setBotModalId(null); setLlegadaModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">🚀</span> Voy en camino

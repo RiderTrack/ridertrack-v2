@@ -87,6 +87,11 @@ import {
   enviarAdjuntoChat,
   pedirUbicacionBot,
   enviarYapeQRChat,
+  enviarPlinQRChat,
+  observarPresenciaChat,
+  suscribirPresenciaChat,
+  presenciaViva,
+  PresenciaChat,
   silenciarBot,
   reactivarBot,
   marcarLeidoChat,
@@ -367,6 +372,14 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
               <span className="text-[10px] opacity-80">El bot envía el QR de tu ruta</span>
             </div>
           </div>
+        ) : m.tipoContenido === 'plin_qr' ? (
+          <div className="flex items-center gap-2 py-0.5">
+            <span className="w-8 h-8 rounded-lg bg-cyan-500/30 border border-cyan-300/40 flex items-center justify-center text-base">💚</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold">QR de Plin</span>
+              <span className="text-[10px] opacity-80">El bot envía tu QR de Plin con plantilla</span>
+            </div>
+          </div>
         ) : (
           <span className="text-sm whitespace-pre-wrap break-words">{m.texto}</span>
         )}
@@ -423,7 +436,9 @@ const ItemConversacion: React.FC<{
               ? '📍 Ubicación'
               : ultimo.tipoContenido === 'yape_qr'
                 ? '💰 QR de Yape'
-                : ultimo.texto;
+                : ultimo.tipoContenido === 'plin_qr'
+                  ? '💚 QR de Plin'
+                  : ultimo.texto;
 
   return (
     <button
@@ -578,6 +593,8 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [rapidoPosicion, setRapidoPosicion] = useState(3); // posición editable (Fase 3.7)
   // Fase 3.9 — estado del grupo MATE (heartbeat del parche del bot)
   const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
+  // Fase 3.20 — presencia «escribiendo…» del cliente del chat abierto
+  const [presencia, setPresencia] = useState<PresenciaChat | null>(null);
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -621,6 +638,30 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     if (telActivo) marcarLeidoChat(telActivo);
     setMenuRapidos(false);
   }, [telActivo]);
+
+  // ── Fase 3.20: «escribiendo…» — pedirle al bot que vigile la
+  //    presencia del chat abierto y escuchar lo que reporta ──
+  useEffect(() => {
+    setPresencia(null);
+    if (!telActivo || telActivo === TEL_GRUPO_MATE) return undefined;
+    observarPresenciaChat(telActivo);
+    const unsub = suscribirPresenciaChat(telActivo, setPresencia);
+    return () => { try { unsub(); } catch { /* noop */ } };
+  }, [telActivo]);
+
+  // La presencia «viva» caduca sola a los 30 s sin eventos nuevos
+  // (revisión por segundo — barata y sin dependencias)
+  const [ahoraTick, setAhoraTick] = useState(Date.now());
+  useEffect(() => {
+    if (!presencia || presencia.estado !== 'composing') return undefined;
+    const t = setInterval(() => setAhoraTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [presencia]);
+  const clienteEscribiendo = useMemo(
+    () => presenciaViva(presencia, ahoraTick),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [presencia, ahoraTick]
+  );
 
   // ── Fase 3.17: abrir el chat pedido por el aviso/campanita ──
   useEffect(() => {
@@ -816,6 +857,16 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     try {
       await enviarYapeQRChat(convActiva.tel, convActiva.nombre);
       toast('💰 QR de Yape', 'El bot enviará el QR de tu ruta activa', 'success');
+    } catch (e: any) {
+      toast('Error', e.message || 'No se pudo enviar el QR', 'error');
+    }
+  };
+
+  const enviarPlin = async () => {
+    if (!convActiva || esGrupo) return;
+    try {
+      await enviarPlinQRChat(convActiva.tel, convActiva.nombre);
+      toast('💚 QR de Plin', 'El bot enviará tu QR de Plin con la plantilla (parche extras_chat.js)', 'success');
     } catch (e: any) {
       toast('Error', e.message || 'No se pudo enviar el QR', 'error');
     }
@@ -1128,6 +1179,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const itemsMenu = convActiva && !esGrupo ? [
     { id: 'ubicacion', icono: MapPinned, etiqueta: 'Pedir ubicación', color: 'text-sky-300', accion: () => { setMenuChat(false); pedirUbicacion(); } },
     { id: 'yape', icono: QrCode, etiqueta: 'Enviar QR de Yape', color: 'text-emerald-300', accion: () => { setMenuChat(false); enviarYape(); } },
+    { id: 'plin', icono: QrCode, etiqueta: 'Enviar QR de Plin', color: 'text-cyan-300', accion: () => { setMenuChat(false); enviarPlin(); } },
     {
       id: 'silencio',
       icono: convActiva.silenciado ? BellRing : BellOff,
@@ -1334,8 +1386,21 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                     </span>
                   ) : (
                     <div className="flex items-center gap-2 text-[11px] min-w-0">
-                      <Phone className="w-3 h-3 text-slate-500 flex-shrink-0" />
-                      <span className="text-slate-400 font-mono truncate hidden xs:inline sm:inline">+{telCompleto(convActiva.tel)}</span>
+                      {clienteEscribiendo ? (
+                        <span className="flex items-center gap-1.5 text-emerald-300 font-bold min-w-0" title="El cliente está redactando un mensaje">
+                          <span className="flex items-end gap-[3px] h-3 flex-shrink-0">
+                            <span className="w-[4px] h-[5px] rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
+                            <span className="w-[4px] h-[8px] rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
+                            <span className="w-[4px] h-[5px] rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+                          </span>
+                          <span className="truncate">escribiendo…</span>
+                        </span>
+                      ) : (
+                        <>
+                          <Phone className="w-3 h-3 text-slate-500 flex-shrink-0" />
+                          <span className="text-slate-400 font-mono truncate hidden xs:inline sm:inline">+{telCompleto(convActiva.tel)}</span>
+                        </>
+                      )}
                       {convActiva.silenciado ? (
                         <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold flex-shrink-0">
                           <BellOff className="w-2.5 h-2.5" /> Silenciado
@@ -1365,6 +1430,14 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       onClick={enviarYape}
                       className="p-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors"
                       title="💰 Enviar QR de Yape"
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={enviarPlin}
+                      className="p-2 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 transition-colors"
+                      title="💚 Enviar QR de Plin (fase 3.20 — requiere parche extras_chat.js en el bot)"
                     >
                       <QrCode className="w-4 h-4" />
                     </button>
@@ -1456,6 +1529,15 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       ))}
                     </div>
                   ))
+                )}
+
+                {/* ✍️ Fase 3.20: el cliente está escribiendo (burbujita viva) */}
+                {clienteEscribiendo && !esGrupo && (
+                  <div className="flex items-center gap-1.5 mt-1 px-3 py-2 w-fit rounded-2xl rounded-bl-md bg-slate-800 border border-slate-700 shadow-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+                  </div>
                 )}
               </div>
 
