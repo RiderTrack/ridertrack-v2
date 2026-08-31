@@ -2245,6 +2245,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               <div className="space-y-3">
                                 <div>
                                   <label className="text-[10px] text-slate-400 uppercase font-bold mb-1.5 block">⚡ ESTADO RÁPIDO</label>
+                                  {/* Fase 3.26 — el estado del reporte ya NO toca la ruta:
+                                      solo arma el mensaje. La aclaración va a la vista
+                                      para que nadie espere que el cliente se mueva solo. */}
+                                  <div className="mb-2 -mt-1 px-2 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-[10px] text-sky-300 leading-relaxed">
+                                    ℹ️ El estado que elijas va SOLO en el mensaje para el grupo (para que ventas llame). <b>No cambia el estado del cliente en tu ruta</b> — ese lo marcas tú en Mi ruta.
+                                  </div>
                                   <div className="grid grid-cols-2 gap-1.5">
                                     {estadosModular.map(([id, emoji, label]) => (
                                       <button key={id} onClick={() => setMateEstadoSel(mateEstadoSel === id ? '' : id)} className={`flex items-center gap-1.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 border ${mateEstadoSel === id ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
@@ -2380,11 +2386,25 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     grupoId: GRUPO_MATE_JID,
                                     estado: mateEstadoSel || 'otros',
                                   });
-                                  if (mateEstadoSel) {
-                                    const mapeoEstado: Record<string, string> = { pendiente: 'pendiente', entregado: 'efectivo', fallido: 'fallida', reprogramar: 'pendiente', ausente: 'ausente', rechazo: 'rechazado', no_contesta: 'no-contesta', en_camino: 'pendiente', devolucion: 'cambio', cancelado: 'cancelado' };
-                                    if (mapeoEstado[mateEstadoSel]) { cambiarEstado(c.id, mapeoEstado[mateEstadoSel]); }
-                                  }
+                                  // ═══ FASE 3.26 — REPORTE DESACOPLADO ═══
+                                  // ANTES: al elegir "No contesta/Ausente/etc." en el
+                                  // reporte, el cliente cambiaba de estado solo y se iba
+                                  // al casillero de FALLIDOS → si después contestaba y
+                                  // le entregabas, ya estaba marcado fallido y NO
+                                  // contaba como entregado (conteo corrupto).
+                                  //
+                                  // AHORA: el reporte SOLO avisa al grupo MATE para que
+                                  // los chicos de venta llamen y confirmen. El cliente
+                                  // se queda ACTIVO en la ruta con su estado actual.
+                                  // El único camino a fallidos es la decisión MANUAL
+                                  // del rider en Mi ruta (botones ausente/fallida/etc.).
+                                  // (Se eliminó el mapeoEstado + cambiarEstado de aquí.)
                                   setReporteMateModalId(null);
+                                  onShowToast?.(
+                                    '✅ Reporte enviado',
+                                    'El cliente NO cambió de estado — sigue activo en tu ruta. Si de verdad no se entrega, márcalo tú como fallido en Mi ruta.',
+                                    'success'
+                                  );
                                 }}
                                 disabled={!tieneContenido}
                                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-black transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
