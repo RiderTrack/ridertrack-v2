@@ -1,23 +1,24 @@
 // ═══════════════════════════════════════════════════════════
-// 🎛️ MEDIOS PROVIDER (Fase 3.11)
+// 🎛️ MEDIOS PROVIDER (Fase 3.11 · deeplink a App en F3.28)
 // Estado GLOBAL de radio + Spotify + YouTube, montado en App:
 //   • El <audio> de radio, el player de Spotify y el iframe de
 //     YouTube viven AQUÍ (no en la vista) → la música sigue
 //     sonando al cambiar de pestaña (Mi Ruta, Chat, etc.)
 //   • Solo una fuente suena a la vez: al arrancar una, pausa
 //     las demás (igual que la v1).
-//   • Captura el deep link ridertrack://callback de Spotify
-//     (evento appUrlOpen) y restaura la sesión guardada.
+//   • F3.28: el deep link de Spotify (com.ridertrack.v2://callback
+//     ?code=…) ya NO se captura aquí — este componente se monta
+//     SOLO cuando hay sesión y en el arranque en frío el evento
+//     llegaba antes. Ahora lo captura App.tsx (siempre montado,
+//     login incluido) y el intercambio lo hace el servicio
+//     spotify.ts directamente. Aquí queda la restauración de
+//     sesión y el resto del orquestador.
 // ═══════════════════════════════════════════════════════════
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { Capacitor } from '@capacitor/core';
-import { App as CapApp } from '@capacitor/app';
+import { RadioEngine, RadioEstado, RADIOS } from '../../services/mediosRadio';
 import {
-  RadioEngine, RadioEstado, RADIOS,
-} from '../../services/mediosRadio';
-import {
-  SpotifyEstado, subscribeSpotify, spotifyLogin, spotifyExchangeCode,
+  SpotifyEstado, subscribeSpotify, spotifyLogin,
   spotifyTogglePlay, spotifyNext, spotifyPrev, spotifyVolume, spotifySeek,
   spotifyShuffle, spotifyRepeat, spotifyToggleLike, spotifyLogout,
   spotifyMisPlaylists, SpotifyPlaylist, spotifyTocarPlaylist, spotifyTocarMeGusta,
@@ -100,7 +101,13 @@ export const MediosProvider: React.FC<{
   }, [engine]);
 
   // ── Restaurar sesión de Spotify (token fresco o refresh) ──
+  // F3.28: si el deep link YA intercambió el código (App.tsx lo
+  // hace apenas abre, incluso antes de montar esto), el servicio
+  // ya tiene token en memoria y su SDK ya está conectando → no
+  // volver a arrancarlo (crearPlayer reemplaza al anterior, pero
+  // sería un disconnect/connect innecesario y parpadeos de estado).
   useEffect(() => {
+    if (getAccessToken()) return; // ya conectado por el deep link
     const fresco = tokenGuardadoFresco();
     if (fresco) { iniciarSpotify(fresco); return; }
     if (hayRefreshToken()) {
@@ -126,36 +133,10 @@ export const MediosProvider: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spotify?.listo]);
 
-  // ── Deep link de Spotify (ridertrack://callback?code=…) ──
-  useEffect(() => {
-    let sub: { remove: () => void } | null = null;
-
-    async function registrar() {
-      try {
-        if (!Capacitor.isNativePlatform?.()) return;
-        sub = await CapApp.addListener('appUrlOpen', (data: any) => {
-          try {
-            const url = new URL(data?.url || '');
-            const code = url.searchParams.get('code');
-            const error = url.searchParams.get('error');
-            if (error) {
-              onShowToast?.('⚠️ Spotify', 'No aceptaste el permiso', 'warning');
-              return;
-            }
-            if (code) {
-              spotifyExchangeCode(code).then((ok) => {
-                if (ok) onShowToast?.('🎵 Spotify conectado', 'Elige una playlist y dale play', 'success');
-                else onShowToast?.('⚠️ Spotify', 'No se pudo completar la conexión', 'warning');
-              });
-            }
-          } catch { /* URL rara — ignorar */ }
-        });
-      } catch { /* plugin no disponible en esta plataforma */ }
-    }
-    registrar();
-    return () => { try { sub?.remove?.(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── (F3.28) Deep link de Spotify → capturado en App.tsx ──
+  // Antes vivía aquí: el componente solo se monta con sesión ya
+  // restaurada y en el arranque en frío (Android re-abre la app
+  // al volver de Spotify) el evento se perdía. Ver App.tsx.
 
   // ── Acciones radio ──
   const radioPlay = useCallback((idEstacion: string) => {
