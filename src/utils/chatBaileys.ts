@@ -103,11 +103,10 @@ export interface MensajeChat {
   /** para poder borrar entradas de mensajes_clientes */
   borrableDocId?: string;
   nombre?: string;
-  /** Fase 3.26 — número de quien escribe en el GRUPO MATE,
-   * listo para mostrar: "+51 987 654 321". Solo para mensajes
-   * entrantes del grupo (los normales de 1 a 1 ya son del cliente
-   * de esa conversación, no hace falta). */
-  autorNumero?: string;
+  /** 🆕 F3.23 — @menciones del grupo de WhatsApp: cada una con el jid
+   *  y el nombre bonito (@Lourdes en vez de @51987654321). El parche
+   *  grupo_mate.js v1.1 las guarda en el doc de mensajes_clientes. */
+  menciones?: { jid: string; nombre: string }[];
 }
 
 export interface Conversacion {
@@ -138,51 +137,6 @@ const TIPOS_GRUPO_MATE = [
 
 function esAccionGrupoMate(tipo?: string): boolean {
   return !!tipo && TIPOS_GRUPO_MATE.includes(tipo);
-}
-
-// ═══════════════════════════════════════════════════════════
-// FASE 3.26 — QUIÉN ESCRIBE EN EL GRUPO (nombre + número)
-// ═══════════════════════════════════════════════════════════
-
-/**
- * Convierte el JID del participante que el bot guarda en el doc
- * (`participante`, p.ej. "51987654321@s.whatsapp.net") — o el campo
- * `numero` que guarda el parche v3 — en un texto listo para mostrar
- * junto al nombre: "+51 987 654 321".
- *
- * Casos:
- *  - "51987654321@s.whatsapp.net" → "+51 987 654 321"
- *  - "51987654321"                 → "+51 987 654 321"
- *  - "987654321" (sin 51)          → "+51 987 654 321"
- *  - "...@lid" (número interno de WhatsApp, no es teléfono real)
- *    → "" (mejor no mostrar nada que mostrar un número falso)
- */
-export function formatearAutorGrupo(participante?: unknown, numero?: unknown): string {
-  const crudo = String(numero ?? '').trim() || String(participante ?? '').trim();
-  if (!crudo || crudo.includes('@lid')) return '';
-  const digitos = crudo.replace(/\D/g, '');
-  if (digitos.length < 9) return '';
-  // Peruano: 9 dígitos (a veces llega con el 51 delante)
-  const t9 = digitos.startsWith('51') && digitos.length >= 11 ? digitos.slice(2, 11) : digitos.slice(-9);
-  return `+51 ${t9.slice(0, 3)} ${t9.slice(3, 6)} ${t9.slice(6, 9)}`;
-}
-
-/** Color determinístico para el nombre del autor en el grupo
- * (como WhatsApp: cada compañero tiene "su" color fijo) */
-export function colorAutorGrupo(semilla: string): string {
-  const paleta = [
-    'text-sky-300',
-    'text-amber-300',
-    'text-emerald-300',
-    'text-rose-300',
-    'text-violet-300',
-    'text-cyan-300',
-    'text-orange-300',
-    'text-teal-300',
-  ];
-  let h = 0;
-  for (let i = 0; i < semilla.length; i++) h = (h * 31 + semilla.charCodeAt(i)) >>> 0;
-  return paleta[h % paleta.length];
 }
 
 export interface CampanaBot {
@@ -332,73 +286,6 @@ export function estadoTicks(
  * (Incluye la conversación sintética "Grupo MATE · Trabajo" y las
  * fotos de perfil reales de clientes_registrados.foto_perfil.)
  */
-// ═══════════════════════════════════════════════════════════
-// FASE 3.26 — 🧹 LIMPIAR HISTORIAL DEL CHAT (sin borrar el chat)
-// ═══════════════════════════════════════════════════════════
-// ¿Qué es? Como el "Limpiar chat" de WhatsApp: los mensajes que
-// ya se mostraron se OCULTAN y la pantalla queda limpia, pero la
-// conversación NO se borra — sigue en la lista, abierta, y los
-// mensajes nuevos que lleguen después de la limpieza se ven
-// normal (el corte es por fecha/hora).
-//
-// ¿Por qué LOCAL (localStorage) y no borrando Firestore? Porque
-// acá el requisito es "limpiar la vista sin borrar el chat": no
-// hay que tocar los datos del servidor (los mensajes siguen en
-// mensajes_clientes por si algún día se quieren ver de nuevo),
-// funciona instantáneo incluso sin internet y NO obliga a pedir
-// permisos de borrado nuevos al bot. Si algún día se quiere una
-// limpieza global (que borre de verdad los docs), es otra fase.
-// ───────────────────────────────────────────────────────────
-const KEY_LIMPIEZA_CHAT = 'rt2_chat_limpiado_';
-
-/** Suscripciones vivas — para re-pintar al instante cuando se limpia */
-const _emitersChat = new Set<() => void>();
-
-/** Clave de limpieza de SIEMPRE la misma forma (F3.27 — FIX del grupo):
- *  telKey() se queda "" para 'GRUPO_MATE' (no tiene dígitos) y la 3.26
- *  ESCRIBÍA 'rt2_chat_limpiado_GRUPO_MATE' pero LEÍA
- *  'rt2_chat_limpiado_' + '' → clave distinta → el corte del grupo
- *  jamás se aplicaba: "limpio el grupo y no pasa nada". */
-function claveLimpiezaChat(tel: string): string {
-  const t9 = telKey(tel) || (tel === TEL_GRUPO_MATE ? TEL_GRUPO_MATE : '');
-  return t9 ? KEY_LIMPIEZA_CHAT + t9 : '';
-}
-
-/** Lee la marca de tiempo del último "Limpiar historial" de un chat */
-export function corteLimpiezaChat(tel: string): number {
-  const clave = claveLimpiezaChat(tel);
-  if (!clave) return 0;
-  try {
-    return Number(localStorage.getItem(clave)) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * 🧹 Limpia el historial VISIBLE de una conversación (cualquiera,
- * incluido el grupo MATE). Oculta todo lo anterior a AHORA; el chat
- * queda abierto y los mensajes que lleguen después se ven normal.
- * Devuelve el corte aplicado (timestamp en ms) para poder testearlo.
- */
-export function limpiarHistorialChat(tel: string): number {
-  // F3.27 — misma clave que cortaLimpiezaChat (un solo helper:
-  // escribir y leer NUNCA vuelven a divergir).
-  const clave = claveLimpiezaChat(tel);
-  if (!clave) return 0;
-  const corte = Date.now();
-  try {
-    localStorage.setItem(clave, String(corte));
-  } catch {
-    /* sin espacio — igual re-emitimos para la sesión actual */
-  }
-  // re-pintar TODAS las vistas suscritas AHORA (no esperar un snapshot)
-  _emitersChat.forEach((fn) => {
-    try { fn(); } catch { /* noop */ }
-  });
-  return corte;
-}
-
 export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
   const convs = new Map<string, Conversacion>();
   let silenciados = new Set<string>();
@@ -432,15 +319,7 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     // de mensajes mientras el chat estaba abierto. Ahora cada emisión
     // entrega copias nuevas (la conversación y su array de mensajes):
     // mensajes, ticks ⏳→✓→✓✓→azul y fotos se pintan EN VIVO.
-    //
-    // Fase 3.26 — además, cada copia aplica el CORTE de "Limpiar
-    // historial": si limpiaste un chat, sus mensajes viejos no se
-    // emiten (queda vacío pero vivo; los nuevos pasan igual).
-    const lista = Array.from(convs.values()).map((c) => {
-      const corte = corteLimpiezaChat(c.tel);
-      const mensajes = corte > 0 ? c.mensajes.filter((m) => m.timestamp > corte) : c.mensajes;
-      return { ...c, mensajes };
-    });
+    const lista = Array.from(convs.values()).map((c) => ({ ...c, mensajes: [...c.mensajes] }));
     lista.forEach((c) => {
       c.noLeidos = c.mensajes.filter((m) => m.origen === 'cliente' && !m.leido).length;
       c.mensajes.sort((a, b) => a.timestamp - b.timestamp);
@@ -561,10 +440,10 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
           leido: !!m.leido,
           enviado: null,
           nombre: m.nombre || 'Grupo',
-          // Fase 3.26 — número de quien escribe: el parche del bot
-          // guarda `participante` (JID) desde la 3.9 y `numero` (limpio)
-          // desde la v3. Con cualquiera de los dos se arma el "+51 …".
-          autorNumero: formatearAutorGrupo(m.participante, m.numero),
+          // 🆕 F3.23 — @arrobas del grupo (píldoras azules en el chat)
+          ...(Array.isArray(m.menciones) && m.menciones.length
+            ? { menciones: m.menciones.slice(0, 20).map((x: any) => ({ jid: String(x.jid || ''), nombre: String(x.nombre || '').trim() || 'Miembro' })).filter((x: any) => x.jid) }
+            : {}),
         });
         return;
       }
@@ -851,16 +730,8 @@ export function suscribirChat(callback: ChatDataListener): SuscripcionesChat {
     )
   );
 
-  // Fase 3.26 — registrar el re-pintado de esta suscripción para
-  // que "Limpiar historial" se vea al instante (limpiarHistorialChat
-  // dispara todos los emiters registrados). Se quita en cancelar().
-  _emitersChat.add(emitir);
-
   return {
-    cancelar: () => {
-      _emitersChat.delete(emitir);
-      unsubs.forEach((u) => { try { u(); } catch { /* noop */ } });
-    },
+    cancelar: () => unsubs.forEach((u) => { try { u(); } catch { /* noop */ } }),
   };
 }
 
@@ -1544,6 +1415,8 @@ export interface EstadoGrupo {
   ts?: number;
   version?: string;
   error?: string;
+  /** 🆕 F3.23 — miembros del grupo [{jid, nombre}] para los @arrobas */
+  miembros?: { jid: string; nombre: string }[];
 }
 
 /** El estado se considera vivo si el bot latió hace menos de 15 min */
@@ -1569,6 +1442,12 @@ export function suscribirEstadoGrupo(cb: (e: EstadoGrupo | null) => void): () =>
           ts: Number(d.ts) || 0,
           version: d.version || '',
           error: d.error || '',
+          miembros: Array.isArray(d.miembros)
+            ? d.miembros
+                .filter((x: any) => x && x.jid)
+                .slice(0, 60)
+                .map((x: any) => ({ jid: String(x.jid), nombre: String(x.nombre || '').trim() || 'Miembro' }))
+            : undefined,
         });
       },
       () => cb(null)
@@ -1987,32 +1866,22 @@ export function guardarFondoChat(f: FondoChat): void {
 }
 
 // ═══════════════════════════════════════════════════════════
-// FASE 3.3 — BORRAR CHAT (como WhatsApp) · F3.27 — burbujas del
-// bot incluidas (antes sobrevivían y el chat "no se limpiaba")
+// FASE 3.3 — BORRAR CHAT (como WhatsApp)
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 🗑️ FASE 3.27 — Borra el historial de una conversación (DE VERDAD):
- *  - TODOS los mensajes_clientes del cliente (sus mensajes + espejos)
+ * 🗑️ Borra el historial de una conversación:
+ *  - TODOS los mensajes_clientes del cliente (sus mensajes)
  *  - las respuestas_manuales YA ENVIADAS (las pendientes se
  *    respetan porque el bot todavía las tiene en cola)
- *  - NUEVO: las burbujas de ACCIONES del bot ya procesadas
- *    (acciones_bot: "✅ Aviso de entrega enviado", "📍 Posición
- *    del rider compartida"...). Antes (3.26 y previas) estas
- *    burbujas SOBREVIVÍAN al "Borrar chat" → el chat quedaba
- *    "sucio" con avisos viejos y la conversación no desaparecía
- *    de la lista. Las acciones PENDIENTES (processed=false) NO se
- *    tocan: son la cola del bot y aún deben enviarse.
+ * El chat desaparece de la lista al quedarse sin mensajes.
  */
-export async function borrarChatCompleto(
-  tel: string
-): Promise<{ entrantes: number; salientes: number; acciones: number }> {
+export async function borrarChatCompleto(tel: string): Promise<{ entrantes: number; salientes: number }> {
   const t9 = telKey(tel);
   if (!t9) throw new Error('Número inválido');
   const variantes = telVariants(t9);
   let entrantes = 0;
   let salientes = 0;
-  let acciones = 0;
 
   // 1. Mensajes del cliente
   const snapEntrantes = await getDocs(
@@ -2040,30 +1909,66 @@ export async function borrarChatCompleto(
     salientes = enviadas.length;
   }
 
-  // 3. FASE 3.27 — Acciones del bot YA PROCESADAS para este cliente
-  //    (telefono en variantes: acciones_bot guarda el "51..." completo).
-  //    Las PENDIENTES se quedan — el bot aún las tiene que enviar.
-  //    Query de UN solo campo ('in') → no requiere índice compuesto.
-  try {
-    const snapAcciones = await getDocs(
-      query(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), where('telefono', 'in', variantes))
-    );
-    const procesadas = snapAcciones.docs.filter((d) => d.data()?.processed === true);
-    if (procesadas.length > 0) {
-      for (let i = 0; i < procesadas.length; i += 450) {
-        const batch = writeBatch(db!);
-        procesadas.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
-        await batch.commit();
-      }
-      acciones = procesadas.length;
+  return { entrantes, salientes };
+}
+
+/**
+ * 🗑️ F3.23 — Borra el historial de la conversación del GRUPO MATE:
+ *  - TODOS los mensajes_clientes del grupo (los que escribió la gente:
+ *    telefono='GRUPO_MATE' o esGrupo=true)
+ *  - los REPORTES ya hechos del bot (acciones_bot pendientes con tipo
+ *    de grupo y processed=true — el historial). Los reportes que el
+ *    bot todavía tiene en cola NO se tocan.
+ * Antes el menú del grupo ni siquiera tenía la opción "Borrar chat"
+ * → "quise limpiar el del grupo pero nada".
+ */
+export async function borrarChatGrupo(): Promise<{ entrantes: number; reportes: number }> {
+  if (!db) throw new Error('Sin conexión a la base de datos');
+
+  let entrantes = 0;
+  let reportes = 0;
+
+  // 1. Mensajes recibidos del grupo (dos formas de identificarlos:
+  //    telefono='GRUPO_MATE' o esGrupo=true → DOS consultas)
+  const snaps = await Promise.all([
+    getDocs(query(collection(db, 'mensajes_clientes'), where('telefono', '==', TEL_GRUPO_MATE))).catch(() => null),
+    getDocs(query(collection(db, 'mensajes_clientes'), where('esGrupo', '==', true))).catch(() => null),
+  ]);
+  const idsVistos = new Set<string>();
+  for (const snap of snaps) {
+    if (!snap) continue;
+    for (const d of snap.docs) {
+      if (idsVistos.has(d.id)) continue; // puede estar en ambas consultas
+      idsVistos.add(d.id);
     }
-  } catch (e) {
-    // Si la subcolección no existe o la regla lo impide, el borrado
-    // del chat NO falla por esto — seguimos con lo que ya se borró.
-    console.warn('⚠️ borrarChatCompleto: acciones_bot no se pudo limpiar:', e);
+  }
+  entrantes = idsVistos.size;
+  const ids = [...idsVistos];
+  for (let i = 0; i < ids.length; i += 450) {
+    if (!ids.length) break;
+    const batch = writeBatch(db);
+    ids.slice(i, i + 450).forEach((id) => batch.delete(doc(db, 'mensajes_clientes', id)));
+    await batch.commit();
   }
 
-  return { entrantes, salientes, acciones };
+  // 2. Reportes del bot al grupo YA hechos (processed=true)
+  const snapAcc = await getDocs(
+    collection(db, 'acciones_bot', UID_BOT, 'pendientes')
+  ).catch(() => null);
+  if (snapAcc && !snapAcc.empty) {
+    const aBorrar = snapAcc.docs.filter((d) => {
+      const m = d.data() || {};
+      return TIPOS_GRUPO_MATE.includes(String(m.tipo || '')) && m.processed === true;
+    });
+    reportes = aBorrar.length;
+    for (let i = 0; i < aBorrar.length; i += 450) {
+      const batch = writeBatch(db);
+      aBorrar.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+
+  return { entrantes, reportes };
 }
 
 // ─────────────────────────────────────────────────────────────
