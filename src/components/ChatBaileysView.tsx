@@ -2414,9 +2414,9 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   <Users className="w-8 h-8 text-slate-600 mx-auto" />
                   <p className="text-[11px] text-slate-400 leading-relaxed">
                     Aún no tengo la lista de miembros del grupo.<br />
-                    El bot la arma con el parche <b className="text-slate-300">grupo_mate.js v1.1</b> a medida
-                    que la gente escribe (y con los participantes del grupo). Mientras tanto puedes
-                    escribir el <b className="text-slate-300">@nombre</b> a mano — el bot lo convierte igual.
+                    Llega solita con el <b className="text-slate-300">grupo_mate.js v1.3</b> (fase 3.32)
+                    a los 5 min de reiniciar el bot + tener las <b className="text-slate-300">reglas Firestore 3.32</b> subidas.
+                    Mientras tanto puedes escribir el <b className="text-slate-300">@nombre</b> a mano — el bot lo convierte igual.
                   </p>
                 </div>
               ) : (
@@ -2429,11 +2429,15 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       onClick={() => insertarArroba(x.nombre)}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 text-left transition-colors"
                     >
-                      <span className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center text-xs font-black flex-shrink-0">
+                      <span className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 border ${x.admin ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'}`}>
                         {x.nombre.slice(0, 2).toUpperCase()}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-xs font-bold text-white truncate">{x.nombre}</span>
+                        <span className="block text-xs font-bold text-white truncate">
+                          {x.admin && <span title="Admin del grupo" className="text-amber-300 mr-0.5">👑</span>}
+                          {x.nombre}
+                          {x.admin && <span className="ml-1 text-[9px] text-amber-400/80 font-black">ADMIN</span>}
+                        </span>
                         <span className="block text-[10px] text-slate-500 truncate">{'@' + x.jid.split('@')[0]}</span>
                       </span>
                       <AtSign className="w-3.5 h-3.5 text-slate-600 shrink-0" />

@@ -523,13 +523,13 @@ const TabSpotify: React.FC = () => {
             onChange={(e) => { const v = parseInt(e.target.value); setVolumenSp(v); m.spotifySetVolumen(v); }}
             className="w-full accent-emerald-500"
           />
-          {/* 🧪 F3.31 — simular llamada: reproduce lo que hace una llamada
+          {/* 🧪 F3.31/F3.32 — simular llamada: reproduce lo que hace una llamada
               real (mata la conexión del player en silencio) para PROBAR que
-              el anti-cuelgue F3.29 revive todo solo. No afecta a la sesión. */}
+              el anti-cuelgue revive todo solo. F3.32: ya no se deshabilita —
+              si una reconexión quedó atascada (>25s), el propio 🧪 la libera. */}
           <button
             onClick={simularLlamada}
-            disabled={spotify.estado === 'reconectando'}
-            className="w-8 h-8 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0 disabled:opacity-50"
+            className="w-8 h-8 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0 disabled:opacity-50 active:scale-90 transition-all"
             title="Simular llamada — prueba que el reproductor se revive solo (sin llamar de verdad)"
             aria-label="Simular llamada"
             data-testid="boton-simular-llamada"
