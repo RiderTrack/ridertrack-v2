@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // 🎵 MEDIOS — SPOTIFY (Fase 3.11 · redirect F3.23 · deeplink F3.28
-//                           · anti-cuelgue F3.29)
+//                           · anti-cuelgue F3.29 · 🧪 simulación F3.31)
 // Port fiel de la v1 (main.js L4199-4700) a TypeScript:
 //   • OAuth Authorization Code + PKCE (mismo client_id de la v1)
 //   • F3.23 FIX: en la APK la v2 ya NO usa ridertrack://callback —
@@ -409,6 +409,60 @@ async function _chequearSalud(): Promise<boolean> {
  *  si sonaba. Exportado para poder dispararlo a mano. */
 export async function spotifyReconectarPlayer(motivo = 'manual'): Promise<boolean> {
   return _reconectarPlayer(motivo);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 🧪 F3.31 — SIMULAR LLAMADA (el botón de prueba pedido)
+// ─────────────────────────────────────────────────────────────
+/** Resultado del botón 🧪 de Medios → Spotify */
+export interface ResultadoSimulacion {
+  ok: boolean;
+  msg: string;
+}
+
+/**
+ * 🧪 F3.31 — Simula lo que hace una llamada REAL sin llamarse por
+ * teléfono: Android le quita el audio al WebView y el WebSocket del
+ * SDK se cae EN SILENCIO (la app sigue creyendo que el player vive).
+ *
+ * Aquí reproducimos exactamente ese guion:
+ *   1) Se "corta la llamada": se suelta la conexión del player por
+ *      debajo, sin avisar a nada más (igual que el OS).
+ *   2) El síntoma llega solo: el dispositivo deja de estar listo
+ *      (si el SDK emite su not_ready, su handler REPROGRAMA este
+ *      mismo timer — no hay doble reconexión).
+ *   3) A los 3s el motor anti-cuelgue F3.29 hace su trabajo de
+ *      verdad: player nuevo + la música vuelve donde estaba.
+ *
+ * Así se prueba TODO el pipeline (not_ready → reconectar → reanudar)
+ * sin gastar una llamada de verdad. El watchdog de 20s queda de
+ * respaldo: si ni el not_ready ni este timer revivieran al player,
+ * el latido lo detecta igual (2 ausencias → reconecta).
+ */
+export function spotifySimularLlamada(): ResultadoSimulacion {
+  if (!_accessToken) return { ok: false, msg: 'Conecta Spotify primero' };
+  if (!_deviceId || !_player) return { ok: false, msg: 'Espera al 🟢 Listo antes de simular' };
+  if (_reconectando) return { ok: false, msg: '📞 Ya se está reconectando — deja que termine' };
+
+  const sonaba =
+    !!_contexto?.reproduciendo && Date.now() - (_contexto?.momento || 0) < REANUDAR_MAX_MS;
+
+  // 1) 📞 la llamada "se lleva" la conexión — la app no se entera
+  try { _player.disconnect(); } catch { /* ya estaba muerto */ }
+
+  // 2) síntoma: el dispositivo dejó de estar listo
+  if (_timerNotReady) clearTimeout(_timerNotReady);
+  emitir({ listo: false, mensaje: '🧪 Llamada simulada — probando el anti-cuelgue…' });
+  _timerNotReady = setTimeout(() => {
+    if (!_estado.listo) void _reconectarPlayer('simulacion-llamada');
+  }, 3_000);
+
+  return {
+    ok: true,
+    msg: sonaba
+      ? '📞 Llamada simulada — la música debe volver sola en 2-4 s'
+      : '📞 Llamada simulada — el reproductor debe revivir solo (no sonaba nada)',
+  };
 }
 async function _reconectarPlayer(motivo: string): Promise<boolean> {
   if (_reconectando) return false;
