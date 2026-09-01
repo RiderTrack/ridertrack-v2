@@ -12,38 +12,6 @@
 //   - cola_envio/campanas  → los broadcasts masivos 📢
 //                            (+ notas de voz 🎙️ Fase 3.3)
 //
-// FASE 3.27 — FIX "NO SE LIMPIA EL CHAT" (reporte probando la 3.26):
-//   ✅ LIMPIAR EL GRUPO MATE YA FUNCIONA — bug de la 3.26: al limpiar
-//      el grupo se GUARDABA la marca con la clave correcta
-//      (rt2_chat_limpiado_GRUPO_MATE) pero al LEERLA se pasaba por
-//      telKey() → "GRUPO_MATE" se quedaba "" → leía otra clave que
-//      jamás se escribió → el corte NUNCA se aplicaba ("limpio el
-//      grupo y no pasa nada"). Ahora escribir y leer usan el MISMO
-//      helper claveLimpiezaChat() — imposible que vuelvan a divergir.
-//   ✅ BORRAR CHAT BORRA DE VERDAD — antes las burbujas de ACCIONES
-//      del bot (✅ Aviso de entrega enviado, 📍 Posición del rider...)
-//      sobrevivían al "Borrar chat" (viven en acciones_bot, que no
-//      se tocaba) → el chat quedaba sucio con avisos viejos y la
-//      conversación no desaparecía de la lista. Ahora se borran las
-//      acciones YA PROCESADAS; las PENDIENTES se respetan (siguen
-//      en la cola del bot y se enviarán normal).
-//
-// FASE 3.26:
-//   ✅ NOMBRE + NÚMERO DE QUIEN ESCRIBE EN EL GRUPO MATE — cada
-//      burbuja entrante del grupo muestra "Carlos Venta · +51 987
-//      654 321" con color fijo por compañero (como WhatsApp). El
-//      número sale del campo `participante`/`numero` que guarda el
-//      parche grupo_mate.js del bot (desde v3 siempre limpio).
-//      La lista también muestra "Carlos: mensaje...".
-//   ✅ LIMPIAR HISTORIAL DEL CHAT — como WhatsApp: los mensajes
-//      viejos se ocultan, el chat QUEDA ABIERTO y los nuevos siguen
-//      llegando. Local (solo tu vista, no borra nada del servidor).
-//      Funciona para clientes y para el grupo MATE.
-//   ✅ SELECCIÓN MÚLTIPLE DE CHATS — modo selección con casillas:
-//      borrar varios chats de una vez (uno por uno o "Seleccionar
-//      todos"), con confirmación. El grupo MATE no se puede borrar
-//      (es el chat de trabajo fijado) pero sí se puede limpiar.
-//
 // FASE 3.22:
 //   ✅ FICHA DEL CLIENTE EN EL CHAT — sin salir de la conversación ves
 //      la posición del cliente en la ruta de hoy (3/12), su dirección,
@@ -78,7 +46,7 @@
 //   ✅ cabecera responsive (menú ⋮ — ya no se montan los botones)
 // ═══════════════════════════════════════════════════════════
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search,
   Send,
@@ -109,6 +77,7 @@ import {
   Pin,
   Palette,
   Users,
+  AtSign,
   Sparkles,
   Check,
   ChevronDown,
@@ -117,9 +86,6 @@ import {
   Package,
   Wallet,
   Navigation,
-  Type,
-  Eraser,
-  CheckSquare,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -172,13 +138,11 @@ import {
   guardarFondoChat,
   FondoChat,
   borrarChatCompleto,
+  borrarChatGrupo,
   estadoTicks,
   suscribirRutaClientes,
   InfoClienteRuta,
   stColorRuta,
-  limpiarHistorialChat,
-  corteLimpiezaChat,
-  colorAutorGrupo,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
 import {
@@ -225,7 +189,7 @@ const AvatarChat: React.FC<{
       <div
         className={`${grande ? 'w-11 h-11' : 'w-10 h-10'} rounded-full flex items-center justify-center flex-shrink-0 shadow-inner select-none bg-gradient-to-br from-emerald-500 to-teal-600 border border-emerald-400/40`}
       >
-        <Users className={`${grande ? 'w-5 h-5' : 'w-4.5 h-4.5'} text-white siempre-blanco`} />
+        <Users className={`${grande ? 'w-5 h-5' : 'w-4.5 h-4.5'} text-white`} />
       </div>
     );
   }
@@ -337,47 +301,93 @@ interface BurbujaProps {
   onRevelar: () => void;
   onVerImagen: (m: MensajeChat) => void;
   onEliminar?: () => void;
-  /** Fase 3.26 — en el GRUPO MATE: muestra quién escribe (nombre +
-   *  número, con color fijo por compañero) sobre cada burbuja */
-  mostrarAutor?: boolean;
 }
 
+/**
+ * 🆕 F3.23 — @ARROBAS del grupo: pinta el texto reemplazando los
+ * "@51987654321" crudos de WhatsApp por píldoras bonitas con el
+ * nombre ("@Lourdes"), igual que se ven en WhatsApp.
+ */
+const TextoConMenciones: React.FC<{ texto: string; menciones?: { jid: string; nombre: string }[] }> = ({ texto, menciones }) => {
+  if (!texto) return null;
+  if (!menciones || !menciones.length) {
+    return <span className="text-sm whitespace-pre-wrap break-words">{texto}</span>;
+  }
+  // construir los reemplazos: "@<número>" → píldora "@<nombre>"
+  const reemplazos = menciones
+    .map((men) => {
+      const numero = String(men.jid || '').split('@')[0].replace(/\D/g, '');
+      if (!numero) return null;
+      return { buscar: '@' + numero, nombre: men.nombre || 'Miembro' };
+    })
+    .filter(Boolean) as { buscar: string; nombre: string }[];
+
+  if (!reemplazos.length) {
+    return <span className="text-sm whitespace-pre-wrap break-words">{texto}</span>;
+  }
+
+  // partir el texto por la primera mención que aparezca, en orden
+  const partes: React.ReactNode[] = [];
+  let resto = texto;
+  let clave = 0;
+  while (resto && reemplazos.length) {
+    // la mención más temprana en el texto
+    let mejor: { idx: number; rep: { buscar: string; nombre: string } } | null = null;
+    for (const rep of reemplazos) {
+      const idx = resto.indexOf(rep.buscar);
+      if (idx >= 0 && (!mejor || idx < mejor.idx)) mejor = { idx, rep };
+    }
+    if (!mejor) break;
+    if (mejor.idx > 0) partes.push(<span key={clave++}>{resto.slice(0, mejor.idx)}</span>);
+    partes.push(
+      <span
+        key={clave++}
+        className="text-emerald-300 bg-emerald-400/10 rounded px-1 font-semibold"
+        title={mejor.rep.buscar}
+      >
+        @{mejor.rep.nombre}
+      </span>
+    );
+    resto = resto.slice(mejor.idx + mejor.rep.buscar.length);
+  }
+  if (resto) partes.push(<span key={clave++}>{resto}</span>);
+
+  return <span className="text-sm whitespace-pre-wrap break-words">{partes}</span>;
+};
+
+/** 🆕 F3.23 — color del nombre de quien escribe en el grupo (como WhatsApp) */
+const colorNombreGrupo = (nombre: string): string => {
+  const paleta = ['text-emerald-300', 'text-sky-300', 'text-violet-300', 'text-amber-300', 'text-rose-300', 'text-teal-300', 'text-orange-300'];
+  let h = 0;
+  for (let i = 0; i < nombre.length; i++) h = (h * 31 + nombre.charCodeAt(i)) >>> 0;
+  return paleta[h % paleta.length];
+};
+
 /** Burbuja individual de mensaje */
-const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRevelar, onVerImagen, onEliminar, mostrarAutor }) => {
+const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRevelar, onVerImagen, onEliminar }) => {
   const esEntrante = m.origen === 'cliente';
   const esBot = m.origen === 'bot';
   const esAuto = m.origen === 'rudyAuto';
   const esCampana = m.origen === 'campana';
 
   const burbujaBase = esEntrante
-    ? 'rt-burbuja rt-burbuja-entrante bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
+    ? 'bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl rounded-tl-md'
     : esBot
-      ? 'rt-burbuja rt-burbuja-saliente bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
+      ? 'bg-emerald-800/90 border border-emerald-600/40 text-white rounded-2xl rounded-tr-md'
       : esAuto
-        ? 'rt-burbuja rt-burbuja-saliente bg-emerald-700/80 border border-emerald-500/30 text-white rounded-2xl rounded-tr-md'
+        ? 'bg-emerald-700/80 border border-emerald-500/30 text-white rounded-2xl rounded-tr-md'
         : esCampana
-          ? 'rt-burbuja rt-burbuja-saliente bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
-          : 'rt-burbuja rt-burbuja-saliente bg-emerald-600 text-white rounded-2xl rounded-tr-md';
+          ? 'bg-teal-900/80 border border-teal-600/40 text-white rounded-2xl rounded-tr-md'
+          : 'bg-emerald-600 text-white rounded-2xl rounded-tr-md';
 
   const esAudio = m.tipoContenido === 'audio' && (m.base64 || m.audioUrl);
 
   return (
     <div className={`flex ${esEntrante ? 'justify-start' : 'justify-end'} mb-2 group`}>
       <div className={`relative max-w-[85%] sm:max-w-[70%] px-3 py-2 shadow-lg ${burbujaBase}`}>
-        {/* Fase 3.26 — QUIÉN ESCRIBE en el grupo: nombre + número
-            (como WhatsApp: color fijo por compañero). Solo en las
-            burbujas ENTRANTES del grupo — las tuyas ya se saben. */}
-        {mostrarAutor && esEntrante && (m.nombre || m.autorNumero) && (
-          <div className="flex items-baseline gap-1.5 mb-1 px-1">
-            <span className={`text-[11px] font-black truncate ${colorAutorGrupo(String(m.nombre || m.autorNumero || ''))}`}>
-              {m.nombre || 'Compañero'}
-            </span>
-            {m.autorNumero && (
-              <span className="text-[9px] font-mono font-semibold text-slate-400 flex-shrink-0">
-                · {m.autorNumero}
-              </span>
-            )}
-          </div>
+        {/* 🆕 F3.23 — quién escribió en el grupo (etiqueta de color, como WhatsApp) */}
+        {esEntrante && m.tel === TEL_GRUPO_MATE && m.nombre && (
+          <div className={`mb-0.5 text-[11px] font-bold ${colorNombreGrupo(m.nombre)}`}>{m.nombre}</div>
         )}
         {/* Etiqueta de origen para salientes especiales */}
         {esBot && (
@@ -454,7 +464,7 @@ const BurbujaMensaje: React.FC<BurbujaProps> = ({ m, desconocido, revelado, onRe
             </div>
           </div>
         ) : (
-          <span className="text-sm whitespace-pre-wrap break-words">{m.texto}</span>
+          <TextoConMenciones texto={m.texto} menciones={m.menciones} />
         )}
 
         {/* Meta: hora + ticks */}
@@ -585,13 +595,7 @@ const ItemConversacion: React.FC<{
   /** Fase 3.22 — insignia viva de la ruta (posición · monto) */
   infoRuta?: InfoClienteRuta;
   onAbrir: () => void;
-  /** Fase 3.26 — modo selección: la fila marca/desmarca en vez de
-   *  abrir, y muestra la casilla al lado del avatar. El grupo MATE
-   *  nunca es seleccionable (se limpia, no se borra). */
-  modoSeleccion?: boolean;
-  seleccionado?: boolean;
-  onAlternar?: () => void;
-}> = ({ conv, activo, fijado, infoRuta, onAbrir, modoSeleccion, seleccionado, onAlternar }) => {
+}> = ({ conv, activo, fijado, infoRuta, onAbrir }) => {
   const ultimo = conv.ultimoMensaje;
   const prefijo = !ultimo
     ? ''
@@ -601,11 +605,7 @@ const ItemConversacion: React.FC<{
         ? '🤖 '
         : ultimo.origen === 'campana'
           ? '📢 '
-          : conv.esGrupo && ultimo.nombre
-            // Fase 3.26 — en el grupo, el entrante lleva el nombre de
-            // quien escribió (como WhatsApp: "Carlos: ya llamé…")
-            ? `${ultimo.nombre}: `
-            : '';
+          : '';
   const preview =
     !ultimo
       ? conv.esGrupo
@@ -628,26 +628,11 @@ const ItemConversacion: React.FC<{
   return (
     <button
       type="button"
-      onClick={modoSeleccion && onAlternar ? onAlternar : onAbrir}
-      disabled={modoSeleccion && !onAlternar}
+      onClick={onAbrir}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
-        modoSeleccion && seleccionado
-          ? 'bg-rose-500/15 border border-rose-500/50'
-          : activo
-            ? 'bg-emerald-600/15 border border-emerald-500/40'
-            : 'border border-transparent hover:bg-slate-800/60'
-      } ${modoSeleccion && !onAlternar ? 'opacity-40 cursor-not-allowed' : ''}`}
+        activo ? 'bg-emerald-600/15 border border-emerald-500/40' : 'border border-transparent hover:bg-slate-800/60'
+      }`}
     >
-      {/* Fase 3.26 — casilla de selección (a la izquierda del avatar) */}
-      {modoSeleccion && (
-        <span
-          className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-            seleccionado ? 'bg-rose-500 border-rose-500' : 'border-slate-500 bg-slate-900/60'
-          }`}
-        >
-          {seleccionado && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-        </span>
-      )}
       <div className="relative flex-shrink-0">
         <AvatarChat tel={conv.tel} nombre={conv.nombre} foto={conv.foto} grupo={conv.esGrupo} />
         {conv.noLeidos > 0 && (
@@ -814,36 +799,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [rapidoPosicion, setRapidoPosicion] = useState(3); // posición editable (Fase 3.7)
   // Fase 3.9 — estado del grupo MATE (heartbeat del parche del bot)
   const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
+  // 🆕 F3.23 — picker de @menciones del grupo (botón @ en el input)
+  const [pickerArroba, setPickerArroba] = useState(false);
+  const [buscaMiembro, setBuscaMiembro] = useState('');
   // Fase 3.20 — presencia «escribiendo…» del cliente del chat abierto
   const [presencia, setPresencia] = useState<PresenciaChat | null>(null);
   // Fase 3.22 — ficha viva de la ruta: t9 → posición/dirección/producto/monto
   const [mapaRuta, setMapaRuta] = useState<Map<string, InfoClienteRuta>>(new Map());
-  // Fase 3.25 — color de fuente del chat: 'auto' (sigue el tema) /
-  // 'blanca' (letras blancas, burbujas oscuras) / 'tinta' (letras
-  // oscuras, burbujas claras). Se recuerda entre sesiones.
-  const [fuenteChat, setFuenteChat] = useState<'auto' | 'blanca' | 'tinta'>(() => {
-    try {
-      const g = localStorage.getItem('rt_chat_fuente');
-      return g === 'blanca' || g === 'tinta' ? g : 'auto';
-    } catch { return 'auto'; }
-  });
-  const [menuFuente, setMenuFuente] = useState(false); // popover del selector
-  const menuFuenteRef = useRef<HTMLDivElement>(null);
-
-  const cambiarFuente = useCallback((f: 'auto' | 'blanca' | 'tinta') => {
-    setFuenteChat(f);
-    setMenuFuente(false);
-    try { localStorage.setItem('rt_chat_fuente', f); } catch { /* sin storage */ }
-  }, []);
-
-  // ═══ FASE 3.26 — estados de 🧹 limpiar historial y 🗑️ selección
-  // múltiple (los handlers viven más abajo, junto al resto de
-  // acciones, porque usan convActiva/toast que se declaran ahí)
-  const [confirmLimpiar, setConfirmLimpiar] = useState(false);
-  const [modoSeleccion, setModoSeleccion] = useState(false);
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
-  const [confirmBorrarSeleccion, setConfirmBorrarSeleccion] = useState(false);
-  const [borrandoSeleccion, setBorrandoSeleccion] = useState(false);
 
   // ── Grabación de nota de voz ──
   const [grabando, setGrabando] = useState(false);
@@ -936,12 +898,11 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     onActiveChatChange?.(telActivo);
   }, [telActivo, onActiveChatChange]);
 
-  // ── Cerrar el menú ⋮ y el selector de fuente al hacer clic fuera ──
+  // ── Cerrar el menú ⋮ al hacer clic fuera ──
   useEffect(() => {
-    if (!menuChat && !menuFuente) return;
+    if (!menuChat) return;
     const cerrar = (ev: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(ev.target as Node)) setMenuChat(false);
-      if (menuFuenteRef.current && !menuFuenteRef.current.contains(ev.target as Node)) setMenuFuente(false);
     };
     document.addEventListener('mousedown', cerrar);
     document.addEventListener('touchstart', cerrar);
@@ -1013,12 +974,19 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   // ── Auto-scroll al último mensaje (Fase 3.18: inteligente) ──
   // Solo baja solo si estabas cerca del final (como WhatsApp): si
   // subiste a leer historial, un mensaje nuevo NO te salta el scroll.
+  // 🆕 F3.23: al CAMBIAR de chat baja siempre — antes, si la
+  // conversación ya tenía mensajes, el efecto veía "estás arriba"
+  // y no bajaba: abrías un chat y te mostraba el INICIO del
+  // historial en vez de lo último (bug).
+  const telAnteriorRef = useRef<string | null>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const cambioDeChat = telAnteriorRef.current !== telActivo;
+    telAnteriorRef.current = telActivo;
     const cercaDelFinal = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
     // Al cambiar de chat sí baja siempre (empiezas en lo último)
-    if (cercaDelFinal || mensajesConv.length === 0) el.scrollTop = el.scrollHeight;
+    if (cambioDeChat || cercaDelFinal || mensajesConv.length === 0) el.scrollTop = el.scrollHeight;
   }, [mensajesConv.length, telActivo]);
 
   // ── Mapa campaign_id → nombre ──
@@ -1067,76 +1035,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
 
   const esGrupo = !!convActiva?.esGrupo;
 
-  // ═══ FASE 3.26 — ACCIONES: 🧹 limpiar historial + 🗑️ selección ═══
-  const salirModoSeleccion = useCallback(() => {
-    setModoSeleccion(false);
-    setSeleccionados(new Set());
-    setConfirmBorrarSeleccion(false);
-  }, []);
-
-  const alternarSeleccion = useCallback((tel: string) => {
-    setSeleccionados((prev) => {
-      const nuevo = new Set(prev);
-      if (nuevo.has(tel)) nuevo.delete(tel);
-      else nuevo.add(tel);
-      return nuevo;
-    });
-  }, []);
-
-  /** Chats borrables (el grupo MATE NO entra: es el chat de trabajo
-   *  fijado — su historial se LIMPIA desde su propio menú, no se borra) */
-  const chatsBorrables = useMemo(
-    () => conversaciones.filter((c) => !c.esGrupo),
-    [conversaciones]
-  );
-
-  const seleccionarTodos = useCallback(() => {
-    // si ya están todos → quitar la selección completa (como WhatsApp)
-    const todosMarcados = chatsBorrables.length > 0 && chatsBorrables.every((c) => seleccionados.has(c.tel));
-    setSeleccionados(todosMarcados ? new Set() : new Set(chatsBorrables.map((c) => c.tel)));
-  }, [chatsBorrables, seleccionados]);
-
-  const limpiarHistorial = useCallback(() => {
-    if (!convActiva) return;
-    limpiarHistorialChat(convActiva.tel);
-    setConfirmLimpiar(false);
-    setMenuChat(false);
-    toast(
-      '🧹 Historial limpio',
-      convActiva.esGrupo
-        ? 'El grupo quedó limpio y sigue recibiendo mensajes — sin borrar el chat'
-        : `El chat de ${convActiva.nombre} quedó limpio y sigue abierto — los mensajes nuevos se ven normal`,
-      'success'
-    );
-  }, [convActiva, toast]);
-
-  const borrarSeleccionados = async () => {
-    const tels: string[] = Array.from(seleccionados.values());
-    if (tels.length === 0) return;
-    setBorrandoSeleccion(true);
-    let ok = 0;
-    let fallos = 0;
-    let totalMensajes = 0;
-    for (const tel of tels) {
-      try {
-        const res = await borrarChatCompleto(tel);
-        ok++;
-        // F3.27 — incluye las burbujas de acciones del bot borradas
-        totalMensajes += res.entrantes + res.salientes + (res.acciones || 0);
-      } catch {
-        fallos++;
-      }
-    }
-    setBorrandoSeleccion(false);
-    if (ok > 0 && telActivo && seleccionados.has(telActivo)) setTelActivo(null);
-    salirModoSeleccion();
-    toast(
-      fallos === 0 ? '🗑️ Chats borrados' : '⚠️ Borrado parcial',
-      fallos === 0
-        ? `${ok} chat${ok === 1 ? '' : 's'} eliminado${ok === 1 ? '' : 's'} · ${totalMensajes} mensajes en total`
-        : `${ok} borrados, ${fallos} fallaron (revisa tu conexión)`,
-      fallos === 0 ? 'success' : 'warning'
-    );
+  /** 🆕 F3.23 — insertar una @mención del grupo en el mensaje */
+  const insertarArroba = (nombre: string) => {
+    const bonito = nombre.replace(/\s+/g, ' ').trim();
+    if (!bonito) return;
+    setTexto((t) => (t ? (t.endsWith(' ') ? t : t + ' ') : '') + '@' + bonito + ' ');
+    setPickerArroba(false);
+    setBuscaMiembro('');
   };
 
   const enviar = async () => {
@@ -1232,18 +1137,18 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   };
 
   const borrarChat = async () => {
-    if (!convActiva || esGrupo) return;
+    if (!convActiva) return;
     setBorrando(true);
     try {
-      const res = await borrarChatCompleto(convActiva.tel);
-      // F3.27 — ahora el conteo incluye las burbujas de acciones del
-      // bot (avisos de entrega, posición, QR...) que antes sobrevivían
-      const total = res.entrantes + res.salientes + (res.acciones || 0);
-      toast(
-        '🗑️ Chat borrado',
-        `${total} mensajes eliminados — la conversación desapareció de la lista`,
-        'success'
-      );
+      if (esGrupo) {
+        // 🗑️ F3.23 — borrar el historial del GRUPO (antes no existía la
+        // opción y "quise limpiar el del grupo pero nada")
+        const res = await borrarChatGrupo();
+        toast('🗑️ Grupo limpiado', `${res.entrantes + res.reportes} mensajes eliminados del grupo MATE — la conversación sigue en la lista`, 'success');
+      } else {
+        const res = await borrarChatCompleto(convActiva.tel);
+        toast('🗑️ Chat borrado', `${res.entrantes + res.salientes} mensajes eliminados — la conversación desapareció de la lista`, 'success');
+      }
       setTelActivo(null);
       setConfirmBorrar(false);
     } catch (e: any) {
@@ -1528,15 +1433,12 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     },
     { id: 'fijar', icono: Pin, etiqueta: fijados.has(convActiva.tel) ? 'Quitar de fijados' : 'Fijar chat', color: 'text-slate-200', accion: alternarFijado },
     { id: 'fondo', icono: Palette, etiqueta: 'Fondo del chat', color: 'text-violet-300', accion: () => { setMenuChat(false); setPanelFondo(true); } },
-    // Fase 3.26 — limpiar los mensajes visibles SIN borrar el chat
-    { id: 'limpiar', icono: Eraser, etiqueta: 'Limpiar historial', color: 'text-cyan-300', accion: () => { setMenuChat(false); setConfirmLimpiar(true); } },
     { id: 'borrar', icono: Trash2, etiqueta: 'Borrar chat', color: 'text-rose-400', accion: () => { setMenuChat(false); setConfirmBorrar(true); } },
   ] : [
     { id: 'fijar', icono: Pin, etiqueta: fijados.has(TEL_GRUPO_MATE) ? 'Quitar de fijados' : 'Fijar chat', color: 'text-slate-200', accion: alternarFijado },
     { id: 'fondo', icono: Palette, etiqueta: 'Fondo del chat', color: 'text-violet-300', accion: () => { setMenuChat(false); setPanelFondo(true); } },
-    // Fase 3.26 — el grupo también se puede limpiar (sin borrarse:
-    // queda arriba, en cero, y los mensajes nuevos siguen llegando)
-    { id: 'limpiar', icono: Eraser, etiqueta: 'Limpiar historial', color: 'text-cyan-300', accion: () => { setMenuChat(false); setConfirmLimpiar(true); } },
+    // 🗑️ F3.23 — "Limpiar chat" del grupo (antes no existía)
+    { id: 'borrar', icono: Trash2, etiqueta: 'Borrar chat', color: 'text-rose-400', accion: () => { setMenuChat(false); setConfirmBorrar(true); } },
   ];
 
   return (
@@ -1575,46 +1477,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
       <div className="flex flex-1 gap-3 min-h-0">
         {/* ─── PANEL IZQUIERDO ─── */}
         <div className={`${telActivo ? 'hidden lg:flex' : 'flex'} flex-col w-full lg:w-[350px] xl:w-[380px] flex-shrink-0 rounded-2xl bg-slate-800 border border-slate-700 shadow-xl overflow-hidden`}>
-          {/* Tabs chats/campañas · Fase 3.26: en modo selección se
-              reemplazan por la barra de selección (como WhatsApp) */}
-          {modoSeleccion ? (
-            <div className="p-2 border-b border-slate-700/70 flex-shrink-0 space-y-1.5 bg-rose-500/5">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={salirModoSeleccion}
-                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/60 transition-all"
-                  title="Cancelar selección"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <span className="text-xs font-black text-white tabular-nums">
-                  {seleccionados.size} seleccionado{seleccionados.size === 1 ? '' : 's'}
-                </span>
-                <button
-                  type="button"
-                  onClick={seleccionarTodos}
-                  disabled={chatsBorrables.length === 0}
-                  className="ml-auto px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-slate-900/60 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all disabled:opacity-40"
-                >
-                  {chatsBorrables.length > 0 && chatsBorrables.every((c) => seleccionados.has(c.tel))
-                    ? 'Quitar selección'
-                    : 'Seleccionar todos'}
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setConfirmBorrarSeleccion(true)}
-                disabled={seleccionados.size === 0}
-                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/20 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-4 h-4" /> Eliminar chat{seleccionados.size === 1 ? '' : 's'} ({seleccionados.size})
-              </button>
-              <div className="text-[9px] text-slate-500 px-1">
-                Toca los chats a borrar · el grupo MATE no se borra (se limpia desde su menú ⋮)
-              </div>
-            </div>
-          ) : (
+          {/* Tabs chats/campañas */}
           <div className="flex p-2 gap-1 border-b border-slate-700/70 flex-shrink-0">
             <button
               type="button"
@@ -1637,18 +1500,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
             >
               <Megaphone className="w-4 h-4" /> Campañas
             </button>
-            {/* Fase 3.26 — entrar al modo selección de chats */}
-            <button
-              type="button"
-              onClick={() => { setTelActivo(null); setModoSeleccion(true); }}
-              disabled={chatsBorrables.length === 0}
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-300 hover:bg-slate-700/60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Seleccionar chats para borrar (uno por uno o todos)"
-            >
-              <CheckSquare className="w-4 h-4" />
-            </button>
           </div>
-          )}
 
           {pestanaIzq === 'chats' ? (
             <>
@@ -1705,9 +1557,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       fijado={fijados.has(c.tel)}
                       infoRuta={c.esGrupo ? undefined : mapaRuta.get(c.tel)}
                       onAbrir={() => abrirChat(c.tel)}
-                      modoSeleccion={modoSeleccion}
-                      seleccionado={seleccionados.has(c.tel)}
-                      onAlternar={c.esGrupo ? undefined : () => alternarSeleccion(c.tel)}
                     />
                   ))
                 )}
@@ -1774,7 +1623,9 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                       <span className="truncate">
                         Grupo de trabajo ·{' '}
                         {estadoGrupoVivo(estadoGrupo) ? (
-                          <span className="text-emerald-300 font-bold">bot conectado ✓</span>
+                          <span className="text-emerald-300 font-bold" title={(estadoGrupo?.version || 'parche del grupo') + (estadoGrupo?.participantes ? ' · ' + estadoGrupo.participantes + ' participantes' : '')}>
+                            bot conectado ✓
+                          </span>
                         ) : (
                           <span className="text-red-300 font-bold" title="Instala el parche grupo_mate.js en el bot (fase 3.9)">
                             bot sin parche del grupo
@@ -1854,65 +1705,11 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   </div>
                 )}
 
-                {/* Fase 3.25 — Color de la fuente del chat (siempre visible,
-                    móvil incluido): Automática / Blanca / Tinta */}
-                <div className="relative flex-shrink-0" ref={menuFuenteRef}>
-                  <button
-                    type="button"
-                    onClick={() => { setMenuFuente((v) => !v); setMenuChat(false); }}
-                    className={`p-2 rounded-xl border transition-colors ${
-                      fuenteChat !== 'auto'
-                        ? 'bg-sky-500/20 text-sky-300 border-sky-400/50'
-                        : menuFuente
-                          ? 'bg-slate-600/50 text-white border-slate-500'
-                          : 'text-slate-300 border-slate-600 bg-slate-700/40 hover:bg-slate-700'
-                    }`}
-                    title="Color de la letra del chat (F3.25): automática, blanca o tinta"
-                  >
-                    <Type className="w-4 h-4" />
-                  </button>
-                  {menuFuente && (
-                    <div className="absolute right-0 top-11 z-50 w-60 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden py-1.5">
-                      <div className="px-3.5 pt-1 pb-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                        Color de la letra
-                      </div>
-                      {([
-                        { id: 'auto', etiqueta: 'Automática', detalle: 'Sigue el tema de la app' },
-                        { id: 'blanca', etiqueta: 'Blanca', detalle: 'Letras blancas · burbujas oscuras' },
-                        { id: 'tinta', etiqueta: 'Tinta oscura', detalle: 'Letras negras · burbujas claras' },
-                      ] as const).map((o) => (
-                        <button
-                          key={o.id}
-                          type="button"
-                          onClick={() => cambiarFuente(o.id)}
-                          className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors ${
-                            fuenteChat === o.id ? 'bg-sky-500/15' : 'hover:bg-slate-800'
-                          }`}
-                        >
-                          <span className={`flex-shrink-0 w-4 ${fuenteChat === o.id ? 'text-sky-300' : 'text-transparent'}`}>
-                            <Check className="w-4 h-4" />
-                          </span>
-                          <span className="flex flex-col min-w-0">
-                            <span className={`text-sm font-bold ${fuenteChat === o.id ? 'text-white' : 'text-slate-200'}`}>{o.etiqueta}</span>
-                            <span className="text-[10px] text-slate-500 truncate">{o.detalle}</span>
-                          </span>
-                          <span className="ml-auto flex-shrink-0 w-6 h-6 rounded-lg border border-slate-600 flex items-center justify-center text-[10px] font-black bg-slate-800">
-                            <span className={o.id === 'blanca' ? 'text-white' : o.id === 'tinta' ? 'text-slate-950' : 'text-slate-300'}>Aa</span>
-                          </span>
-                        </button>
-                      ))}
-                      <div className="px-3.5 pt-2 pb-1 text-[10px] text-slate-500 leading-snug border-t border-slate-800 mt-1.5">
-                        En modo claro las burbujas verdes quedaban con letra negra (F3.25 lo corrige). Elige lo que mejor leas.
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Menú ⋮ (siempre visible — móvil incluido) */}
                 <div className="relative flex-shrink-0" ref={menuRef}>
                   <button
                     type="button"
-                    onClick={() => { setMenuChat((v) => !v); setMenuFuente(false); }}
+                    onClick={() => setMenuChat((v) => !v)}
                     className={`p-2 rounded-xl border transition-colors ${menuChat ? 'bg-emerald-600 text-white border-emerald-500' : 'text-slate-300 border-slate-600 bg-slate-700/40 hover:bg-slate-700'}`}
                     title="Más opciones"
                   >
@@ -1946,44 +1743,24 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
               {/* Mensajes (con el fondo elegido) */}
               <div
                 ref={scrollRef}
-                className={`flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 ${fondo.css ? '' : 'bg-slate-900/40'} ${
-                  fuenteChat === 'blanca' ? 'rt-fuente-blanca' : fuenteChat === 'tinta' ? 'rt-fuente-tinta' : ''
-                }`}
+                className={`flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-6 py-3 ${fondo.css ? '' : 'bg-slate-900/40'}`}
                 style={fondo.css ? { background: fondo.css } : undefined}
               >
                 {esGrupo && (
                   <div className="mx-auto max-w-lg mb-3 p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-200/90 leading-relaxed">
                     <b className="text-sky-300">👥 Grupo de trabajo MATE.</b> Lo que escribas aquí lo manda el bot
-                    al grupo de WhatsApp de MATE. Los reportes del bot y <b>lo que respondan los compañeros
-                    llegan aquí en vivo</b>, con <b>su nombre y número</b> en cada mensaje (parche grupo_mate.js v3
-                    del bot — si los nombres no salen o dejan de llegar mensajes, reemplaza el parche de la
-                    fase 3.26 y reinicia el bot). Con <b>🧹 Limpiar historial</b> dejas el grupo limpio sin
-                    borrarlo y sigue recibiendo.
+                    al grupo de WhatsApp de MATE. Ves los reportes del bot y lo que escriban los compañeros — con
+                    sus <b className="text-sky-300">@menciones</b> incluidas. Usa el botón <b className="text-sky-300">@</b> del
+                    teclado para mencionar a alguien (llega con píldora azul y notificación en WhatsApp).
                   </div>
                 )}
                 {mensajesAgrupados.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
                     <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
-                    {/* F3.27 — si limpiaste el historial, el estado vacío lo dice
-                        (antes decía «Sin mensajes aún» y confundía: parecía un
-                        chat nuevo en vez de un chat recién limpiado) */}
-                    {corteLimpiezaChat(convActiva?.tel || '') > 0 ? (
-                      <>
-                        <div className="text-sm font-semibold text-cyan-300">🧹 Historial limpio</div>
-                        <div className="text-xs mt-1 text-slate-400">
-                          {esGrupo
-                            ? 'El grupo sigue abierto — los mensajes nuevos llegarán aquí'
-                            : 'El chat sigue abierto — los mensajes nuevos llegarán aquí'}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-sm font-semibold text-slate-400">Sin mensajes aún</div>
-                        <div className="text-xs mt-1">
-                          {esGrupo ? 'Escribe algo para el grupo de trabajo' : 'Escribe el primero o pídele su ubicación al cliente'}
-                        </div>
-                      </>
-                    )}
+                    <div className="text-sm font-semibold text-slate-400">Sin mensajes aún</div>
+                    <div className="text-xs mt-1">
+                      {esGrupo ? 'Escribe algo para el grupo de trabajo' : 'Escribe el primero o pídele su ubicación al cliente'}
+                    </div>
                   </div>
                 ) : (
                   mensajesAgrupados.map((g, gi) => (
@@ -1996,7 +1773,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                             ...m,
                             nombreCampana: m.nombreCampana ? nombreCampana.get(m.nombreCampana) || m.nombreCampana : undefined,
                           }}
-                          mostrarAutor={esGrupo}
                           desconocido={!esGrupo && convActiva.nombre.startsWith('Cliente ')}
                           revelado={reveladas.has(m.id)}
                           onRevelar={() => setReveladas((s) => new Set(s).add(m.id))}
@@ -2283,6 +2059,20 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   >
                     <Smile className="w-5 h-5" />
                   </button>
+                  {/* 🆕 F3.23 — @arrobas al escribir en el grupo: abre la lista
+                      de miembros y mete "@Nombre " en el mensaje. El parche
+                      grupo_mate.js v1.1 lo convierte en mención REAL de
+                      WhatsApp (píldora azul + notificación). */}
+                  {esGrupo && (
+                    <button
+                      type="button"
+                      onClick={() => { setPickerArroba(true); setEmojiAbierto(false); setMenuAdjuntos(false); setMenuRapidos(false); }}
+                      className="p-2.5 rounded-xl text-emerald-300 hover:text-white hover:bg-emerald-600/40 transition-colors flex-shrink-0"
+                      title="Mencionar a alguien del grupo (@)"
+                    >
+                      <AtSign className="w-5 h-5" />
+                    </button>
+                  )}
                   {!esGrupo && (
                     <>
                       <button
@@ -2583,111 +2373,84 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
         </div>
       )}
 
+      {/* ═══ MODAL: picker de @menciones del grupo (F3.23) ═══ */}
+      {pickerArroba && esGrupo && (
+        <div
+          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4"
+          onClick={() => setPickerArroba(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-slate-900 border border-emerald-500/30 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/70">
+              <div className="flex items-center gap-2">
+                <AtSign className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-black text-white">Mencionar en el grupo</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickerArroba(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 border-b border-slate-700/70">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">
+                <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <input
+                  value={buscaMiembro}
+                  onChange={(e) => setBuscaMiembro(e.target.value)}
+                  placeholder="Buscar miembro…"
+                  className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none w-full"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="max-h-[45vh] overflow-y-auto custom-scrollbar p-2">
+              {(estadoGrupo?.miembros || []).length === 0 ? (
+                <div className="p-4 text-center space-y-2">
+                  <Users className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Aún no tengo la lista de miembros del grupo.<br />
+                    El bot la arma con el parche <b className="text-slate-300">grupo_mate.js v1.1</b> a medida
+                    que la gente escribe (y con los participantes del grupo). Mientras tanto puedes
+                    escribir el <b className="text-slate-300">@nombre</b> a mano — el bot lo convierte igual.
+                  </p>
+                </div>
+              ) : (
+                (estadoGrupo?.miembros || [])
+                  .filter((x) => x.nombre.toLowerCase().includes(buscaMiembro.toLowerCase().trim()))
+                  .map((x) => (
+                    <button
+                      key={x.jid}
+                      type="button"
+                      onClick={() => insertarArroba(x.nombre)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 text-left transition-colors"
+                    >
+                      <span className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center text-xs font-black flex-shrink-0">
+                        {x.nombre.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs font-bold text-white truncate">{x.nombre}</span>
+                        <span className="block text-[10px] text-slate-500 truncate">{'@' + x.jid.split('@')[0]}</span>
+                      </span>
+                      <AtSign className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    </button>
+                  ))
+              )}
+              {(estadoGrupo?.miembros || []).length > 0 &&
+                (estadoGrupo?.miembros || []).filter((x) => x.nombre.toLowerCase().includes(buscaMiembro.toLowerCase().trim())).length === 0 && (
+                  <p className="p-3 text-center text-[11px] text-slate-500">Nadie coincide con «{buscaMiembro}»</p>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ MODAL: confirmar borrar chat ═══ */}
-      {/* ═══ FASE 3.26 — 🧹 CONFIRMAR LIMPIAR HISTORIAL ═══
-          (chat abierto: mensajes se ocultan, el chat sigue vivo) */}
-      {confirmLimpiar && convActiva && (
-        <div
-          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setConfirmLimpiar(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-slate-900 border border-cyan-500/30 shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex-shrink-0">
-                  <Eraser className="w-5 h-5 text-cyan-400" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-black text-white">
-                    ¿Limpiar el historial {esGrupo ? 'del grupo' : 'de este chat'}?
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Los mensajes que ves ahora se ocultan y{' '}
-                    <b className="text-cyan-300">el chat queda abierto</b>: sigue en tu lista y los
-                    mensajes nuevos que lleguen después se ven normal.{' '}
-                    {esGrupo
-                      ? 'Ideal para empezar el día con el grupo en cero sin borrarlo.'
-                      : 'Los mensajes no se borran del servidor — esta limpieza es solo para tu vista.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 px-4 pb-4">
-              <button
-                type="button"
-                onClick={() => setConfirmLimpiar(false)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={limpiarHistorial}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-colors active:scale-95"
-              >
-                <Eraser className="w-4 h-4" />
-                Limpiar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══ FASE 3.26 — 🗑️ CONFIRMAR BORRAR VARIOS CHATS ═══ */}
-      {confirmBorrarSeleccion && modoSeleccion && (
-        <div
-          className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => !borrandoSeleccion && setConfirmBorrarSeleccion(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-slate-900 border border-rose-500/30 shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 flex-shrink-0">
-                  <AlertTriangle className="w-5 h-5 text-rose-400" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-black text-white">
-                    ¿Borrar {seleccionados.size} chat{seleccionados.size === 1 ? '' : 's'}?
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Se elimina el historial de los chat
-                    {seleccionados.size === 1 ? ' seleccionado' : 's seleccionados'} (sus mensajes y tus
-                    respuestas ya enviadas), como borrar chats de WhatsApp. Es permanente y los mensajes
-                    que el bot aún tenga en cola NO se tocan.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 px-4 pb-4">
-              <button
-                type="button"
-                onClick={() => setConfirmBorrarSeleccion(false)}
-                disabled={borrandoSeleccion}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-colors disabled:opacity-40"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={borrarSeleccionados}
-                disabled={borrandoSeleccion}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-colors disabled:opacity-40"
-              >
-                {borrandoSeleccion ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Borrar {seleccionados.size}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {confirmBorrar && convActiva && !esGrupo && (
+      {confirmBorrar && convActiva && (
         <div
           className="fixed inset-0 z-[2000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => !borrando && setConfirmBorrar(false)}
@@ -2702,12 +2465,20 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   <AlertTriangle className="w-5 h-5 text-rose-400" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-black text-white">¿Borrar este chat?</h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Se eliminará el historial de <b className="text-slate-200">{convActiva.nombre}</b> (sus
-                    mensajes y tus respuestas ya enviadas). Es permanente, como borrar un chat de
-                    WhatsApp. Los mensajes que el bot aún tenga en cola NO se tocan.
-                  </p>
+                  <h3 className="text-sm font-black text-white">{esGrupo ? '¿Limpiar el chat del grupo?' : '¿Borrar este chat?'}</h3>
+                  {esGrupo ? (
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      Se eliminará el historial de <b className="text-slate-200">{convActiva.nombre}</b>: los mensajes
+                      que escribió la gente y los reportes ya enviados del bot. Los reportes que el bot aún tenga en
+                      cola NO se tocan y el grupo sigue en la lista.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      Se eliminará el historial de <b className="text-slate-200">{convActiva.nombre}</b> (sus
+                      mensajes y tus respuestas ya enviadas). Es permanente, como borrar un chat de
+                      WhatsApp. Los mensajes que el bot aún tenga en cola NO se tocan.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -2727,7 +2498,7 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-colors disabled:opacity-40"
               >
                 {borrando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Borrar chat
+                {esGrupo ? 'Limpiar grupo' : 'Borrar chat'}
               </button>
             </div>
           </div>

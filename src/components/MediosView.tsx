@@ -10,6 +10,9 @@
 //       F3.29: banner "📞 ¿Te llamaron? Reconectando…" cuando la
 //       llamada mató el player — el watchdog de spotify.ts lo
 //       reconecta solo y la música vuelve donde estaba.
+//       F3.30: botoncito 🔄 de re-sincronización manual junto al
+//       volumen — dispara el MISMO motor F3.29 a pedido (por si
+//       algo raro lo dejó desincronizado y el watchdog no vió nada).
 //   ▶️ YouTube — pega un link y suena; guárdalo en favoritos
 // Todo el audio lo maneja MediosProvider (global) → el
 // mini-reproductor (barra abajo) acompaña en toda la app.
@@ -22,6 +25,7 @@ import {
   LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check, Copy, ChevronDown, Info,
 } from 'lucide-react';
 import { useMedios } from './medios/MediosProvider';
+import { spotifyReconectarPlayer } from '../services/spotify';
 import { RADIOS, RadioEstacion, leerFavoritos, guardarFavoritos } from '../services/mediosRadio';
 import { leerFavoritosYT, guardarFavoritosYT, VideoFavorito, extraerVideoId } from '../services/mediosYouTube';
 
@@ -235,6 +239,37 @@ const TabSpotify: React.FC = () => {
   // F3.28: guía de conexión desplegable (el paso del dashboard)
   const [guiaAbierta, setGuiaAbierta] = useState(false);
   const [uriCopiada, setUriCopiada] = useState(false);
+
+  // 🔄 F3.30 — botoncito de re-sincronización (SOLO aquí, en Spotify):
+  // llama directo al motor anti-cuelgue F3.29 (spotifyReconectarPlayer)
+  // para revivir el reproductor a pedido del usuario. Si el watchdog
+  // ya está reconectando solo, no molesta (el motor hace dedupe).
+  const [resinc, setResinc] = useState(false);
+  const [resincMsg, setResincMsg] = useState('');
+  const resincronizar = async () => {
+    if (resinc) return;
+    if (spotify.estado === 'reconectando') {
+      setResincMsg('📞 Ya se está reconectando solo — espera un momento');
+      setTimeout(() => setResincMsg(''), 4000);
+      return;
+    }
+    setResinc(true);
+    setResincMsg('');
+    try {
+      const ok = await spotifyReconectarPlayer('boton-f3.30');
+      if (ok) {
+        m.recargarPlaylists();
+        setResincMsg('✅ Re-sincronizado');
+      } else {
+        setResincMsg('📞 Reconectando — la música vuelve sola en unos segundos');
+      }
+    } catch {
+      setResincMsg('⚠️ No se pudo — reintenta en unos segundos');
+    } finally {
+      setResinc(false);
+      setTimeout(() => setResincMsg(''), 4000);
+    }
+  };
   const copiarURI = () => {
     const uri = 'com.ridertrack.v2://callback';
     const done = () => { setUriCopiada(true); setTimeout(() => setUriCopiada(false), 2000); };
@@ -472,6 +507,17 @@ const TabSpotify: React.FC = () => {
             onChange={(e) => { const v = parseInt(e.target.value); setVolumenSp(v); m.spotifySetVolumen(v); }}
             className="w-full accent-emerald-500"
           />
+          {/* 🔄 F3.30 — el botoncito pedido: revive el Spotify colgado (usa el motor anti-cuelgue F3.29) */}
+          <button
+            onClick={resincronizar}
+            disabled={resinc}
+            className="w-8 h-8 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0 disabled:opacity-50"
+            title="Re-sincronizar Spotify — revívelo si una llamada lo dejó colgado (música avanzando sin sonido)"
+            aria-label="Re-sincronizar Spotify"
+            data-testid="boton-resinc-spotify"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resinc ? 'animate-spin' : ''}`} />
+          </button>
           <button
             onClick={() => { if (confirm('¿Desconectar Spotify?')) m.spotifyDesconectar(); }}
             className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center shrink-0"
@@ -481,6 +527,7 @@ const TabSpotify: React.FC = () => {
           </button>
         </div>
         {spotify.estado === 'error' && <div className="mt-2 text-[11px] text-amber-400">{spotify.mensaje}</div>}
+        {resincMsg && <div className="mt-1.5 text-[11px] text-emerald-300 text-center" data-testid="msg-resinc-spotify">{resincMsg}</div>}
       </div>
 
       {/* Playlists */}
