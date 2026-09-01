@@ -13,6 +13,10 @@
 //       F3.30: botoncito 🔄 de re-sincronización manual junto al
 //       volumen — dispara el MISMO motor F3.29 a pedido (por si
 //       algo raro lo dejó desincronizado y el watchdog no vió nada).
+//       F3.31: botoncito 🧪 "simular llamada" — mata la conexión del
+//       player en silencio (como una llamada real) y deja que el
+//       anti-cuelgue F3.29 lo reviva SOLO. Para probar el pipeline
+//       completo sin llamarse por teléfono de verdad.
 //   ▶️ YouTube — pega un link y suena; guárdalo en favoritos
 // Todo el audio lo maneja MediosProvider (global) → el
 // mini-reproductor (barra abajo) acompaña en toda la app.
@@ -22,10 +26,10 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Music, Radio as RadioIcon, Youtube, Search, Star, Play, Pause, Square,
   Volume2, Loader2, Heart, SkipBack, SkipForward, Shuffle, Repeat, Repeat1,
-  LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check, Copy, ChevronDown, Info,
+  LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check, Copy, ChevronDown, Info, FlaskConical,
 } from 'lucide-react';
 import { useMedios } from './medios/MediosProvider';
-import { spotifyReconectarPlayer } from '../services/spotify';
+import { spotifyReconectarPlayer, spotifySimularLlamada } from '../services/spotify';
 import { RADIOS, RadioEstacion, leerFavoritos, guardarFavoritos } from '../services/mediosRadio';
 import { leerFavoritosYT, guardarFavoritosYT, VideoFavorito, extraerVideoId } from '../services/mediosYouTube';
 
@@ -270,6 +274,18 @@ const TabSpotify: React.FC = () => {
       setTimeout(() => setResincMsg(''), 4000);
     }
   };
+  // 🧪 F3.31 — "simular llamada": reproduce el guion EXACTO de una
+  // llamada real (la conexión del player muere en silencio) y deja
+  // que el motor anti-cuelgue F3.29 haga su trabajo solo. Ideal
+  // para probar el anti-cuelgue sin gastar una llamada de verdad.
+  const [simMsg, setSimMsg] = useState('');
+  const simularLlamada = () => {
+    const res = spotifySimularLlamada();
+    setSimMsg(res.msg);
+    // el mensaje vive bastante: la recuperación tarda unos segundos
+    setTimeout(() => setSimMsg(''), res.ok ? 9000 : 5000);
+  };
+
   const copiarURI = () => {
     const uri = 'com.ridertrack.v2://callback';
     const done = () => { setUriCopiada(true); setTimeout(() => setUriCopiada(false), 2000); };
@@ -507,6 +523,19 @@ const TabSpotify: React.FC = () => {
             onChange={(e) => { const v = parseInt(e.target.value); setVolumenSp(v); m.spotifySetVolumen(v); }}
             className="w-full accent-emerald-500"
           />
+          {/* 🧪 F3.31 — simular llamada: reproduce lo que hace una llamada
+              real (mata la conexión del player en silencio) para PROBAR que
+              el anti-cuelgue F3.29 revive todo solo. No afecta a la sesión. */}
+          <button
+            onClick={simularLlamada}
+            disabled={spotify.estado === 'reconectando'}
+            className="w-8 h-8 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0 disabled:opacity-50"
+            title="Simular llamada — prueba que el reproductor se revive solo (sin llamar de verdad)"
+            aria-label="Simular llamada"
+            data-testid="boton-simular-llamada"
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+          </button>
           {/* 🔄 F3.30 — el botoncito pedido: revive el Spotify colgado (usa el motor anti-cuelgue F3.29) */}
           <button
             onClick={resincronizar}
@@ -528,6 +557,7 @@ const TabSpotify: React.FC = () => {
         </div>
         {spotify.estado === 'error' && <div className="mt-2 text-[11px] text-amber-400">{spotify.mensaje}</div>}
         {resincMsg && <div className="mt-1.5 text-[11px] text-emerald-300 text-center" data-testid="msg-resinc-spotify">{resincMsg}</div>}
+        {simMsg && <div className="mt-1.5 text-[11px] text-amber-300 text-center" data-testid="msg-simular-llamada">{simMsg}</div>}
       </div>
 
       {/* Playlists */}
