@@ -354,10 +354,22 @@ const KEY_LIMPIEZA_CHAT = 'rt2_chat_limpiado_';
 /** Suscripciones vivas — para re-pintar al instante cuando se limpia */
 const _emitersChat = new Set<() => void>();
 
+/** Clave de limpieza de SIEMPRE la misma forma (F3.27 — FIX del grupo):
+ *  telKey() se queda "" para 'GRUPO_MATE' (no tiene dígitos) y la 3.26
+ *  ESCRIBÍA 'rt2_chat_limpiado_GRUPO_MATE' pero LEÍA
+ *  'rt2_chat_limpiado_' + '' → clave distinta → el corte del grupo
+ *  jamás se aplicaba: "limpio el grupo y no pasa nada". */
+function claveLimpiezaChat(tel: string): string {
+  const t9 = telKey(tel) || (tel === TEL_GRUPO_MATE ? TEL_GRUPO_MATE : '');
+  return t9 ? KEY_LIMPIEZA_CHAT + t9 : '';
+}
+
 /** Lee la marca de tiempo del último "Limpiar historial" de un chat */
 export function corteLimpiezaChat(tel: string): number {
+  const clave = claveLimpiezaChat(tel);
+  if (!clave) return 0;
   try {
-    return Number(localStorage.getItem(KEY_LIMPIEZA_CHAT + telKey(tel))) || 0;
+    return Number(localStorage.getItem(clave)) || 0;
   } catch {
     return 0;
   }
@@ -370,11 +382,13 @@ export function corteLimpiezaChat(tel: string): number {
  * Devuelve el corte aplicado (timestamp en ms) para poder testearlo.
  */
 export function limpiarHistorialChat(tel: string): number {
-  const t9 = telKey(tel) || (tel === TEL_GRUPO_MATE ? TEL_GRUPO_MATE : '');
-  if (!t9) return 0;
+  // F3.27 — misma clave que cortaLimpiezaChat (un solo helper:
+  // escribir y leer NUNCA vuelven a divergir).
+  const clave = claveLimpiezaChat(tel);
+  if (!clave) return 0;
   const corte = Date.now();
   try {
-    localStorage.setItem(KEY_LIMPIEZA_CHAT + t9, String(corte));
+    localStorage.setItem(clave, String(corte));
   } catch {
     /* sin espacio — igual re-emitimos para la sesión actual */
   }
@@ -1973,22 +1987,32 @@ export function guardarFondoChat(f: FondoChat): void {
 }
 
 // ═══════════════════════════════════════════════════════════
-// FASE 3.3 — BORRAR CHAT (como WhatsApp)
+// FASE 3.3 — BORRAR CHAT (como WhatsApp) · F3.27 — burbujas del
+// bot incluidas (antes sobrevivían y el chat "no se limpiaba")
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 🗑️ Borra el historial de una conversación:
- *  - TODOS los mensajes_clientes del cliente (sus mensajes)
+ * 🗑️ FASE 3.27 — Borra el historial de una conversación (DE VERDAD):
+ *  - TODOS los mensajes_clientes del cliente (sus mensajes + espejos)
  *  - las respuestas_manuales YA ENVIADAS (las pendientes se
  *    respetan porque el bot todavía las tiene en cola)
- * El chat desaparece de la lista al quedarse sin mensajes.
+ *  - NUEVO: las burbujas de ACCIONES del bot ya procesadas
+ *    (acciones_bot: "✅ Aviso de entrega enviado", "📍 Posición
+ *    del rider compartida"...). Antes (3.26 y previas) estas
+ *    burbujas SOBREVIVÍAN al "Borrar chat" → el chat quedaba
+ *    "sucio" con avisos viejos y la conversación no desaparecía
+ *    de la lista. Las acciones PENDIENTES (processed=false) NO se
+ *    tocan: son la cola del bot y aún deben enviarse.
  */
-export async function borrarChatCompleto(tel: string): Promise<{ entrantes: number; salientes: number }> {
+export async function borrarChatCompleto(
+  tel: string
+): Promise<{ entrantes: number; salientes: number; acciones: number }> {
   const t9 = telKey(tel);
   if (!t9) throw new Error('Número inválido');
   const variantes = telVariants(t9);
   let entrantes = 0;
   let salientes = 0;
+  let acciones = 0;
 
   // 1. Mensajes del cliente
   const snapEntrantes = await getDocs(
@@ -2016,7 +2040,30 @@ export async function borrarChatCompleto(tel: string): Promise<{ entrantes: numb
     salientes = enviadas.length;
   }
 
-  return { entrantes, salientes };
+  // 3. FASE 3.27 — Acciones del bot YA PROCESADAS para este cliente
+  //    (telefono en variantes: acciones_bot guarda el "51..." completo).
+  //    Las PENDIENTES se quedan — el bot aún las tiene que enviar.
+  //    Query de UN solo campo ('in') → no requiere índice compuesto.
+  try {
+    const snapAcciones = await getDocs(
+      query(collection(db!, 'acciones_bot', UID_BOT, 'pendientes'), where('telefono', 'in', variantes))
+    );
+    const procesadas = snapAcciones.docs.filter((d) => d.data()?.processed === true);
+    if (procesadas.length > 0) {
+      for (let i = 0; i < procesadas.length; i += 450) {
+        const batch = writeBatch(db!);
+        procesadas.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      acciones = procesadas.length;
+    }
+  } catch (e) {
+    // Si la subcolección no existe o la regla lo impide, el borrado
+    // del chat NO falla por esto — seguimos con lo que ya se borró.
+    console.warn('⚠️ borrarChatCompleto: acciones_bot no se pudo limpiar:', e);
+  }
+
+  return { entrantes, salientes, acciones };
 }
 
 // ─────────────────────────────────────────────────────────────
