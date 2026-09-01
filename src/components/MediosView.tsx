@@ -7,6 +7,9 @@
 //       player completo + tus playlists para arrancar la música.
 //       F3.28: guía de conexión visible en la tarjeta de login
 //       (el paso 1 sola vez del dashboard de Spotify).
+//       F3.29: banner "📞 ¿Te llamaron? Reconectando…" cuando la
+//       llamada mató el player — el watchdog de spotify.ts lo
+//       reconecta solo y la música vuelve donde estaba.
 //   ▶️ YouTube — pega un link y suena; guárdalo en favoritos
 // Todo el audio lo maneja MediosProvider (global) → el
 // mini-reproductor (barra abajo) acompaña en toda la app.
@@ -379,6 +382,16 @@ const TabSpotify: React.FC = () => {
     <div className="space-y-3">
       {/* Player */}
       <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-600/20 to-slate-800 border border-emerald-500/30 shadow-xl">
+        {/* 📞 F3.29: la llamada mató el player → se reconecta solo */}
+        {spotify.estado === 'reconectando' && (
+          <div className="mb-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2" data-testid="banner-reconectando">
+            <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold text-amber-300 leading-tight">📞 ¿Te llamaron? Reconectando el reproductor…</div>
+              <div className="text-[10px] text-slate-400 leading-tight">La música vuelve sola en unos segundos</div>
+            </div>
+          </div>
+        )}
         {track ? (
           <>
             <div className="flex items-center gap-3">
