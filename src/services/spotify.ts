@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 🎵 MEDIOS — SPOTIFY (Fase 3.11 · fix redirect Fase 3.23)
+// 🎵 MEDIOS — SPOTIFY (Fase 3.11 · redirect F3.23 · deeplink F3.28)
 // Port fiel de la v1 (main.js L4199-4700) a TypeScript:
 //   • OAuth Authorization Code + PKCE (mismo client_id de la v1)
 //   • F3.23 FIX: en la APK la v2 ya NO usa ridertrack://callback —
@@ -8,7 +8,16 @@
 //     Ahora, en nativo, el redirect es el scheme PROPIO de la v2:
 //     com.ridertrack.v2://callback (el que la APK ya escucha vía
 //     appUrlOpen). Solo falta añadirlo 1 vez en el dashboard de
-//     Spotify (Redirect URIs) — ver LEEME-FASE-3-23.md.
+//     Spotify (Redirect URIs) — ver LEEME-FASE-3-28.md.
+//   • F3.28 FIX (el hueco que quedaba): el listener del deep link
+//     vivía dentro de MediosProvider, que se monta SOLO cuando ya
+//     hay sesión → si Android re-abría la app EN FRÍO al volver de
+//     Spotify, el evento appUrlOpen se disparaba ANTES de que el
+//     listener existiera y el código se perdía en silencio.
+//     Ahora App.tsx lo captura SIEMPRE (login incluido) por 2 vías:
+//     getLaunchUrl() (arranque en frío) + appUrlOpen (app viva),
+//     con dedupe por código. El parseo vive AQUÍ para poder
+//     testearlo sin montar React.
 //   • Web Playback SDK: la app se vuelve un dispositivo Spotify
 //     Connect ("RiderTrack 🛵") y reproduce DIRECTO (Premium)
 //   • El login abre Spotify en el navegador del sistema; al
@@ -131,9 +140,24 @@ async function tokenRequest(body: Record<string, string>): Promise<any> {
   return data;
 }
 
-export async function spotifyExchangeCode(code: string): Promise<boolean> {
+/** Resultado del intercambio con MOTIVO (para avisar al usuario
+ *  qué pasó exactamente y no un genérico "no se pudo") */
+export interface ResultadoExchangeSpotify {
+  ok: boolean;
+  /** 'sin-verifier' = código repetido/viejo (se ignora en silencio) ·
+   *  'redirect-uri' = falta registrar com.ridertrack.v2://callback en
+   *  el dashboard de Spotify · 'red' = sin internet/otro error */
+  motivo: 'ok' | 'sin-verifier' | 'redirect-uri' | 'red';
+  detalle?: string;
+}
+
+export async function spotifyExchangeCode(code: string): Promise<ResultadoExchangeSpotify> {
   const verifier = localStorage.getItem(KEY_VERIFIER);
-  if (!verifier) return false;
+  if (!verifier) {
+    // Sin verifier: login viejo ya usado o duplicado (Android a veces
+    // entrega el mismo deep link 2 veces) → NO es error del usuario.
+    return { ok: false, motivo: 'sin-verifier' };
+  }
   try {
     const data = await tokenRequest({
       client_id: SPOTIFY_CLIENT_ID,
@@ -144,11 +168,47 @@ export async function spotifyExchangeCode(code: string): Promise<boolean> {
     });
     _guardarToken(data);
     localStorage.removeItem(KEY_VERIFIER);
-    await iniciarSpotify(data.access_token);
-    return true;
+    // El token YA quedó guardado → la conexión es un hecho. Si el SDK
+    // tarda o falla al arrancar (p.ej. mala conexión momentánea), NO
+    // es un fallo del login: los listeners de estado ya reportan y la
+    // restauración al re-montar Medios lo reintenta con el token.
+    try {
+      await iniciarSpotify(data.access_token);
+    } catch (e: any) {
+      console.warn('Spotify: token OK pero el SDK tardó en arrancar:', e?.message || e);
+    }
+    return { ok: true, motivo: 'ok' };
   } catch (e: any) {
-    console.warn('Spotify exchange error:', e?.message || e);
-    return false;
+    const detalle = e?.message || String(e || '');
+    // Spotify responde 400 "Invalid redirect_uri" si la URI del dashboard
+    // no coincide — el paso que falta 1 sola vez de parte del usuario
+    const esRedirect = /redirect/i.test(detalle);
+    console.warn('Spotify exchange error:', detalle);
+    return { ok: false, motivo: esRedirect ? 'redirect-uri' : 'red', detalle };
+  }
+}
+
+// ── Deep link: parseo puro (F3.28 — testable sin React) ──
+/** Reconoce la URL de callback de Spotify viniendo del deep link:
+ *  com.ridertrack.v2://callback?code=XXX (APK, F3.23) o
+ *  ridertrack://callback?code=XXX (web) o con ?error=… si el
+ *  usuario no aceptó. Cualquier OTRA URL (maps, wa.me, el propio
+ *  login) devuelve null → el handler la ignora. */
+export function parsearCallbackSpotify(url: string): { code: string; error?: string } | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const esquemaNuestro =
+      u.protocol === 'com.ridertrack.v2:' || u.protocol === 'ridertrack:';
+    const esCallback = u.host === 'callback' || u.pathname === '/callback';
+    if (!esquemaNuestro || !esCallback) return null;
+    const code = u.searchParams.get('code');
+    const error = u.searchParams.get('error');
+    if (code) return { code };
+    if (error) return { code: '', error };
+    return null;
+  } catch {
+    return null; // URL malformada — ignorar
   }
 }
 
