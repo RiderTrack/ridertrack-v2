@@ -4,7 +4,9 @@
 //   📻 Radio — las 14 emisoras peruanas de la v1 (favoritos,
 //       búsqueda, volumen) — sigue sonando en otras pestañas
 //   🎵 Spotify — login Premium (PKCE, mismo client de la v1),
-//       player completo + tus playlists para arrancar la música
+//       player completo + tus playlists para arrancar la música.
+//       F3.28: guía de conexión visible en la tarjeta de login
+//       (el paso 1 sola vez del dashboard de Spotify).
 //   ▶️ YouTube — pega un link y suena; guárdalo en favoritos
 // Todo el audio lo maneja MediosProvider (global) → el
 // mini-reproductor (barra abajo) acompaña en toda la app.
@@ -14,7 +16,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Music, Radio as RadioIcon, Youtube, Search, Star, Play, Pause, Square,
   Volume2, Loader2, Heart, SkipBack, SkipForward, Shuffle, Repeat, Repeat1,
-  LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check,
+  LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check, Copy, ChevronDown, Info,
 } from 'lucide-react';
 import { useMedios } from './medios/MediosProvider';
 import { RADIOS, RadioEstacion, leerFavoritos, guardarFavoritos } from '../services/mediosRadio';
@@ -227,6 +229,32 @@ const TabSpotify: React.FC = () => {
   const { spotify, playlists, playlistsCargando } = m;
   const [volumenSp, setVolumenSp] = useState(80);
 
+  // F3.28: guía de conexión desplegable (el paso del dashboard)
+  const [guiaAbierta, setGuiaAbierta] = useState(false);
+  const [uriCopiada, setUriCopiada] = useState(false);
+  const copiarURI = () => {
+    const uri = 'com.ridertrack.v2://callback';
+    const done = () => { setUriCopiada(true); setTimeout(() => setUriCopiada(false), 2000); };
+    try {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(uri).then(done).catch(() => copiarFallback(uri, done));
+      } else copiarFallback(uri, done);
+    } catch { copiarFallback(uri, done); }
+  };
+  const copiarFallback = (texto: string, done: () => void) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    } catch { /* sin portapapeles — copia a mano */ }
+  };
+
   // posición progresiva del track (el SDK solo emite en cambios)
   const [posLocal, setPosLocal] = useState(0);
   useEffect(() => {
@@ -270,6 +298,50 @@ const TabSpotify: React.FC = () => {
           <ExternalLink className="w-4 h-4" /> Conectar Spotify
         </button>
         <p className="text-[10px] text-slate-400">Requiere cuenta Premium (reproducción dentro de la app)</p>
+
+        {/* F3.28 — Guía: el paso 1 sola vez del dashboard de Spotify */}
+        <div className="border-t border-slate-700/50 pt-3 text-left">
+          <button
+            onClick={() => setGuiaAbierta((v) => !v)}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-slate-400 hover:text-white transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" />
+            {guiaAbierta ? 'Ocultar guía' : '¿No vuelve a la app tras aceptar? Ver guía'}
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${guiaAbierta ? 'rotate-180' : ''}`} />
+          </button>
+          {guiaAbierta && (
+            <div className="mt-2.5 space-y-2.5 text-left">
+              <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-700">
+                <div className="text-[11px] font-black text-emerald-400">PASO 1 · una sola vez</div>
+                <p className="text-[10px] text-slate-300 mt-1 leading-relaxed">
+                  En el <b>dashboard de Spotify</b> (developer.spotify.com/dashboard → tu app → <b>Settings → Redirect URIs</b>)
+                  agrega exactamente esta URI y guarda:
+                </p>
+                <button
+                  onClick={copiarURI}
+                  className="mt-1.5 w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-800 border border-slate-600 hover:border-emerald-500/60 active:scale-[0.99] transition-all"
+                  title="Copiar URI"
+                >
+                  <code className="flex-1 text-[10px] font-mono text-emerald-300 truncate">com.ridertrack.v2://callback</code>
+                  {uriCopiada
+                    ? <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    : <Copy className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+                </button>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-700">
+                <div className="text-[11px] font-black text-emerald-400">PASO 2 · siempre</div>
+                <p className="text-[10px] text-slate-300 mt-1 leading-relaxed">
+                  Toca <b>Conectar Spotify</b> → se abre el navegador → inicia sesión y <b>acepta</b>.
+                  Android te devuelve solo a RiderTrack y ya queda conectado (recuerda tu Premium).
+                </p>
+              </div>
+              <p className="text-[9px] text-slate-500 px-1 leading-relaxed">
+                Si ya aceptaste y no pasó nada: la APK actual ya escucha el regreso automático — revisa que el texto
+                del Paso 1 esté idéntico (sin espacios) y vuelve a conectar. La radio y YouTube funcionan sin Spotify.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
