@@ -51,8 +51,11 @@ export const MiniPlayerReproductor: React.FC<{ mediosVisible?: boolean }> = ({ m
   } else if (fuenteActiva === 'spotify' && spotify.track) {
     icono = <Music2 className="w-4 h-4 text-emerald-400" />;
     titulo = spotify.track.nombre || 'Spotify';
-    subtitulo = spotify.track.artista || '';
-    sonando = spotify.track.reproduciendo;
+    // 📞 F3.29: durante la reconexión post-llamada se ve el estado real
+    subtitulo = spotify.estado === 'reconectando'
+      ? '📞 Reconectando…'
+      : spotify.track.artista || '';
+    sonando = spotify.estado === 'reconectando' ? false : spotify.track.reproduciendo;
   } else if (fuenteActiva === 'youtube' && youtube.videoId) {
     icono = <Youtube className="w-4 h-4 text-red-500" />;
     titulo = youtube.titulo || 'YouTube';
