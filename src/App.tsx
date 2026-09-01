@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+// F3.28: deep link de Spotify capturado a NIVEL TOP (login incluido)
+import { parsearCallbackSpotify, spotifyExchangeCode } from './services/spotify';
 import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
 import { Cliente } from './services/firestore';
 import { Header } from './components/Header';
@@ -286,6 +289,73 @@ export default function App() {
     const id = `toast-${Date.now()}-${Math.random()}`;
     setToasts((prev) => [...prev, { id, title, description, type }]);
   };
+
+  // ═════════════════════════════════════════
+  // 🎵 FASE 3.28 — DEEP LINK DE SPOTIFY A NIVEL TOP
+  // El listener vivía dentro de MediosProvider, que solo se monta
+  // cuando Firebase YA restauró la sesión. Al volver de Spotify:
+  //   • App viva (warm) → a veces andaba
+  //   • App re-abierta en FRÍO (Android la mató mientras estabas en
+  //     el navegador de Spotify — lo normal con "no mantener
+  //     actividades" o falta de RAM) → el evento appUrlOpen llegaba
+  //     ANTES de que existiera el listener → el código se perdía en
+  //     silencio → "acepto en Spotify y no pasa nada".
+  // Ahora App (siempre montado, también en el LoginScreen) captura
+  // por DOS vías, con dedupe por código (algunos Androids disparan
+  // ambas):
+  //   1) getLaunchUrl() — la URL que LANZÓ la app (arranque en frío)
+  //   2) appUrlOpen — la app ya estaba viva y vuelve del navegador
+  // El intercambio lo hace el servicio directo (no necesita sesión
+  // ni al Medios montado); cuando entras, MediosProvider encuentra
+  // el token y arranca el reproductor.
+  // ═════════════════════════════════════════
+  const showToastRef = useRef(showToast);
+  useEffect(() => { showToastRef.current = showToast; });
+
+  const ultimoCodigoSpotifyRef = useRef<string | null>(null);
+  useEffect(() => {
+    async function procesarDeepLink(url: string) {
+      const cb = parsearCallbackSpotify(url);
+      if (!cb) return; // no era nuestro callback (maps, wa.me, etc.)
+      if (cb.error) {
+        showToastRef.current('⚠️ Spotify', 'No aceptaste el permiso de conexión', 'warning');
+        return;
+      }
+      if (!cb.code || cb.code === ultimoCodigoSpotifyRef.current) return; // dedupe
+      ultimoCodigoSpotifyRef.current = cb.code;
+      const res = await spotifyExchangeCode(cb.code);
+      if (res.ok) {
+        showToastRef.current('🎵 Spotify conectado', 'Elige una playlist y dale play', 'success');
+      } else if (res.motivo === 'redirect-uri') {
+        showToastRef.current(
+          '⚠️ Spotify',
+          'Falta registrar com.ridertrack.v2://callback en el dashboard de Spotify (1 sola vez) — mira la guía en Medios → Spotify',
+          'warning'
+        );
+      } else if (res.motivo === 'sin-verifier') {
+        // Código repetido o login viejo — silencio, no es error del usuario
+        ultimoCodigoSpotifyRef.current = null; // permite reintentar con un código nuevo
+      } else {
+        showToastRef.current('⚠️ Spotify', 'No se pudo completar la conexión — revisa tu internet y vuelve a conectar', 'warning');
+      }
+    }
+
+    let sub: { remove: () => void } | null = null;
+    (async () => {
+      try {
+        if (!Capacitor.isNativePlatform?.()) return; // solo APK
+        sub = await CapApp.addListener('appUrlOpen', (data: any) => {
+          procesarDeepLink(String(data?.url || ''));
+        });
+        // Arranque en frío: la app se ABRÓ por el deep link (no estaba
+        // viva) → appUrlOpen puede no llegar → preguntar por la URL
+        // que la lanzó.
+        const lanzamiento = await CapApp.getLaunchUrl().catch(() => null);
+        if (lanzamiento?.url) procesarDeepLink(String(lanzamiento.url));
+      } catch { /* plugin no disponible — web/dev */ }
+    })();
+    return () => { try { sub?.remove?.(); } catch { /* ya removido */ } };
+  }, []);
 
   const handleDismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
