@@ -318,6 +318,8 @@ let _docListenerListo = false;
 let _fallosDevices = 0;
 let _reconectando = false;
 let _reintentos = 0;
+// 🩹 F3.32 — cuándo EMPEZÓ la reconexión en curso (anti-atasco)
+let _reconnectStart = 0;
 
 /** Reanudar solo si sonaba hace menos de 15 min: una llamada no mata
  *  la playlist, pero tampoco queremos que la música explote sola
@@ -384,6 +386,16 @@ export async function spotifyChequearSalud(): Promise<boolean> {
   return _chequearSalud();
 }
 async function _chequearSalud(): Promise<boolean> {
+  // 🩹 F3.32 — ANTI-ATASCO: si una reconexión lleva >75s sin resolver,
+  // se libera el candado y se avisa — el botón ▶ vuelve a responder.
+  // (Antes podía quedar "reconectando…" ETERNO: el bucle del 🧪.)
+  if (_reconectando && _reconnectStart && Date.now() - _reconnectStart > 75_000) {
+    _reconectando = false;
+    _reintentos = 0;
+    if (_reintentoTimer) { clearTimeout(_reintentoTimer); _reintentoTimer = null; }
+    emitir({ estado: 'error', listo: false, mensaje: '⚠️ Spotify no quiso volver — toca ▶ para reintentar' });
+    return false;
+  }
   if (!_player || _reconectando || !_deviceId) return true;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true; // sin red: no es culpa del player
   try {
@@ -442,7 +454,18 @@ export interface ResultadoSimulacion {
 export function spotifySimularLlamada(): ResultadoSimulacion {
   if (!_accessToken) return { ok: false, msg: 'Conecta Spotify primero' };
   if (!_deviceId || !_player) return { ok: false, msg: 'Espera al 🟢 Listo antes de simular' };
-  if (_reconectando) return { ok: false, msg: '📞 Ya se está reconectando — deja que termine' };
+  if (_reconectando) {
+    // 🩹 F3.32 — si la reconexión anterior quedó atascada (>25s), el
+    // propio 🧪 la libera para poder volver a probar (antes: bucle
+    // eterno de "reconectando…").
+    if (_reconnectStart && Date.now() - _reconnectStart > 25_000) {
+      _reconectando = false;
+      _reintentos = 0;
+      if (_reintentoTimer) { clearTimeout(_reintentoTimer); _reintentoTimer = null; }
+    } else {
+      return { ok: false, msg: '📞 Ya se está reconectando — deja que termine' };
+    }
+  }
 
   const sonaba =
     !!_contexto?.reproduciendo && Date.now() - (_contexto?.momento || 0) < REANUDAR_MAX_MS;
@@ -460,14 +483,15 @@ export function spotifySimularLlamada(): ResultadoSimulacion {
   return {
     ok: true,
     msg: sonaba
-      ? '📞 Llamada simulada — la música debe volver sola en 2-4 s'
-      : '📞 Llamada simulada — el reproductor debe revivir solo (no sonaba nada)',
+      ? '📞 Llamada simulada — la música vuelve sola en unos segundos'
+      : '📞 Llamada simulada — el reproductor revive solo (no sonaba nada)',
   };
 }
 async function _reconectarPlayer(motivo: string): Promise<boolean> {
   if (_reconectando) return false;
   if (!getAccessToken() && !hayRefreshToken()) return false;
   _reconectando = true;
+  _reconnectStart = Date.now();
   _fallosDevices = 0;
   if (_reintentoTimer) { clearTimeout(_reintentoTimer); _reintentoTimer = null; }
   const contexto = _contexto;
@@ -482,10 +506,42 @@ async function _reconectarPlayer(motivo: string): Promise<boolean> {
       token = _accessToken;
     }
     if (!token) throw new Error('sin-token');
-    // player nuevo con la MISMA sesión
-    if (_player) { try { _player.disconnect(); } catch {} }
-    _player = null;
-    _deviceId = null;
+
+    // ═══ 🩹 F3.32 — PASO 1: REVIVIR EL MISMO PLAYER ═══
+    // Se le pide al SDK que reconecte su WebSocket (player.connect())
+    // y se conserva el device_id → sin carreras entre players.
+    // Era la pieza que faltaba: antes se creaba un player NUEVO al
+    // toque, y el WebSocket del viejo (todavía cerrándose) enredaba
+    // al nuevo → nunca quedaba "listo" → bucle infinito de
+    // "reconectando…" (el bug que salió con el botón 🧪).
+    if (_player) {
+      try {
+        const revivió = await conTimeout(_player.connect(), 8_000, 'revive');
+        if (revivió && _deviceId) {
+          if (contexto?.reproduciendo && Date.now() - contexto.momento < REANUDAR_MAX_MS) {
+            await _reanudar(contexto);
+            emitir({ estado: 'listo', listo: true, mensaje: '🎶 Recuperado tras la llamada' });
+          } else {
+            emitir({ estado: 'listo', listo: true, mensaje: '🟢 Listo · RiderTrack 🛵' });
+          }
+          _reintentos = 0;
+          _reconectando = false;
+          return true;
+        }
+      } catch { /* no revivió → paso 2: player nuevo */ }
+    }
+
+    // ═══ 🩹 F3.32 — PASO 2: PLAYER NUEVO (con las 2 llaves que
+    // faltaban): a) se le QUITAN los listeners al viejo (que sus
+    // not_ready fantasma no reprogramen nada) y b) se espera 1.2s
+    // a que su WebSocket cierre DE VERDAD antes de crear el nuevo.
+    if (_player) {
+      try { _player.removeAllListeners?.(); } catch {}
+      try { _player.disconnect(); } catch {}
+      _player = null;
+      _deviceId = null;
+      await new Promise<void>((r) => setTimeout(r, 1_200));
+    }
     await conTimeout(
       new Promise<void>((res) => { crearPlayer(token!, res); }),
       AJUSTES_RECONEXION.readyTimeoutMs, 'ready',
@@ -493,9 +549,9 @@ async function _reconectarPlayer(motivo: string): Promise<boolean> {
     // ¿sonaba? → que vuelva a sonar donde estaba
     if (contexto?.reproduciendo && Date.now() - contexto.momento < REANUDAR_MAX_MS) {
       await _reanudar(contexto);
-      emitir({ mensaje: '🎶 Recuperado tras la llamada' });
+      emitir({ estado: 'listo', listo: true, mensaje: '🎶 Recuperado tras la llamada' });
     } else {
-      emitir({ mensaje: '🟢 Listo · RiderTrack 🛵' });
+      emitir({ estado: 'listo', listo: true, mensaje: '🟢 Listo · RiderTrack 🛵' });
     }
     _reintentos = 0;
     _reconectando = false;
@@ -682,6 +738,20 @@ async function _api(path: string, opts: RequestInit = {}): Promise<any> {
 
 // ── Controles (misma lógica robusta de la v1 · F3.29 con timeout) ──
 export async function spotifyTogglePlay(): Promise<void> {
+  // 🩹 F3.32 — si hay una reconexión en curso NO se apila más trabajo
+  // (era una de las puertas del bucle: cada ▶ lanzaba otra reconexión
+  // encima). Pero si esa reconexión lleva >25s atascada, el propio ▶
+  // la libera y relanza — el usuario SIEMPRE tiene salida.
+  if (_reconectando) {
+    if (_reconnectStart && Date.now() - _reconnectStart > 25_000) {
+      _reconectando = false;
+      _reintentos = 0;
+      if (_reintentoTimer) { clearTimeout(_reintentoTimer); _reintentoTimer = null; }
+    } else {
+      emitir({ mensaje: '⏳ Reconectando — dame unos segundos y vuelve a tocar ▶' });
+      return;
+    }
+  }
   const p = _player;
   if (p) {
     try {
