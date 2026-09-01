@@ -799,6 +799,9 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [rapidoPosicion, setRapidoPosicion] = useState(3); // posición editable (Fase 3.7)
   // Fase 3.9 — estado del grupo MATE (heartbeat del parche del bot)
   const [estadoGrupo, setEstadoGrupo] = useState<EstadoGrupo | null>(null);
+  // 🆕 F3.33 — por qué no hay datos: 'PERMISSION_DENIED' (reglas sin
+  // publicar) / 'sin-conexion' / null (todo bien, solo falta el latido)
+  const [errorEstadoGrupo, setErrorEstadoGrupo] = useState<string | null>(null);
   // 🆕 F3.23 — picker de @menciones del grupo (botón @ en el input)
   const [pickerArroba, setPickerArroba] = useState(false);
   const [buscaMiembro, setBuscaMiembro] = useState('');
@@ -840,7 +843,10 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     const unsubPlantillas = escucharPlantillas(setPlantillas, (e) =>
       console.warn('[ChatBaileys] plantillas:', e.message)
     );
-    const unsubEstadoGrupo = suscribirEstadoGrupo(setEstadoGrupo);
+    const unsubEstadoGrupo = suscribirEstadoGrupo((e, err) => {
+      setEstadoGrupo(e);
+      setErrorEstadoGrupo(err || null);
+    });
     // Fase 3.22 — UNA suscripción a ruta_activa alimenta la insignia de la
     // lista y la ficha del chat abierto (se actualiza al marcar entregado)
     const unsubRutaClientes = suscribirRutaClientes((mapa) => setMapaRuta(mapa));
@@ -978,15 +984,37 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   // conversación ya tenía mensajes, el efecto veía "estás arriba"
   // y no bajaba: abrías un chat y te mostraba el INICIO del
   // historial en vez de lo último (bug).
+  // 🆕 F3.33: "pegado abajo". El efecto corría ANTES de que la
+  // conversación cargara sus mensajes (conexión lenta: el snapshot
+  // de Firestore tarda) → bajaba el scroll de una lista VACÍA (nada)
+  // y cuando por fin llegaban los mensajes ya no bajaba porque
+  // estabas "arriba". Ahora, al abrir un chat, el scroll se queda
+  // PEGADO abajo hasta que el contenido llegue de verdad.
   const telAnteriorRef = useRef<string | null>(null);
+  const pegadoAbajoRef = useRef(true);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const cambioDeChat = telAnteriorRef.current !== telActivo;
-    telAnteriorRef.current = telActivo;
+    if (cambioDeChat) {
+      telAnteriorRef.current = telActivo;
+      pegadoAbajoRef.current = true; // nuevo chat: pegarse abajo hasta que cargue
+    }
     const cercaDelFinal = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
-    // Al cambiar de chat sí baja siempre (empiezas en lo último)
-    if (cambioDeChat || cercaDelFinal || mensajesConv.length === 0) el.scrollTop = el.scrollHeight;
+    if (pegadoAbajoRef.current || cercaDelFinal || mensajesConv.length === 0) {
+      el.scrollTop = el.scrollHeight;
+      // El chat queda pegado mientras no haya contenido; cuando ya hay
+      // mensajes, se confirma en el frame siguiente que quedamos abajo
+      // y se suelta (recuperando el comportamiento WhatsApp normal).
+      if (mensajesConv.length > 0) {
+        requestAnimationFrame(() => {
+          const el2 = scrollRef.current;
+          if (el2 && el2.scrollHeight - el2.scrollTop - el2.clientHeight < 200) {
+            pegadoAbajoRef.current = false;
+          }
+        });
+      }
+    }
   }, [mensajesConv.length, telActivo]);
 
   // ── Mapa campaign_id → nombre ──
@@ -2412,12 +2440,40 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
               {(estadoGrupo?.miembros || []).length === 0 ? (
                 <div className="p-4 text-center space-y-2">
                   <Users className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Aún no tengo la lista de miembros del grupo.<br />
-                    Llega solita con el <b className="text-slate-300">grupo_mate.js v1.3</b> (fase 3.32)
-                    a los 5 min de reiniciar el bot + tener las <b className="text-slate-300">reglas Firestore 3.32</b> subidas.
-                    Mientras tanto puedes escribir el <b className="text-slate-300">@nombre</b> a mano — el bot lo convierte igual.
-                  </p>
+                  {/* 🆕 F3.33 — el estado vacío ahora dice POR QUÉ está vacía:
+                      permisos de Firestore, bot sin latido, o sin miembros —
+                      antes solo decía "aún no tengo la lista" y no se podía
+                      diagnosticar a distancia. */}
+                  {errorEstadoGrupo && String(errorEstadoGrupo).includes('PERMISSION') ? (
+                    <p className="text-[11px] text-rose-300 leading-relaxed">
+                      No puedo leer <b className="text-rose-200">sistema/estado_grupo</b> (permiso denegado).<br />
+                      Las <b className="text-rose-200">reglas de Firestore</b> no se publicaron bien: entra a
+                      <b className="text-rose-200"> Firebase Console → Firestore → Reglas</b>, verifica que el
+                      bloque <b className="text-rose-200">match /sistema/&#123;docId&#125;</b> esté y aprieta
+                      <b className="text-rose-200"> Publicar</b>.
+                    </p>
+                  ) : !estadoGrupo ? (
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Sin señal del bot todavía.<br />
+                      El bot escribe la lista <b className="text-slate-300">5 segundos</b> después de arrancar
+                      (y la refresca cada 5 min) con el <b className="text-slate-300">grupo_mate.js v1.4</b>.
+                      Si ya pasaron 5 min, reinicia el bot
+                      (<b className="text-slate-300">pm2 restart rudy-bot</b>) y revisa que las
+                      <b className="text-slate-300"> reglas 3.32</b> estén publicadas.
+                      Mientras tanto puedes escribir el <b className="text-slate-300">@nombre</b> a mano.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      El bot latió{' '}
+                      <b className="text-slate-300">
+                        {estadoGrupo.ts ? `hace ${Math.max(1, Math.round((Date.now() - estadoGrupo.ts) / 60000))} min` : 'recién'}
+                      </b>{' '}
+                      pero sin miembros (<b className="text-slate-300">{estadoGrupo.version || 'versión ?'}</b>).<br />
+                      Actualiza el bot al <b className="text-slate-300">grupo_mate.js v1.4</b> (fase 3.33): los
+                      grupos nuevos de WhatsApp identifican a la gente con un ID interno que la versión
+                      anterior descartaba. Mientras tanto puedes escribir el <b className="text-slate-300">@nombre</b> a mano.
+                    </p>
+                  )}
                 </div>
               ) : (
                 (estadoGrupo?.miembros || [])
@@ -2438,7 +2494,15 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                           {x.nombre}
                           {x.admin && <span className="ml-1 text-[9px] text-amber-400/80 font-black">ADMIN</span>}
                         </span>
-                        <span className="block text-[10px] text-slate-500 truncate">{'@' + x.jid.split('@')[0]}</span>
+                        {/* 🆕 F3.33 — los miembros con ID interno (@lid) no tienen
+                            número visible: mostramos etiqueta en vez del número
+                            larguísimo. El nombre se aprende cuando la persona
+                            escribe en el grupo. */}
+                        <span className="block text-[10px] text-slate-500 truncate">
+                          {x.jid.endsWith('@lid')
+                            ? 'ID interno · el nombre se aprende al escribir'
+                            : '@' + x.jid.split('@')[0]}
+                        </span>
                       </span>
                       <AtSign className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                     </button>
@@ -2448,6 +2512,30 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                 (estadoGrupo?.miembros || []).filter((x) => x.nombre.toLowerCase().includes(buscaMiembro.toLowerCase().trim())).length === 0 && (
                   <p className="p-3 text-center text-[11px] text-slate-500">Nadie coincide con «{buscaMiembro}»</p>
                 )}
+            </div>
+            {/* 🆕 F3.33 — pie de diagnóstico: versión del parche, antigüedad del
+                latido y error de lectura. Sirve para saber qué está pasando sin
+                tener que abrir Termux. */}
+            <div className="px-4 py-2 border-t border-slate-700/70 bg-slate-900/60">
+              <p className="text-[10px] text-slate-500 leading-relaxed truncate">
+                {errorEstadoGrupo ? (
+                  <span className="text-rose-300/80">⚠️ Lectura: {errorEstadoGrupo}</span>
+                ) : estadoGrupo ? (
+                  <>
+                    <span className={estadoGrupoVivo(estadoGrupo) ? 'text-emerald-400/80' : 'text-amber-400/80'}>
+                      {estadoGrupoVivo(estadoGrupo) ? '●' : '○'}
+                    </span>{' '}
+                    {estadoGrupo.version || 'sin versión'} · latido{' '}
+                    {estadoGrupo.ts
+                      ? `hace ${Math.max(0, Math.round((Date.now() - estadoGrupo.ts) / 60000))} min`
+                      : '—'}
+                    {' · '}
+                    {(estadoGrupo?.miembros || []).length} miembro(s)
+                  </>
+                ) : (
+                  'Esperando el primer latido del bot…'
+                )}
+              </p>
             </div>
           </div>
         </div>
