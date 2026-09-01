@@ -12,6 +12,22 @@
 //   - cola_envio/campanas  → los broadcasts masivos 📢
 //                            (+ notas de voz 🎙️ Fase 3.3)
 //
+// FASE 3.27 — FIX "NO SE LIMPIA EL CHAT" (reporte probando la 3.26):
+//   ✅ LIMPIAR EL GRUPO MATE YA FUNCIONA — bug de la 3.26: al limpiar
+//      el grupo se GUARDABA la marca con la clave correcta
+//      (rt2_chat_limpiado_GRUPO_MATE) pero al LEERLA se pasaba por
+//      telKey() → "GRUPO_MATE" se quedaba "" → leía otra clave que
+//      jamás se escribió → el corte NUNCA se aplicaba ("limpio el
+//      grupo y no pasa nada"). Ahora escribir y leer usan el MISMO
+//      helper claveLimpiezaChat() — imposible que vuelvan a divergir.
+//   ✅ BORRAR CHAT BORRA DE VERDAD — antes las burbujas de ACCIONES
+//      del bot (✅ Aviso de entrega enviado, 📍 Posición del rider...)
+//      sobrevivían al "Borrar chat" (viven en acciones_bot, que no
+//      se tocaba) → el chat quedaba sucio con avisos viejos y la
+//      conversación no desaparecía de la lista. Ahora se borran las
+//      acciones YA PROCESADAS; las PENDIENTES se respetan (siguen
+//      en la cola del bot y se enviarán normal).
+//
 // FASE 3.26:
 //   ✅ NOMBRE + NÚMERO DE QUIEN ESCRIBE EN EL GRUPO MATE — cada
 //      burbuja entrante del grupo muestra "Carlos Venta · +51 987
@@ -161,6 +177,7 @@ import {
   InfoClienteRuta,
   stColorRuta,
   limpiarHistorialChat,
+  corteLimpiezaChat,
   colorAutorGrupo,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
@@ -1104,7 +1121,8 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
       try {
         const res = await borrarChatCompleto(tel);
         ok++;
-        totalMensajes += res.entrantes + res.salientes;
+        // F3.27 — incluye las burbujas de acciones del bot borradas
+        totalMensajes += res.entrantes + res.salientes + (res.acciones || 0);
       } catch {
         fallos++;
       }
@@ -1218,7 +1236,14 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     setBorrando(true);
     try {
       const res = await borrarChatCompleto(convActiva.tel);
-      toast('🗑️ Chat borrado', `${res.entrantes + res.salientes} mensajes eliminados — la conversación desapareció de la lista`, 'success');
+      // F3.27 — ahora el conteo incluye las burbujas de acciones del
+      // bot (avisos de entrega, posición, QR...) que antes sobrevivían
+      const total = res.entrantes + res.salientes + (res.acciones || 0);
+      toast(
+        '🗑️ Chat borrado',
+        `${total} mensajes eliminados — la conversación desapareció de la lista`,
+        'success'
+      );
       setTelActivo(null);
       setConfirmBorrar(false);
     } catch (e: any) {
@@ -1939,10 +1964,26 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                 {mensajesAgrupados.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
                     <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
-                    <div className="text-sm font-semibold text-slate-400">Sin mensajes aún</div>
-                    <div className="text-xs mt-1">
-                      {esGrupo ? 'Escribe algo para el grupo de trabajo' : 'Escribe el primero o pídele su ubicación al cliente'}
-                    </div>
+                    {/* F3.27 — si limpiaste el historial, el estado vacío lo dice
+                        (antes decía «Sin mensajes aún» y confundía: parecía un
+                        chat nuevo en vez de un chat recién limpiado) */}
+                    {corteLimpiezaChat(convActiva?.tel || '') > 0 ? (
+                      <>
+                        <div className="text-sm font-semibold text-cyan-300">🧹 Historial limpio</div>
+                        <div className="text-xs mt-1 text-slate-400">
+                          {esGrupo
+                            ? 'El grupo sigue abierto — los mensajes nuevos llegarán aquí'
+                            : 'El chat sigue abierto — los mensajes nuevos llegarán aquí'}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold text-slate-400">Sin mensajes aún</div>
+                        <div className="text-xs mt-1">
+                          {esGrupo ? 'Escribe algo para el grupo de trabajo' : 'Escribe el primero o pídele su ubicación al cliente'}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   mensajesAgrupados.map((g, gi) => (
