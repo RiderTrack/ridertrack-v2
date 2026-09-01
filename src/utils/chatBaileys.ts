@@ -1415,8 +1415,9 @@ export interface EstadoGrupo {
   ts?: number;
   version?: string;
   error?: string;
-  /** 🆕 F3.23 — miembros del grupo [{jid, nombre}] para los @arrobas */
-  miembros?: { jid: string; nombre: string }[];
+  /** 🆕 F3.23 — miembros del grupo [{jid, nombre}] para los @arrobas.
+   *  🆕 F3.32 — ahora con admin: true para pintar 👑 (rol real del grupo) */
+  miembros?: { jid: string; nombre: string; admin?: boolean }[];
 }
 
 /** El estado se considera vivo si el bot latió hace menos de 15 min */
@@ -1426,8 +1427,14 @@ export function estadoGrupoVivo(e: EstadoGrupo | null): boolean {
   return ts > 0 && Date.now() - ts < 15 * 60 * 1000;
 }
 
-/** Suscripción en vivo al estado del grupo (null = sin parche aún) */
-export function suscribirEstadoGrupo(cb: (e: EstadoGrupo | null) => void): () => void {
+/** Suscripción en vivo al estado del grupo (null = sin parche aún).
+ *  🆕 F3.33 — el segundo parámetro lleva el error de Firestore cuando
+ *  la lectura falla (p. ej. PERMISSION_DENIED = reglas sin publicar):
+ *  la app lo muestra en el picker @ para poder diagnosticar a
+ *  distancia en vez de quedarse mudo con la lista vacía. */
+export function suscribirEstadoGrupo(
+  cb: (e: EstadoGrupo | null, error?: string) => void
+): () => void {
   try {
     return onSnapshot(
       doc(db!, 'sistema', 'estado_grupo'),
@@ -1446,14 +1453,19 @@ export function suscribirEstadoGrupo(cb: (e: EstadoGrupo | null) => void): () =>
             ? d.miembros
                 .filter((x: any) => x && x.jid)
                 .slice(0, 60)
-                .map((x: any) => ({ jid: String(x.jid), nombre: String(x.nombre || '').trim() || 'Miembro' }))
+                .map((x: any) => ({
+                  jid: String(x.jid),
+                  nombre: String(x.nombre || '').trim() || 'Miembro',
+                  // 🆕 F3.32 — el rol de admin llega del latido del bot
+                  admin: x.admin === true || x.admin === 'admin' ? true : undefined,
+                }))
             : undefined,
         });
       },
-      () => cb(null)
+      (err: any) => cb(null, String(err?.code || err?.message || 'error'))
     );
   } catch {
-    cb(null);
+    cb(null, 'sin-conexion');
     return () => undefined;
   }
 }
