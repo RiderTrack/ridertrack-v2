@@ -321,6 +321,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
       if (tipo === 'avisar_entrega') {
         // Guard anti-doble: si luego marcas entregado, no se repite
         registrarAvisoEnviado(claveAviso(c.cel));
+        // 🙏 F3.46 — ficha marcada "ya le llegó su gracias" (persistente)
+        actualizarCliente(c.id, { graciasEnviado: true });
       }
       onShowToast?.(
         tipo === 'avisar_entrega' ? '🙏 Gracias enviado' : '🤖 Bot',
@@ -935,10 +937,10 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                             : modoAvisoDe(c.aviso) === 'auto_texto'
                             ? 'bg-amber-500/15 border-amber-500/50'
                             : 'bg-slate-700 border-slate-600'
-                        }`}
-                        title={`Aviso al entregar — ${ETIQUETA_MODO[modoAvisoDe(c.aviso)].largo}`}
+                        } ${c.graciasEnviado ? 'opacity-50' : ''}`}
+                        title={`Aviso al entregar — ${ETIQUETA_MODO[modoAvisoDe(c.aviso)].largo}${c.graciasEnviado ? ' · ya recibió su gracias ✓' : ''}`}
                       >
-                        🙏
+                        {c.graciasEnviado ? '🙏✓' : '🙏'}
                       </button>
                       <button
                         onClick={() => compartirSeguimiento(c)}

@@ -549,10 +549,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         },
         ...extra,
       });
-      // 🙏 F3.44: si acabas de mandar el gracias a mano, el disparo
-      // automático al marcar entregado se calla 5 min (anti doble)
+      // 🙏 F3.44/F3.46: si acabas de mandar el gracias a mano, (1) el
+      // disparo automático se calla 5 min (anti doble inmediato) y
+      // (2) su ficha queda marcada "graciasEnviado" (persistente —
+      // si lo marcaste entregado antes, no vuelve a sonar mañana).
       if (tipo === 'avisar_entrega') {
         registrarAvisoEnviado(claveAviso(cliente.cel));
+        actualizarCliente(cliente.id, { graciasEnviado: true });
       }
       onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
     } catch (e: any) {

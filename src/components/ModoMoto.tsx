@@ -242,6 +242,9 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
         enviar_imagen: conImagen,
       });
       registrarAvisoEnviado(claveAviso(c.cel));
+      // 🙏 F3.46 — ficha marcada "ya le llegó su gracias" (persistente:
+      // si después lo marcás cobrado, no vuelve a sonar)
+      actualizarCliente(c.id, { graciasEnviado: true });
       setPanel('ninguno');
       onShowToast?.('🙏 Gracias enviado', `El bot le manda el mensajito a ${c.nombre || 'el cliente'}`, 'success');
     } catch {
