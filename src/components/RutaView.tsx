@@ -51,6 +51,8 @@ import { esPagoEmpresa } from '../utils/realData';
 import { sonarPago } from '../services/notificaciones';
 // Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
 import { GRUPO_MATE_JID } from '../utils/chatBaileys';
+// 🙏 F3.34: modo del "gracias por tu compra" (auto/manual como la v1)
+import { ModoGracias, leerModoGracias, persistirModoGracias } from '../utils/modoGracias';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -60,6 +62,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
   const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
+
+  // 🙏 F3.34 — "Gracias por tu compra" como la v1: al marcar un pago,
+  // el bot puede mandar solo la tarjeta+plantilla (auto_imagen), solo
+  // la plantilla (auto_texto) o nada (manual → se manda desde 🎯 Control
+  // de mensajes o el modal 🤖 Bot, como hasta ahora).
+  const [graciasModalAbierto, setGraciasModalAbierto] = useState(false);
+  const modoGracias: ModoGracias = leerModoGracias(config);
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
@@ -345,6 +354,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     ['empresa', '🏪', 'Empresa'],
   ];
 
+  // 🙏 F3.34: estados que cuentan como ENTREGADO (misma lista que usa la
+  // lista de clientes para el puntito verde). Se usa para que el "gracias"
+  // auto solo salga la PRIMERA vez que se marca el pago — si corriges el
+  // método de pago (efectivo→yape) NO se re-envía.
+  const ESTADOS_ENTREGADOS = [
+    'efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos',
+    'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio',
+  ];
+
   const estadosFallidos = [
     ['fallida', '❌', 'Fallida'],
     ['reprogramar', '🔄', 'Reprog.'],
@@ -550,6 +568,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
     } catch (e: any) {
       onShowToast?.('Error', e.message || 'No se pudo enviar', 'error');
+    }
+  };
+
+  // 🙏 F3.34: guarda el modo del "gracias por tu compra" — localStorage
+  // (instantáneo para TODAS las vistas, incluso la pestaña Pedidos) +
+  // Firestore config_empresa (sobrevive reinstalaciones).
+  const guardarModoGracias = async (modo: ModoGracias) => {
+    persistirModoGracias(modo);
+    try {
+      await guardarConfig({ ...config, gracias: { modo } });
+      onShowToast?.(
+        '🙏 Gracias por tu compra',
+        modo === 'manual' ? 'Modo manual — lo envías tú (🎯 Control)' : modo === 'auto_texto' ? 'Automático: solo plantilla' : 'Automático: imagen + plantilla',
+        'success'
+      );
+      setGraciasModalAbierto(false);
+    } catch (e: any) {
+      onShowToast?.('Error', e?.message || 'No se pudo guardar el modo', 'error');
     }
   };
 
@@ -1276,15 +1312,41 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                     {/* Botones de pago - SIEMPRE visibles */}
                     <div>
-                        <div className="text-[9px] text-slate-500 uppercase mb-1">Pago</div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[9px] text-slate-500 uppercase">Pago</div>
+                          {/* 🙏 F3.34: chip del modo del "gracias por tu compra" */}
+                          <button
+                            onClick={() => setGraciasModalAbierto(true)}
+                            title="F3.34 — cómo se manda el 'gracias por tu compra' al marcar un pago (automático o manual, como la v1)"
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all active:scale-95 ${
+                              modoGracias === 'auto_imagen' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                              : modoGracias === 'auto_texto' ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                              : 'bg-slate-700/60 border-slate-600 text-slate-400'
+                            }`}
+                          >
+                            {modoGracias === 'auto_imagen' ? '🙏 Auto 📷' : modoGracias === 'auto_texto' ? '🙏 Auto 📝' : '✋ Manual'}
+                          </button>
+                        </div>
                         <div className="grid grid-cols-3 gap-1">
                           {pagosList.map(([id, emoji, label]) => (
                             <button
                               key={id}
                               onClick={() => {
+                                const yaEntregado = ESTADOS_ENTREGADOS.includes(String(c.st || ''));
                                 cambiarEstado(c.id, id);
                                 sonarPago(); // 🔔 Fase 3.14
                                 onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
+                                // 🙏 F3.34: modo automático → el bot manda el
+                                // "gracias por tu compra" (tarjeta+plantilla o
+                                // solo texto). Solo la PRIMERA vez que se marca
+                                // (corregir el método de pago NO re-envía).
+                                if (!yaEntregado && modoGracias !== 'manual') {
+                                  enviarAccionBot(c, 'avisar_entrega', {
+                                    enviar_imagen: modoGracias === 'auto_imagen',
+                                    modo_entrega: modoGracias,
+                                    st: id,
+                                  });
+                                }
                               }}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
                                 id === 'efectivo' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -2092,10 +2154,30 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   });
                                   // Cambiar estado del cliente según tipo
                                   if (pagoFotoTipo === 'entregado') {
+                                    const yaEntregado = ESTADOS_ENTREGADOS.includes(String(c.st || ''));
                                     cambiarEstado(c.id, 'efectivo');
+                                    // 🙏 F3.34: "gracias por tu compra" automático
+                                    // (solo si no estaba ya marcado como entregado)
+                                    if (!yaEntregado && modoGracias !== 'manual') {
+                                      enviarAccionBot(c, 'avisar_entrega', {
+                                        enviar_imagen: modoGracias === 'auto_imagen',
+                                        modo_entrega: modoGracias,
+                                        st: 'efectivo',
+                                      });
+                                    }
                                   } else if (pagoFotoTipo === 'comprobante') {
                                     const estadoMap: Record<string, string> = { yape: 'yape-rudy', plin: 'yape-plin', efectivo: 'efectivo', transferencia: 'transferencia', pos: 'pos', mixto: 'mixto' };
-                                    cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
+                                    const nuevoEstadoFoto = estadoMap[pagoFotoMetodo] || 'efectivo';
+                                    const yaEntregadoFoto = ESTADOS_ENTREGADOS.includes(String(c.st || ''));
+                                    cambiarEstado(c.id, nuevoEstadoFoto);
+                                    // 🙏 F3.34: también al registrar un comprobante de pago
+                                    if (!yaEntregadoFoto && modoGracias !== 'manual') {
+                                      enviarAccionBot(c, 'avisar_entrega', {
+                                        enviar_imagen: modoGracias === 'auto_imagen',
+                                        modo_entrega: modoGracias,
+                                        st: nuevoEstadoFoto,
+                                      });
+                                    }
                                   }
                                   onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado a MATE`, 'success');
                                   setPagoFotoModalId(null);
@@ -2574,6 +2656,72 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           }}
           onShowToast={onShowToast}
         />
+      )}
+
+      {/* ═══ Modal 🙏 Modo "Gracias por tu compra" (F3.34 — como la v1) ═══ */}
+      {graciasModalAbierto && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setGraciasModalAbierto(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-bold text-white">🙏 Gracias por tu compra</h3>
+              <button onClick={() => setGraciasModalAbierto(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="text-xs text-slate-400 mb-2">
+              ¿Qué hace el bot cuando <span className="text-white font-bold">marcas un pago</span>? (igual que la v1)
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => guardarModoGracias('auto_imagen')}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-95 border ${
+                  modoGracias === 'auto_imagen' ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300' : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+                }`}
+              >
+                <span className="text-lg">📷</span>
+                <div className="flex-1">
+                  <div className="text-sm font-bold">Con imagen · automático</div>
+                  <div className="text-[10px] text-slate-500">Al marcar el pago, el bot manda la tarjeta de gracias (imagen) + la plantilla de siempre</div>
+                </div>
+                {modoGracias === 'auto_imagen' && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+              </button>
+
+              <button
+                onClick={() => guardarModoGracias('auto_texto')}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-95 border ${
+                  modoGracias === 'auto_texto' ? 'bg-amber-500/15 border-amber-500/50 text-amber-300' : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400'
+                }`}
+              >
+                <span className="text-lg">📝</span>
+                <div className="flex-1">
+                  <div className="text-sm font-bold">Solo texto · automático</div>
+                  <div className="text-[10px] text-slate-500">Manda "gracias por tu compra" con la plantilla, sin imagen (más seguro si el cliente no respondió)</div>
+                </div>
+                {modoGracias === 'auto_texto' && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />}
+              </button>
+
+              <button
+                onClick={() => guardarModoGracias('manual')}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all active:scale-95 border ${
+                  modoGracias === 'manual' ? 'bg-slate-600/30 border-slate-400 text-slate-200' : 'bg-slate-700/40 hover:bg-slate-600/40 border-slate-600 text-slate-300'
+                }`}
+              >
+                <span className="text-lg">✋</span>
+                <div className="flex-1">
+                  <div className="text-sm font-bold">Manual (como hasta ahora)</div>
+                  <div className="text-[10px] text-slate-500">No se manda nada solo — lo envías tú desde 🎯 Control de mensajes o el modal 🤖 Bot</div>
+                </div>
+                {modoGracias === 'manual' && <CheckCircle2 className="w-4 h-4 text-slate-300 shrink-0" />}
+              </button>
+            </div>
+
+            <div className="text-[10px] text-slate-500 pt-1 leading-relaxed">
+              💡 Se envía solo la <span className="text-slate-300 font-bold">primera vez</span> que marcas el pago del cliente — si corriges el método (efectivo → yape) no se re-envía.
+              La plantilla es la de siempre ("✅ Entrega completada") y la puedes editar desde el panel del bot. El bot se queda callado después (igual que la v1).
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
