@@ -33,6 +33,8 @@ import { AvatarSvg } from '../data/avatars';
 import { AvatarPicker } from './AvatarPicker';
 // Fase 3.35: 🛣️ kilometraje en el menú (hoy/ayer/7 días/total)
 import { OdometroMenuStats } from './OdometroCard';
+// F3.36: 🔧 mantenimiento de la moto (estado rápido en el menú)
+import { MantenimientoMenuStats } from './MantenimientoCard';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -188,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.35</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.36</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -258,6 +260,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* 🛣️ Fase 3.35: kilometraje del odómetro GPS — stats rápidas
           Hoy / Ayer / 7 días / Total (se actualizan en vivo) */}
       <OdometroMenuStats uid={uid} colapsado={isCollapsed} />
+
+      {/* 🔧 Fase 3.36: mantenimiento de la moto — vencidos / por
+          vencer / próximo, con badge rojo si algo venció */}
+      <MantenimientoMenuStats uid={uid} colapsado={isCollapsed} />
 
       {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">

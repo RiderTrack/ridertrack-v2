@@ -35,6 +35,8 @@ import {
 import { useAuth } from '../hooks/useAuth';
 // F3.35: 🛣️ odómetro GPS en vivo (km de hoy + calibración)
 import { OdometroCard } from './OdometroCard';
+// F3.36: 🔧 recordatorios de mantenimiento con los km del odómetro
+import { MantenimientoCard } from './MantenimientoCard';
 import {
   construirLinkSeguimiento,
   mensajeSeguimiento,
@@ -651,6 +653,11 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
 
       {/* ══════ 🛣️ ODÓMETRO GPS (Fase 3.35) ══════ */}
       <OdometroCard uid={user?.uid} onShowToast={onShowToast} />
+
+      {/* ══════ 🔧 MANTENIMIENTO (Fase 3.36) — recordatorios con
+          los km del odómetro: barra de avance por item, ✓ registrar
+          hecho, historial, intervalos editables ══════ */}
+      <MantenimientoCard uid={user?.uid} onShowToast={onShowToast} />
 
       {/* ══════ 🍽️ REFRIGERIO ══════ */}
       <div id="refri-card" className={`rounded-2xl border p-3.5 transition-colors ${
