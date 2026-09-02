@@ -251,8 +251,10 @@ export function useRefrigerio(uid?: string | null) {
 // Estas funciones lo pausan/reanudan DESDE CUALQUIER VISTA
 // (el componente no necesita estar montado) y avisan con el
 // evento 'rt-crono-cambio' para que CronometroRuta recargue.
+// (F3.40: exportada — el Modo Moto también arranca/pausa el
+// cronómetro con sus botones gigantes.)
 
-function persistirCrono(uid: string | null | undefined, st: CronoRutaState) {
+export function persistirCrono(uid: string | null | undefined, st: CronoRutaState) {
   try {
     localStorage.setItem(`rt_crono_${uid || 'anon'}`, JSON.stringify(st));
   } catch {
