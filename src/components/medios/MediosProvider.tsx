@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // 🎛️ MEDIOS PROVIDER (Fase 3.11 · deeplink a App en F3.28)
-// Estado GLOBAL de radio + Spotify + YouTube, montado en App:
+// Estado GLOBAL de radio + Spotify + YouTube + Podcasts (F3.43),
+// montado en App:
 //   • El <audio> de radio, el player de Spotify y el iframe de
 //     YouTube viven AQUÍ (no en la vista) → la música sigue
 //     sonando al cambiar de pestaña (Mi Ruta, Chat, etc.)
@@ -28,11 +29,27 @@ import {
   YouTubeEstado, subscribeYouTube, tocarYouTube, ytTogglePlay, ytDetener,
   extraerVideoId, getEstadoYouTube,
 } from '../../services/mediosYouTube';
+// F3.43: 🎧 podcasts RSS — mismo player de la app, pausa cortés
+import {
+  EpisodioRSS,
+  EstadoPodcastsRSS,
+  arrancarPodcastsRSS,
+  snapshotPodcastsRSS,
+  suscribirPodcastsRSS,
+  tocarEpisodioRSS,
+  toggleEpisodioRSS,
+  detenerEpisodioRSS,
+  saltarEpisodioRSS,
+  fijarVelocidadRSS,
+  pausarEpisodioRSS,
+} from '../../services/podcastRSS';
+// F3.42/F3.43: la jornada hablada (TTS) se corta cuando suena un episodio
+import { detenerPodcast as detenerJornadaHablada } from '../../services/podcast';
 
 /** ID del contenedor persistente del iframe de YouTube */
 export const YT_CONTAINER_ID = 'rt-yt-player-container';
 
-export type FuenteMedia = 'radio' | 'spotify' | 'youtube';
+export type FuenteMedia = 'radio' | 'spotify' | 'youtube' | 'podcast';
 
 interface MediosContexto {
   radio: RadioEstado;
@@ -64,6 +81,14 @@ interface MediosContexto {
   youtubeToggle: () => void;
   youtubeDetener: () => void;
 
+  // F3.43: 🎧 podcasts RSS (mismo player de la app)
+  podcast: EstadoPodcastsRSS;
+  podcastTocar: (ep: EpisodioRSS) => void;
+  podcastToggle: () => void;
+  podcastDetener: () => void;
+  podcastSaltar: (seg: number) => void;
+  podcastVelocidad: (v: number) => void;
+
   fuenteActiva: FuenteMedia | null;
   algoCargado: boolean;
 }
@@ -79,7 +104,9 @@ export function useMedios(): MediosContexto {
 export const MediosProvider: React.FC<{
   children: React.ReactNode;
   onShowToast?: (titulo: string, desc?: string, tipo?: 'success' | 'info' | 'warning' | 'error') => void;
-}> = ({ children, onShowToast }) => {
+  /** F3.43: uid del rider — arranque del servicio de podcasts */
+  uid?: string | null;
+}> = ({ children, onShowToast, uid }) => {
   const engineRef = useRef<RadioEngine | null>(null);
   if (!engineRef.current) engineRef.current = new RadioEngine();
   const engine = engineRef.current;
@@ -91,14 +118,24 @@ export const MediosProvider: React.FC<{
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [playlistsCargando, setPlaylistsCargando] = useState(false);
   const [ultimaFuente, setUltimaFuente] = useState<FuenteMedia | null>(null);
+  // F3.43: 🎧 estado del podcast RSS
+  const [podcast, setPodcast] = useState<EstadoPodcastsRSS>(() => snapshotPodcastsRSS());
 
-  // ── Suscripciones a los 3 motores ──
+  // ── Suscripciones a los 4 motores ──
   useEffect(() => {
     engine.onCambio = (e) => setRadio({ ...e });
     const offSp = subscribeSpotify((e) => setSpotify(e));
     const offYt = subscribeYouTube((e) => setYouTube(e));
-    return () => { engine.onCambio = null; offSp(); offYt(); };
+    const offPod = suscribirPodcastsRSS(() => setPodcast(snapshotPodcastsRSS()));
+    return () => { engine.onCambio = null; offSp(); offYt(); offPod(); };
   }, [engine]);
+
+  // ── F3.43: arranque del servicio de podcasts con el uid ──
+  useEffect(() => {
+    if (!uid) return;
+    const off = arrancarPodcastsRSS(uid);
+    return off;
+  }, [uid]);
 
   // ── Restaurar sesión de Spotify (token fresco o refresh) ──
   // F3.28: si el deep link YA intercambió el código (App.tsx lo
@@ -146,6 +183,7 @@ export const MediosProvider: React.FC<{
     // corta las otras fuentes si estaban sonando
     if (spotify?.track?.reproduciendo) spotifyTogglePlay();
     if (youtube?.reproduciendo) ytTogglePlay();
+    if (snapshotPodcastsRSS().fase === 'reproduciendo') pausarEpisodioRSS();
     engine.play(est);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, spotify?.track?.reproduciendo, youtube?.reproduciendo]);
@@ -163,6 +201,7 @@ export const MediosProvider: React.FC<{
     setUltimaFuente('spotify');
     if (engine.reproduciendo) engine.pausar();
     if (getEstadoYouTube().reproduciendo) ytTogglePlay();
+    if (snapshotPodcastsRSS().fase === 'reproduciendo') pausarEpisodioRSS();
     spotifyTogglePlay();
   }, [engine]);
 
@@ -189,6 +228,7 @@ export const MediosProvider: React.FC<{
     setUltimaFuente('spotify');
     if (engine.reproduciendo) engine.pausar();
     if (getEstadoYouTube().reproduciendo) ytTogglePlay();
+    if (snapshotPodcastsRSS().fase === 'reproduciendo') pausarEpisodioRSS();
     spotifyTocarPlaylist(uri).then((ok) => {
       if (!ok) onShowToast?.('⚠️ Spotify', 'El dispositivo aún no está listo — espera unos segundos', 'warning');
     });
@@ -198,6 +238,7 @@ export const MediosProvider: React.FC<{
     setUltimaFuente('spotify');
     if (engine.reproduciendo) engine.pausar();
     if (getEstadoYouTube().reproduciendo) ytTogglePlay();
+    if (snapshotPodcastsRSS().fase === 'reproduciendo') pausarEpisodioRSS();
     spotifyTocarMeGusta().then((ok) => {
       if (!ok) onShowToast?.('⚠️ Spotify', 'El dispositivo aún no está listo — espera unos segundos', 'warning');
     });
@@ -210,6 +251,7 @@ export const MediosProvider: React.FC<{
     setUltimaFuente('youtube');
     if (engine.reproduciendo) engine.pausar();
     if (spotify?.track?.reproduciendo) spotifyTogglePlay();
+    if (snapshotPodcastsRSS().fase === 'reproduciendo') pausarEpisodioRSS();
     tocarYouTube(id, YT_CONTAINER_ID);
     return true;
   }, [engine, spotify?.track?.reproduciendo]);
@@ -220,14 +262,38 @@ export const MediosProvider: React.FC<{
   }, []);
   const youtubeDetener = useCallback(() => ytDetener(), []);
 
+  // ── F3.43: acciones podcasts RSS ──
+  const podcastTocar = useCallback((ep: EpisodioRSS) => {
+    setUltimaFuente('podcast');
+    // corta las otras fuentes + la jornada hablada (TTS F3.42)
+    if (engine.reproduciendo) engine.pausar();
+    if (spotify?.track?.reproduciendo) spotifyTogglePlay();
+    if (getEstadoYouTube().reproduciendo) ytTogglePlay();
+    try { detenerJornadaHablada(); } catch { /* sin jornada sonando */ }
+    void tocarEpisodioRSS(ep);
+  }, [engine, spotify?.track?.reproduciendo]);
+
+  const podcastToggle = useCallback(() => {
+    setUltimaFuente('podcast');
+    toggleEpisodioRSS();
+  }, []);
+
+  const podcastDetener = useCallback(() => { detenerEpisodioRSS(); }, []);
+
+  const podcastSaltar = useCallback((seg: number) => { saltarEpisodioRSS(seg); }, []);
+
+  const podcastVelocidad = useCallback((v: number) => { fijarVelocidadRSS(v); }, []);
+
   // ── Fuente activa para el mini-reproductor ──
   const fuenteActiva: FuenteMedia | null =
     (ultimaFuente === 'radio' && radio.estacion) ? 'radio'
     : (ultimaFuente === 'spotify' && spotify?.track) ? 'spotify'
     : (ultimaFuente === 'youtube' && youtube?.videoId) ? 'youtube'
+    : (ultimaFuente === 'podcast' && podcast.episodio) ? 'podcast'
     : radio.estacion ? 'radio'
     : spotify?.track ? 'spotify'
     : youtube?.videoId ? 'youtube'
+    : podcast.episodio ? 'podcast'
     : null;
 
   const algoCargado = !!fuenteActiva;
@@ -241,6 +307,7 @@ export const MediosProvider: React.FC<{
     spotifyLike, spotifyDesconectar, spotifyTocar, spotifyTocarMegusta,
     youtube: youtube || { videoId: null, titulo: '', reproduciendo: false, cargando: false, error: null },
     youtubeTocar, youtubeToggle, youtubeDetener,
+    podcast, podcastTocar, podcastToggle, podcastDetener, podcastSaltar, podcastVelocidad,
     fuenteActiva, algoCargado,
   };
 

@@ -11,13 +11,25 @@
 // no pelearse con el iframe que crea la API de YouTube.
 // ═══════════════════════════════════════════════════════════
 
-import React, { useEffect } from 'react';
-import { Pause, Play, X, Music2, Youtube } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Pause, Play, X, Music2, Youtube, Podcast as PodcastIcon } from 'lucide-react';
 import { useMedios, YT_CONTAINER_ID } from './MediosProvider';
+import { formatearTiempoPlayer } from '../../utils/podcastRssCore';
+import { posicionVivaRSS } from '../../services/podcastRSS';
 
 export const MiniPlayerReproductor: React.FC<{ mediosVisible?: boolean }> = ({ mediosVisible = false }) => {
   const m = useMedios();
-  const { radio, spotify, youtube, fuenteActiva, algoCargado } = m;
+  const { radio, spotify, youtube, podcast, fuenteActiva, algoCargado } = m;
+
+  // F3.43: posición viva del episodio (1 s, SOLO este componente —
+  // el timeupdate del audio no re-renderiza toda la app)
+  const [segMini, setSegMini] = useState(podcast.seg);
+  useEffect(() => {
+    setSegMini(podcast.seg);
+    if (fuenteActiva !== 'podcast' || podcast.fase !== 'reproduciendo') return;
+    const t = setInterval(() => setSegMini(posicionVivaRSS()), 1000);
+    return () => clearInterval(t);
+  }, [fuenteActiva, podcast.fase, podcast.seg, podcast.episodio?.url]);
 
   // Reserva espacio abajo para que la barra no tape contenido
   useEffect(() => {
@@ -61,17 +73,27 @@ export const MiniPlayerReproductor: React.FC<{ mediosVisible?: boolean }> = ({ m
     titulo = youtube.titulo || 'YouTube';
     subtitulo = youtube.cargando ? 'Cargando…' : youtube.reproduciendo ? 'Reproduciendo' : 'Pausado';
     sonando = youtube.reproduciendo;
+  } else if (fuenteActiva === 'podcast' && podcast.episodio) {
+    // F3.43: 🎧 episodio de podcast (novelas/audiolibros)
+    icono = <PodcastIcon className="w-4 h-4 text-violet-400" />;
+    titulo = podcast.episodio.titulo;
+    subtitulo = podcast.fase === 'cargando'
+      ? 'Cargando…'
+      : `${podcast.episodio.podcastTitulo} · ${formatearTiempoPlayer(segMini)}${podcast.velocidad !== 1 ? ` · ${podcast.velocidad}×` : ''}`;
+    sonando = podcast.fase === 'reproduciendo';
   }
 
   const toggle = () => {
     if (fuenteActiva === 'radio') m.radioToggle();
     else if (fuenteActiva === 'spotify') m.spotifyToggle();
     else if (fuenteActiva === 'youtube') m.youtubeToggle();
+    else if (fuenteActiva === 'podcast') m.podcastToggle();
   };
   const detener = () => {
     if (fuenteActiva === 'radio') m.radioDetener();
     else if (fuenteActiva === 'spotify') m.spotifyDesconectar();
     else if (fuenteActiva === 'youtube') m.youtubeDetener();
+    else if (fuenteActiva === 'podcast') m.podcastDetener();
   };
 
   return (
