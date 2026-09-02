@@ -31,6 +31,8 @@ import {
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
 import { AvatarPicker } from './AvatarPicker';
+// Fase 3.35: 🛣️ kilometraje en el menú (hoy/ayer/7 días/total)
+import { OdometroMenuStats } from './OdometroCard';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -51,6 +53,8 @@ interface SidebarProps {
   riderAvatar?: string;
   onSeleccionarAvatar?: (avatarId: string) => Promise<void>;
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  /** Fase 3.35: uid del rider — para las stats del odómetro en el menú */
+  uid?: string | null;
 }
 
 interface MenuItem {
@@ -81,6 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   riderAvatar,
   onSeleccionarAvatar,
   onShowToast,
+  uid,
 }) => {
   const [pickerAbierto, setPickerAbierto] = useState(false);
 
@@ -183,7 +188,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.34</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.35</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -249,6 +254,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ))}
       </nav>
+
+      {/* 🛣️ Fase 3.35: kilometraje del odómetro GPS — stats rápidas
+          Hoy / Ayer / 7 días / Total (se actualizan en vivo) */}
+      <OdometroMenuStats uid={uid} colapsado={isCollapsed} />
 
       {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
