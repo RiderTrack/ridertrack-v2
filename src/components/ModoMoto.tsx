@@ -229,6 +229,10 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
         try {
           const pendientes = clientes.filter((c) => c.st === 'pendiente' || !c.st).length;
           const msg = `Ruta iniciada, tenés ${clientes.length} pedidos, ${pendientes} pendientes`;
+          // F3.42: avisa al podcast que la app va a hablar (se auto-pausa)
+          try {
+            window.dispatchEvent(new CustomEvent('rt-voz-nav'));
+          } catch {}
           const TTS = (window as any).Capacitor?.Plugins?.TextToSpeech;
           if (TTS) {
             TTS.speak({ text: msg, lang: 'es-PE', rate: 1.0, pitch: 1.0, volume: 1.0 }).catch(() => {});
@@ -261,7 +265,7 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
       await finalizarRutaActual();
       setRecienFinalizada(true);
       // F3.41: aviso del resumen diario — la última milla del día
-      onShowToast?.('🏁 Ruta finalizada', 'Buen trabajo — manda tu resumen: menú ☰ → Resumen WhatsApp', 'success');
+      onShowToast?.('🏁 Ruta finalizada', 'Buen trabajo — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Podcast)', 'success');
     } finally {
       setFinalizando(false);
     }

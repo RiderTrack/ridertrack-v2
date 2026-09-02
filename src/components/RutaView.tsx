@@ -2487,7 +2487,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               try {
                 await finalizarRutaActual();
                 // F3.41: aviso del resumen diario — la última milla del día
-                onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial — manda tu resumen: menú ☰ → Resumen WhatsApp', 'success');
+                onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Podcast)', 'success');
               } catch (e: any) {
                 onShowToast?.('❌ Error', e.message || 'No se pudo finalizar', 'error');
               }

@@ -42,6 +42,8 @@ import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
 import { CajaMenuBoton, CajaCard } from './CajaCard';
 // F3.41: 📊 resumen diario → WhatsApp (paso 5 del plan)
 import { ResumenMenuBoton, ResumenDiarioCard } from './ResumenDiarioCard';
+// F3.42: 🎙️ el podcast de la jornada (paso 6, el final del plan)
+import { PodcastMenuBoton, PodcastCard } from './PodcastCard';
 import { Modal } from './ui';
 
 interface SidebarProps {
@@ -107,15 +109,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [odoGestionAbierto, setOdoGestionAbierto] = useState(false);
   // F3.41: 📊 modal del resumen diario → WhatsApp
   const [resGestionAbierto, setResGestionAbierto] = useState(false);
+  // F3.42: 🎙️ modal del podcast de la jornada
+  const [podGestionAbierto, setPodGestionAbierto] = useState(false);
 
   // F3.40: abre un gestor cerrando el drawer móvil primero (el
   // drawer va en z-[1200], tapa los modales z-50)
-  const abrirGestion = (cual: 'odo' | 'mant' | 'caja' | 'res') => {
+  const abrirGestion = (cual: 'odo' | 'mant' | 'caja' | 'res' | 'pod') => {
     if (isMobileOpen) onCloseMobile();
     if (cual === 'odo') setOdoGestionAbierto(true);
     else if (cual === 'mant') setMantGestionAbierto(true);
     else if (cual === 'caja') setCajaGestionAbierto(true);
-    else setResGestionAbierto(true);
+    else if (cual === 'res') setResGestionAbierto(true);
+    else setPodGestionAbierto(true);
   };
 
   // Secciones del menú
@@ -224,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.41</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.42</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -256,6 +261,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <CajaMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('caja')} />
                 {/* F3.41: 📊 resumen del día → grupo MATE de un toque */}
                 <ResumenMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('res')} />
+                {/* F3.42: 🎙️ el podcast — tu día contado en voz alta */}
+                <PodcastMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('pod')} />
               </>
             ) : (
               seccion.items.map((item) => {
@@ -439,6 +446,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         maxWidth="md"
       >
         <ResumenDiarioCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
+      </Modal>
+
+      {/* 🎙️ F3.42: EL PODCAST DE TU JORNADA — reproductor de radio
+          con el episodio de hoy y el de la semana: capítulos,
+          progreso, velocidad, pausa que retoma por la frase. La
+          voz es la del teléfono (la misma de la navegación). */}
+      <Modal
+        isOpen={podGestionAbierto}
+        onClose={() => setPodGestionAbierto(false)}
+        title="🎙️ El Podcast de tu Jornada"
+        subtitle="Tu día y tu semana, contados en voz alta"
+        maxWidth="md"
+      >
+        <PodcastCard uid={uid} riderName={riderName} />
       </Modal>
     </>
   );
