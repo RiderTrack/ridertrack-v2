@@ -12,8 +12,11 @@
 //                        velocidad, calibración (F3.37: por viaje
 //                        con Waze + ayuda + pantalla viva + km
 //                        recuperados 🌉). Vive dentro del Mini.
-//   · OdometroMenuStats→ bloque compacto Hoy/Ayer/7d/Total para
-//                        el menú hamburguesa (Sidebar).
+//   · OdometroMenuBoton→ (F3.40) fila del menú ☰ IGUAL a las
+//                        demás opciones (icono+label+badge km
+//                        hoy). Toca → modal stats+calibración.
+//   · OdometroMenuStats→ bloque compacto Hoy/Ayer/7d/Total (vive
+//                        dentro del modal del menú ☰, F3.40).
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -464,6 +467,69 @@ export const OdometroMini: React.FC<OdometroMiniProps> = ({ uid, onShowToast }) 
 };
 
 // ═══════════════════════════════════════════════════════════
+// 🔘 BOTÓN DE MENÚ (F3.40) — fila IDÉNTICA a las demás opciones
+// del ☰ (icono + "Kilometraje" + badge con los km de hoy).
+// Reemplaza al bloque grande: el menú ya no se satura. Al tocar
+// abre el modal con las stats (Hoy/Ayer/7d/Total) + calibración.
+// ═══════════════════════════════════════════════════════════
+
+interface OdometroMenuBotonProps {
+  uid?: string | null;
+  /** Sidebar colapsado → solo el icono (con punto cyan si cuenta) */
+  colapsado?: boolean;
+  onAbrir?: () => void;
+}
+
+export const OdometroMenuBoton: React.FC<OdometroMenuBotonProps> = ({ uid, colapsado, onAbrir }) => {
+  const stats = useStatsOdometro();
+  const [cargando, setCargando] = useState(true);
+
+  // Al montar: traer los días viejos de Firestore para el badge
+  useEffect(() => {
+    if (!uid) { setCargando(false); return; }
+    let vivo = true;
+    recargarStatsRemotas(uid).finally(() => { if (vivo) setCargando(false); });
+    return () => { vivo = false; };
+  }, [uid]);
+
+  return (
+    <button
+      onClick={onAbrir}
+      title={colapsado ? 'Kilometraje' : `Odómetro: hoy ${formatearKm(stats.hoyM)} — toca para ver stats y calibrar`}
+      className="group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 active:scale-[0.98]"
+    >
+      <Gauge
+        className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+          stats.contando ? 'text-cyan-400' : ''
+        }`}
+      />
+      {!colapsado && <span className="ml-3 truncate font-medium">Kilometraje</span>}
+      {!colapsado && (
+        <span
+          className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border tabular-nums ${
+            stats.contando
+              ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+              : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+        >
+          {cargando ? '…' : formatearKm(stats.hoyM)}
+        </span>
+      )}
+      {/* Punto cyan cuando está contando (modo colapsado) */}
+      {colapsado && stats.contando && (
+        <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+      )}
+      {/* Tooltip en modo colapsado */}
+      {colapsado && (
+        <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
+          Kilometraje
+        </div>
+      )}
+    </button>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
 // 📊 STATS — bloque del menú hamburguesa (Sidebar)
 // ═══════════════════════════════════════════════════════════
 
@@ -534,7 +600,7 @@ export const OdometroMenuStats: React.FC<OdometroMenuStatsProps> = ({ uid, colap
       {fila('7 días', formatearKm(stats.dias7M))}
       {fila('Total', formatearKm(stats.totalM))}
       <p className="text-[8px] text-slate-600 leading-tight mt-1">
-        cuenta con el cronómetro de ruta activo · calibra tocando el km en Seguimiento
+        cuenta con el cronómetro de ruta activo · calibración y pantalla viva abajo
       </p>
     </div>
   );

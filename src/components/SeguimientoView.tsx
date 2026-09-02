@@ -59,6 +59,8 @@ import {
 
 interface SeguimientoViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  /** F3.40: activa el 🏍️ Modo Moto (botones gigantes) */
+  onActivarModoMoto?: () => void;
 }
 
 const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
@@ -99,7 +101,7 @@ function celNormalizado(cel: string | number | undefined | null): string {
 
 type Filtro = 'todos' | 'pendientes' | 'entregados' | 'fallidos';
 
-export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast }) => {
+export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, onActivarModoMoto }) => {
   const { user } = useAuth();
   const { clientes, loading, stats } = useClientes();
   const { crono, rutaMs } = useCronoRuta(user?.uid);
@@ -517,6 +519,19 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
               </button>
             )}
             <div className="ml-auto flex items-center gap-1.5">
+              {/* 🏍️ F3.40: Modo Moto — botones gigantes para conducir.
+                  Lo natural: terminas de armar tu ruta aquí y SALES
+                  a repartir → un toque y la app se vuelve manejable
+                  con guantes / en el manubrio. */}
+              {onActivarModoMoto && calculo.pendientes.length > 0 && (
+                <button
+                  onClick={onActivarModoMoto}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black bg-amber-500 hover:bg-amber-400 border-amber-400 text-black transition-all active:scale-95 shadow-md shadow-amber-500/20"
+                  title="Pantalla de conducción: botones gigantes (navegar, cobrar, llamar)"
+                >
+                  🏍️ Modo moto
+                </button>
+              )}
               <button
                 onClick={() => {
                   setInicioPanelAbierto(!inicioPanelAbierto);

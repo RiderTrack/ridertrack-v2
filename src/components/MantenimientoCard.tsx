@@ -20,7 +20,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Wrench, Check, Settings2, Plus, History, Trash2, ChevronDown, RefreshCw } from 'lucide-react';
+import { Wrench, Check, Settings2, Plus, History, Trash2, ChevronDown } from 'lucide-react';
 import {
   arrancarMantenimiento,
   recargarMantenimiento,
@@ -624,17 +624,19 @@ export const MantenimientoCard: React.FC<MantenimientoCardProps> = ({ uid, onSho
 };
 
 // ═══════════════════════════════════════════════════════════
-// 📊 STATS — bloque del menú hamburguesa (Sidebar)
+// 🔘 BOTÓN DE MENÚ (F3.40) — fila IGUAL a las demás opciones del
+// ☰ (icono + "Mantenimiento" + badge rojo/ámbar). Reemplaza al
+// bloque grande que saturaba el menú. Toca → gestor en modal.
 // ═══════════════════════════════════════════════════════════
 
-interface MantenimientoMenuStatsProps {
+interface MantenimientoMenuBotonProps {
   uid?: string | null;
+  /** Sidebar colapsado → solo el icono (badge rojo si hay vencidos) */
   colapsado?: boolean;
-  /** F3.38: al tocar el bloque se abre el gestor completo (modal) */
-  onAbrirGestion?: () => void;
+  onAbrir?: () => void;
 }
 
-export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ uid, colapsado, onAbrirGestion }) => {
+export const MantenimientoMenuBoton: React.FC<MantenimientoMenuBotonProps> = ({ uid, colapsado, onAbrir }) => {
   const mant = useMantenimiento();
   const stats = useStatsOdometro();
   const [cargando, setCargando] = useState(true);
@@ -650,85 +652,49 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
   const evaluaciones = useMemo(() => evaluarLista(mant.items, mant.estados, kmTotal, Date.now()), [mant, kmTotal]);
   const resumen = useMemo(() => resumenMant(evaluaciones), [evaluaciones]);
 
-  if (colapsado) {
-    const hay = resumen.vencidos.length > 0 || resumen.acerca.length > 0;
-    return (
-      <button
-        onClick={onAbrirGestion}
-        className="px-3 py-2 border-t border-slate-800 w-full"
-        title={`Mantenimiento: ${resumen.vencidos.length} vencidos — toca para gestionar`}
-      >
-        <div className="relative flex flex-col items-center gap-0.5">
-          <Wrench className={`w-4 h-4 ${resumen.vencidos.length > 0 ? 'text-red-400' : hay ? 'text-amber-400' : 'text-slate-500'}`} />
-          {resumen.vencidos.length > 0 && (
-            <span className="absolute -top-1 -right-1.5 px-1 min-w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
-              {resumen.vencidos.length}
-            </span>
-          )}
-          <span className="text-[8px] font-bold text-slate-500 uppercase">mantto</span>
-        </div>
-      </button>
-    );
-  }
+  // Texto corto para el tooltip
+  const resumenTexto = cargando
+    ? 'cargando…'
+    : resumen.vencidos.length > 0
+      ? `${resumen.vencidos.length} vencidos — toca para gestionar`
+      : resumen.acerca.length > 0
+        ? `${resumen.acerca.length} por vencer — toca para gestionar`
+        : 'todo al día ✓ — toca para gestionar';
 
-  let linea: { texto: string; clase: string } | null = null;
-  if (resumen.vencidos.length > 0) {
-    const v = resumen.vencidos[0];
-    linea = {
-      texto: `Vencidos: ${resumen.vencidos.length} — ${v.nombre.split(' ')[0]}${v.kmRestantes != null ? ` ${textoKm(v.kmRestantes)}` : ''}`,
-      clase: 'text-red-300',
-    };
-  } else if (resumen.acerca.length > 0) {
-    const a = resumen.acerca[0];
-    linea = {
-      texto: `Por vencer: ${a.nombre.split(' ')[0]} · ${a.kmRestantes != null ? textoKm(a.kmRestantes) : textoDias(a.diasRestantes ?? 0)}`,
-      clase: 'text-amber-300',
-    };
-  } else if (resumen.proximo) {
-    const p = resumen.proximo;
-    linea = {
-      texto: `Próximo: ${p.nombre.split(' ')[0]} · ${p.kmRestantes != null ? textoKm(p.kmRestantes) : textoDias(p.diasRestantes ?? 0)}`,
-      clase: 'text-slate-300',
-    };
-  }
+  const badge =
+    resumen.vencidos.length > 0
+      ? { texto: `${resumen.vencidos.length}`, clase: 'bg-red-500/20 text-red-400 border-red-500/30' }
+      : resumen.acerca.length > 0
+        ? { texto: `${resumen.acerca.length}`, clase: 'bg-amber-500/20 text-amber-400 border-amber-500/30' }
+        : null;
 
   return (
-    <div
-      onClick={onAbrirGestion}
-      className={`mx-2 mb-2 rounded-xl border border-slate-800 bg-slate-800/40 p-2.5 group/mant ${
-        onAbrirGestion ? 'cursor-pointer hover:border-slate-600 hover:bg-slate-800/70 transition-colors active:scale-[0.98]' : ''
-      }`}
-      title="Toca para gestionar tus mantenimientos"
+    <button
+      onClick={onAbrir}
+      title={colapsado ? 'Mantenimiento' : `Mantenimiento: ${resumenTexto}`}
+      className="group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 active:scale-[0.98]"
     >
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold flex items-center gap-1">
-          <Wrench className={`w-3 h-3 ${resumen.vencidos.length > 0 ? 'text-red-400' : 'text-slate-500'}`} />
-          Mantenimiento
-          {resumen.vencidos.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse ml-0.5" />}
+      <Wrench
+        className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+          resumen.vencidos.length > 0 ? 'text-red-400' : resumen.acerca.length > 0 ? 'text-amber-400' : ''
+        }`}
+      />
+      {!colapsado && <span className="ml-3 truncate font-medium">Mantenimiento</span>}
+      {!colapsado && badge && (
+        <span className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border ${badge.clase}`}>
+          {badge.texto}
         </span>
-        <button
-          onClick={async (e) => {
-            e.stopPropagation(); // el bloque entero abre el gestor
-            if (!uid) return;
-            setCargando(true);
-            await recargarMantenimiento(uid);
-            setCargando(false);
-          }}
-          className="p-1 rounded text-slate-600 hover:text-cyan-400 hover:bg-slate-700/50 transition-colors opacity-0 group-hover/mant:opacity-100"
-          title="Recargar desde la nube"
-        >
-          <RefreshCw className={`w-3 h-3 ${cargando ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-      {linea ? (
-        <p className={`text-[11px] font-bold truncate ${linea.clase}`}>{cargando ? '…' : linea.texto}</p>
-      ) : (
-        <p className="text-[11px] text-slate-500">{cargando ? '…' : 'todo al día ✓'}</p>
       )}
-      <p className="text-[8px] text-slate-600 leading-tight mt-1 flex items-center gap-1">
-        <span>toca para gestionar · km del odómetro</span>
-        <Settings2 className="w-2.5 h-2.5 flex-shrink-0" />
-      </p>
-    </div>
+      {colapsado && resumen.vencidos.length > 0 && (
+        <span className="absolute top-1 right-1.5 px-1 min-w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center border border-slate-900">
+          {resumen.vencidos.length}
+        </span>
+      )}
+      {colapsado && (
+        <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
+          Mantenimiento
+        </div>
+      )}
+    </button>
   );
 };

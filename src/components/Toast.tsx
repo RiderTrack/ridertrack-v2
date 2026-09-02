@@ -16,7 +16,9 @@ interface ToastContainerProps {
 
 export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismiss }) => {
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
+    // (F3.40) z-[2000]: por encima del Modo Moto (z-[1300]) y del
+    // drawer móvil (z-[1200]) — los avisos SIEMPRE deben verse
+    <div className="fixed bottom-5 right-5 z-[2000] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}

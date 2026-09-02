@@ -641,16 +641,19 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
 };
 
 // ═══════════════════════════════════════════════════════════
-// 💰 BLOQUE DEL MENÚ ☰ (estado rápido, toca = abre el gestor)
+// 🔘 BOTÓN DE MENÚ (F3.40) — fila IGUAL a las demás opciones del
+// ☰ (icono + "Caja" + badge con el esperado en caja / candado).
+// Reemplaza al bloque grande que saturaba el menú. Toca → gestor.
 // ═══════════════════════════════════════════════════════════
 
-interface CajaMenuStatsProps {
+interface CajaMenuBotonProps {
   uid?: string | null;
+  /** Sidebar colapsado → solo el icono */
   colapsado?: boolean;
-  onAbrirGestion?: () => void;
+  onAbrir?: () => void;
 }
 
-export const CajaMenuStats: React.FC<CajaMenuStatsProps> = ({ uid, colapsado, onAbrirGestion }) => {
+export const CajaMenuBoton: React.FC<CajaMenuBotonProps> = ({ uid, colapsado, onAbrir }) => {
   const { caja, resumen, cierreHoy } = useResumenCaja(uid);
   const [cargando, setCargando] = useState(true);
   const cerrada = !!cierreHoy;
@@ -669,59 +672,40 @@ export const CajaMenuStats: React.FC<CajaMenuStatsProps> = ({ uid, colapsado, on
     };
   }, [uid]);
 
-  if (colapsado) {
-    return (
-      <button onClick={onAbrirGestion} className="px-3 py-2 border-t border-slate-800 w-full" title="Caja del día — toca para gestionar">
-        <div className="relative flex flex-col items-center gap-0.5">
-          <Wallet className={`w-4 h-4 ${cerrada ? 'text-emerald-400' : 'text-cyan-400'}`} />
-          <span className="text-[8px] font-bold text-slate-500 uppercase">caja</span>
-        </div>
-      </button>
-    );
-  }
+  const badge = cargando
+    ? { texto: '…', clase: 'bg-slate-800 text-slate-400 border-slate-700' }
+    : cerrada
+      ? { texto: formatearSoles(cierreHoy!.netoDelDia), clase: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' }
+      : { texto: formatearSoles(resumen.esperado), clase: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' };
 
   return (
-    <div
-      onClick={onAbrirGestion}
-      className={`mx-2 mb-2 rounded-xl border p-2.5 group/caja ${
-        onAbrirGestion ? 'cursor-pointer hover:border-slate-600 hover:bg-slate-800/70 transition-colors active:scale-[0.98]' : ''
-      } ${cerrada ? 'border-emerald-500/30 bg-slate-800/40' : 'border-slate-800 bg-slate-800/40'}`}
-      title="Toca para abrir la caja (gastos + cierre)"
+    <button
+      onClick={onAbrir}
+      title={
+        colapsado
+          ? 'Caja del día'
+          : cerrada
+            ? `Caja CERRADA · ${etiquetaDiferencia(cierreHoy!.diferencia).texto} — toca para ver el cierre`
+            : `En caja 💵 ${formatearSoles(resumen.esperado)}${resumen.nGastos > 0 ? ` · ${resumen.nGastos} gastos` : ''} — toca para anotar / cerrar`
+      }
+      className="group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 active:scale-[0.98]"
     >
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold flex items-center gap-1">
-          <Wallet className={`w-3 h-3 ${cerrada ? 'text-emerald-400' : 'text-cyan-400'}`} />
-          Caja de hoy
-          {cerrada && <Lock className="w-2.5 h-2.5 text-emerald-400" />}
+      {cerrada ? (
+        <Lock className="w-5 h-5 flex-shrink-0 text-emerald-400 transition-transform duration-200 group-hover:scale-105" />
+      ) : (
+        <Wallet className="w-5 h-5 flex-shrink-0 text-cyan-400 transition-transform duration-200 group-hover:scale-105" />
+      )}
+      {!colapsado && <span className="ml-3 truncate font-medium">Caja</span>}
+      {!colapsado && (
+        <span className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border tabular-nums ${badge.clase}`}>
+          {badge.texto}
         </span>
-        <span
-          className={`px-1.5 py-0.5 text-[9px] font-bold rounded-full border tabular-nums ${
-            cerrada
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-              : 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
-          }`}
-        >
-          {cerrada ? formatearSoles(cierreHoy!.netoDelDia) : formatearSoles(resumen.esperado)}
-        </span>
-      </div>
-      <p className="text-[11px] font-bold truncate">
-        {cargando ? (
-          <span className="text-slate-500">…</span>
-        ) : cerrada ? (
-          <span className="text-emerald-300">
-            🔒 cerrada · {etiquetaDiferencia(cierreHoy!.diferencia).texto}
-          </span>
-        ) : (
-          <span className="text-slate-300">
-            en caja 💵 {formatearSoles(resumen.esperado)}
-            {resumen.nGastos > 0 && <span className="text-orange-300"> · 💸 {resumen.nGastos}</span>}
-          </span>
-        )}
-      </p>
-      <p className="text-[8px] text-slate-600 leading-tight mt-1 flex items-center gap-1">
-        <span>{cerrada ? 'gastos + cierre del día' : 'toca para anotar gastos / cerrar'}</span>
-        <ChevronDown className="w-2.5 h-2.5 flex-shrink-0" />
-      </p>
-    </div>
+      )}
+      {colapsado && (
+        <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
+          Caja del día
+        </div>
+      )}
+    </button>
   );
 };

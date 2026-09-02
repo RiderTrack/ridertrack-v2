@@ -31,15 +31,15 @@ import {
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
 import { AvatarPicker } from './AvatarPicker';
-// Fase 3.35: 🛣️ kilometraje en el menú (hoy/ayer/7 días/total)
-import { OdometroMenuStats } from './OdometroCard';
-// F3.36: 🔧 mantenimiento de la moto (estado rápido en el menú)
-// F3.38: el GESTOR COMPLETO vive aquí, en un modal — ya no
-// satura el Seguimiento de ruta (los clientes van primero)
-import { MantenimientoMenuStats, MantenimientoCard } from './MantenimientoCard';
-// F3.39: 💰 caja del día (gastos + cierre) — mismo patrón: bloque
-// en el menú ☰ + gestor completo en modal
-import { CajaMenuStats, CajaCard } from './CajaCard';
+// Fase 3.35/3.40: 🛣️ kilometraje en el menú — BOTÓN como las
+// demás opciones (F3.40); el modal trae las stats + calibración
+import { OdometroMenuBoton, OdometroMenuStats, OdometroCard } from './OdometroCard';
+// F3.36/3.40: 🔧 mantenimiento de la moto — BOTÓN de menú (badge
+// rojo si algo venció); el gestor completo vive en su modal
+import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
+// F3.39/3.40: 💰 caja del día — BOTÓN de menú (badge con el
+// esperado); el gestor completo vive en su modal
+import { CajaMenuBoton, CajaCard } from './CajaCard';
 import { Modal } from './ui';
 
 interface SidebarProps {
@@ -100,6 +100,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [mantGestionAbierto, setMantGestionAbierto] = useState(false);
   // F3.39: 💰 modal del gestor de caja (menú hamburguesa)
   const [cajaGestionAbierto, setCajaGestionAbierto] = useState(false);
+  // F3.40: 🛣️ modal de kilometraje (stats + calibración) — antes
+  // era un bloque grande abajo; ahora es un botón como los demás
+  const [odoGestionAbierto, setOdoGestionAbierto] = useState(false);
+
+  // F3.40: abre un gestor cerrando el drawer móvil primero (el
+  // drawer va en z-[1200], tapa los modales z-50)
+  const abrirGestion = (cual: 'odo' | 'mant' | 'caja') => {
+    if (isMobileOpen) onCloseMobile();
+    if (cual === 'odo') setOdoGestionAbierto(true);
+    else if (cual === 'mant') setMantGestionAbierto(true);
+    else setCajaGestionAbierto(true);
+  };
 
   // Secciones del menú
   const secciones: MenuSection[] = [
@@ -125,6 +137,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
       ],
+    },
+    // F3.40: 🛣️🔧💰 LA JORNADA — antes eran 3 bloques grandes que
+    // saturaban el final del menú; ahora son BOTONES como los
+    // demás (icono + nombre + badge) y cada uno abre su gestor.
+    {
+      titulo: 'Jornada',
+      items: [],
     },
     {
       titulo: 'Operación',
@@ -200,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.39</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.40</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -222,7 +241,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {seccion.titulo && isCollapsed && (
               <div className="border-t border-slate-800 my-2 mx-2"></div>
             )}
-            {seccion.items.map((item) => {
+            {/* F3.40: 🛣️🔧💰 JORNADA — 3 botones IGUAL a las demás
+                opciones del menú. Cada uno abre su gestor (modal);
+                el badge muestra el dato clave al pasar la vista. */}
+            {seccion.titulo === 'Jornada' ? (
+              <>
+                <OdometroMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('odo')} />
+                <MantenimientoMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('mant')} />
+                <CajaMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('caja')} />
+              </>
+            ) : (
+              seccion.items.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -262,40 +291,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </button>
               );
-            })}
+              })
+            )}
           </div>
         ))}
       </nav>
 
-      {/* 🛣️ Fase 3.35: kilometraje del odómetro GPS — stats rápidas
-          Hoy / Ayer / 7 días / Total (se actualizan en vivo) */}
-      <OdometroMenuStats uid={uid} colapsado={isCollapsed} />
-
-      {/* 🔧 Fase 3.36/3.38: mantenimiento de la moto — vencidos /
-          por vencer / próximo, con badge rojo si algo venció.
-          Al tocarlo se abre el GESTOR COMPLETO en un modal. */}
-      <MantenimientoMenuStats
-        uid={uid}
-        colapsado={isCollapsed}
-        onAbrirGestion={() => {
-          // En móvil: cerrar el drawer primero para que el modal
-          // quede visible (el drawer va en z-[1200], el modal z-50)
-          if (isMobileOpen) onCloseMobile();
-          setMantGestionAbierto(true);
-        }}
-      />
-
-      {/* 💰 Fase 3.39: caja del día — esperado en caja + gastos +
-          candado si ya cerraste. Al tocarlo se abre el GESTOR
-          COMPLETO (fondo, gastos, cierre con conteo, MATE) en modal. */}
-      <CajaMenuStats
-        uid={uid}
-        colapsado={isCollapsed}
-        onAbrirGestion={() => {
-          if (isMobileOpen) onCloseMobile();
-          setCajaGestionAbierto(true);
-        }}
-      />
+      {/* (F3.40) El kilometraje, mantenimiento y caja ya viven como
+          BOTONES en la sección "Jornada" del menú — mismo look que
+          las demás opciones, cero saturación. Sus gestores completos
+          abren en modales (abajo, una sola renderización). */}
 
       {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
@@ -396,6 +401,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         maxWidth="lg"
       >
         <CajaCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
+      </Modal>
+
+      {/* 🛣️ F3.40: KILOMETRAJE — stats (Hoy/Ayer/7d/Total) + la
+          tarjeta completa del odómetro (calibración por viaje,
+          pantalla viva, reiniciar) en un solo modal. Antes el bloque
+          de stats vivía fijo abajo del menú y lo saturaba. */}
+      <Modal
+        isOpen={odoGestionAbierto}
+        onClose={() => setOdoGestionAbierto(false)}
+        title="🛣️ Kilometraje (odómetro GPS)"
+        subtitle="Stats del odómetro · calibración · pantalla viva"
+        maxWidth="lg"
+      >
+        <div className="space-y-3">
+          <OdometroMenuStats uid={uid} />
+          <OdometroCard uid={uid} onShowToast={onShowToast} />
+        </div>
       </Modal>
     </>
   );
