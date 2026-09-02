@@ -60,6 +60,9 @@ import { guardarAvatarRider } from './services/firestore';
 import { MotorOdometro } from './components/OdometroCard';
 // F3.36: 🔧 motor de recordatorios de mantenimiento (invisible)
 import { MotorMantenimiento } from './components/MantenimientoCard';
+// F3.40: 🏍️ MODO MOTO — pantalla de conducción con botones
+// gigantes y alto contraste (paso 4 del plan)
+import { ModoMotoOverlay } from './components/ModoMoto';
 import { db } from './services/firebase';
 import { collection, onSnapshot, query, where, limit as fsLimit } from 'firebase/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
@@ -180,6 +183,28 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // 🏍️ F3.40: Modo Moto — overlay de conducción. Persistido en
+  // localStorage (rt_modo_moto): si la app se cierra/reinicia en
+  // plena ruta, vuelve directo en Modo Moto (como el rider lo
+  // dejó montado en el manubrio).
+  const [modoMoto, setModoMoto] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rt_modo_moto') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleModoMoto = () => {
+    setModoMoto((v) => {
+      const nv = !v;
+      try {
+        if (nv) localStorage.setItem('rt_modo_moto', '1');
+        else localStorage.removeItem('rt_modo_moto');
+      } catch {}
+      return nv;
+    });
+  };
 
   // Picker de avatar (se abre desde header y sidebar) — Fase 1.5
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
@@ -749,6 +774,8 @@ export default function App() {
         riderName={riderName}
         riderAvatar={avatarEfectivo}
         onAbrirAvatarPicker={() => setAvatarPickerOpen(true)}
+        modoMotoActivo={modoMoto}
+        onToggleModoMoto={toggleModoMoto}
       />
 
       {/* Main App Layout */}
@@ -799,7 +826,7 @@ export default function App() {
           )}
 
           {activeTab === 'seguimiento' && (
-            <SeguimientoView onShowToast={showToast} />
+            <SeguimientoView onShowToast={showToast} onActivarModoMoto={toggleModoMoto} />
           )}
 
           {activeTab === 'yape' && (
@@ -961,6 +988,20 @@ export default function App() {
           arranca el store de mantenimientos y avisa con toast
           cuando algo VENCE (1 aviso por ítem por día). */}
       <MotorMantenimiento uid={user?.uid} onShowToast={showToast} />
+
+      {/* 🏍️ F3.40: MODO MOTO — overlay de conducción (botones
+          gigantes, alto contraste). Solo se monta cuando está
+          activo: sus listeners de ruta viven únicamente mientras
+          conduces. Se activa/sale con el 🏍️ del header o el botón
+          del hero en Seguimiento de ruta. */}
+      {modoMoto && (
+        <ModoMotoOverlay
+          uid={user?.uid}
+          riderName={riderName}
+          onCerrar={toggleModoMoto}
+          onShowToast={showToast}
+        />
+      )}
 
       {/* 🎭 Picker de avatar (desde el header) */}
       <AvatarPicker
