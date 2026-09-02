@@ -6,6 +6,8 @@ import { App as CapApp } from '@capacitor/app';
 import { parsearCallbackSpotify, spotifyExchangeCode } from './services/spotify';
 import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
 import { Cliente } from './services/firestore';
+// 🙏 F3.46 — textos del toast cuando el disparo del gracias se calla
+import { TEXTO_MOTIVO, type MotivoSkip } from './utils/avisoEntrega';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -385,6 +387,39 @@ export default function App() {
       } catch { /* plugin no disponible — web/dev */ }
     })();
     return () => { try { sub?.remove?.(); } catch { /* ya removido */ } };
+  }, []);
+
+  // ═════════════════════════════════════════
+  // 🙏 FASE 3.44/3.46 — TOASTS DEL AVISO AUTOMÁTICO
+  // useClientes.cambiarEstado dispara "rt-aviso-entrega" cuando
+  // marcás un método de pago (desde cualquier vista) y le toca el
+  // gracias a ese cliente → toast verde de confirmación. Si el
+  // disparo se CALLA (modo manual / ya le llegó / sin celular /
+  // anti doble), dispara "rt-aviso-skip" con el MOTIVO → toast
+  // informativo: nunca más un silencio que nadie entiende.
+  // ═════════════════════════════════════════
+  useEffect(() => {
+    const alAvisar = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const detalle = d.modo === 'auto_texto' ? 'solo texto 📝' : 'con imagen 📷';
+      showToastRef.current(
+        '🙏 Gracias enviado',
+        `${d.nombre || 'El cliente'} recibirá su "gracias por tu compra" (${detalle})`,
+        'success'
+      );
+    };
+    const alCallar = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const t = TEXTO_MOTIVO[d.motivo as MotivoSkip];
+      if (!t || !t.titulo) return;
+      showToastRef.current(t.titulo, t.detalle(d.nombre || 'El cliente'), 'info');
+    };
+    window.addEventListener('rt-aviso-entrega', alAvisar);
+    window.addEventListener('rt-aviso-skip', alCallar);
+    return () => {
+      window.removeEventListener('rt-aviso-entrega', alAvisar);
+      window.removeEventListener('rt-aviso-skip', alCallar);
+    };
   }, []);
 
   const handleDismissToast = (id: string) => {
