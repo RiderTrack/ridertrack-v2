@@ -3,6 +3,8 @@
 // Los podcasts de verdad, pensados para tus novelas:
 //   · Buscador (iTunes — sin cuenta ni pago) o pegando la URL
 //     del RSS
+//   · 🗂️ CATEGORÍAS para explorar (F3.45): 7 géneros con feeds
+//     verificados a la carta + lo más escuchado en vivo
 //   · Tus suscripciones + lista de episodios con NUEVOS
 //   · Reproduce en el MISMO player de la app (mini-reproductor
 //     abajo, como la radio y Spotify)
@@ -13,11 +15,11 @@
 // La lógica vive en services/podcastRSS.ts + utils/podcastRssCore.
 // ═══════════════════════════════════════════════════════════
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Podcast as PodcastIcon, Search, Play, Pause, Download, Trash2, Loader2,
   RotateCcw, RotateCw, Gauge, ArrowLeft, RefreshCw, Rss, Link2, Check,
-  Info, Square,
+  Info, Square, LayoutGrid, TrendingUp, BadgeCheck,
 } from 'lucide-react';
 import { useMedios } from './MediosProvider';
 import {
@@ -51,11 +53,23 @@ import {
   formatearMB,
   formatearTiempoPlayer,
 } from '../../utils/podcastRssCore';
+import {
+  CATEGORIAS_PODCAST,
+  CategoriaPodcast,
+  FeedCurado,
+  FECHA_VERIFICACION_CATALOGO,
+  categoriaConSeguidas,
+} from '../../utils/podcastCatalogo';
 
 type Vista =
   | { tipo: 'mis' }
   | { tipo: 'buscar' }
-  | { tipo: 'episodios'; sub: SuscripcionPodcast };
+  | { tipo: 'episodios'; sub: SuscripcionPodcast }
+  | { tipo: 'categoria'; cat: CategoriaPodcast };
+
+/** "3 set 2026" — cuando se verificaron los feeds del catálogo */
+const FECHA_CATALOGO_LABEL = new Date(FECHA_VERIFICACION_CATALOGO + 'T12:00:00')
+  .toLocaleDateString('es-PE', { day: 'numeric', month: 'short', year: 'numeric' });
 
 // ═══════════════════════════════════════════════════════════
 // 🖼️ Portada con fallback (los feeds a veces tienen imágenes rotas)
@@ -311,6 +325,60 @@ const FilaEpisodio: React.FC<FilaProps> = ({ ep, podcastTitulo, imagen, feedUrl,
 };
 
 // ═══════════════════════════════════════════════════════════
+// 🗂️ FILA DE CATÁLOGO — feed curado o resultado en vivo
+// (misma anatomía que los resultados del buscador, + eps/idioma)
+// ═══════════════════════════════════════════════════════════
+interface FilaCatalogoProps {
+  imagen?: string;
+  emoji: string;
+  titulo: string;
+  sub: string;
+  eps?: number;
+  ingles?: boolean;
+  yaSigue: boolean;
+  cargando: boolean;
+  alSeguir: () => void;
+  alAbrir: () => void;
+}
+
+const FilaCatalogo: React.FC<FilaCatalogoProps> = ({ imagen, emoji, titulo, sub, eps, ingles, yaSigue, cargando, alSeguir, alAbrir }) => (
+  <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-slate-700/40 last:border-0 hover:bg-slate-700/30 transition-colors">
+    <Portada src={imagen} emoji={emoji} className="w-10 h-10 rounded-lg border border-slate-700" />
+    <div className="min-w-0 flex-1">
+      <div className="text-xs font-bold text-white truncate">{titulo}</div>
+      <div className="text-[10px] text-slate-400 line-clamp-2 leading-snug">{sub}</div>
+      {(eps || ingles) && (
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {!!eps && eps > 0 && (
+            <span className="text-[9px] font-bold text-violet-300">▶ {eps} episodios</span>
+          )}
+          {ingles && (
+            <span className="text-[9px] font-black text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1 py-0.5 rounded">INGLÉS</span>
+          )}
+        </div>
+      )}
+    </div>
+    {yaSigue ? (
+      <button
+        onClick={alAbrir}
+        className="text-[9px] font-black text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2 py-1.5 rounded flex items-center gap-1 shrink-0 hover:bg-emerald-500/25 active:scale-95 transition-all"
+        title="Ya lo sigues — toca para ver sus episodios"
+      >
+        <Check className="w-3 h-3" /> SIGUES
+      </button>
+    ) : (
+      <button
+        onClick={alSeguir}
+        disabled={cargando}
+        className="px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-bold flex items-center gap-1 shrink-0 disabled:opacity-50 active:scale-95 transition-all"
+      >
+        {cargando ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+        Seguir
+      </button>
+    )}
+  </div>
+);
+
 // 🎧 TAB PRINCIPAL
 // ═══════════════════════════════════════════════════════════
 export const TabPodcasts: React.FC = () => {
@@ -331,6 +399,51 @@ export const TabPodcasts: React.FC = () => {
   const [buscando, setBuscando] = useState(false);
   const [errBuscar, setErrBuscar] = useState<string | null>(null);
   const [seguirCargando, setSeguirCargando] = useState<string | null>(null);
+
+  // ── categorías (F3.45) ──
+  const catAbierta = vista.tipo === 'categoria' ? vista.cat : null;
+  const [catResultados, setCatResultados] = useState<ResultadoBusquedaPodcast[] | null>(null);
+  const [catCargando, setCatCargando] = useState(false);
+  const [catError, setCatError] = useState<string | null>(null);
+  const catIdRef = useRef<string | null>(null);
+
+  /** busca en iTunes lo más escuchado del término de la categoría */
+  const cargarMasEscuchado = async (cat: CategoriaPodcast) => {
+    catIdRef.current = cat.id;
+    setCatResultados(null);
+    setCatError(null);
+    setCatCargando(true);
+    try {
+      const res = await buscarPodcastsRSS(cat.termino);
+      if (catIdRef.current !== cat.id) return; // cambió de categoría mientras buscaba
+      setCatResultados(res);
+    } catch {
+      if (catIdRef.current === cat.id) setCatError('No se pudo cargar — revisa tu conexión');
+    } finally {
+      if (catIdRef.current === cat.id) setCatCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    if (catAbierta) void cargarMasEscuchado(catAbierta);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catAbierta?.id]);
+
+  /** seguir un feed del catálogo curado (mismo flujo que el buscador) */
+  const seguirCurado = async (f: FeedCurado, cat: CategoriaPodcast) => {
+    if (seguirCargando) return;
+    setSeguirCargando(f.url);
+    setCatError(null);
+    try {
+      agregarSuscripcionRSS({ feedUrl: f.url, titulo: f.titulo, autor: cat.nombre, imagen: f.imagen || '' });
+      setSubs(suscripcionesRSS());
+      await abrirFeed({ feedUrl: f.url, titulo: f.titulo, autor: cat.nombre, imagen: f.imagen || '', agregadoAt: 0, ultimoVistoAt: 0 });
+    } catch (err: any) {
+      setCatError(err?.message || 'No se pudo seguir ese podcast — prueba otro de la carta');
+    } finally {
+      setSeguirCargando(null);
+    }
+  };
 
   const buscar = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -537,6 +650,127 @@ export const TabPodcasts: React.FC = () => {
     );
   }
 
+  // ═══════════════ VISTA CATEGORÍA (F3.45) ═══════════════
+  if (catAbierta) {
+    const seguidasUrls = subs.map((s) => s.feedUrl);
+    const abrirSub = (url: string) => {
+      const s = subs.find((x) => x.feedUrl === url);
+      if (s) void abrirFeed(s);
+    };
+    return (
+      <div className="space-y-3">
+        <PlayerCard />
+
+        {/* encabezado de la categoría */}
+        <div className="rounded-2xl bg-gradient-to-br from-violet-600/15 to-slate-800 border border-violet-500/30 p-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setVista({ tipo: 'mis' }); setFeed(null); setCatResultados(null); setCatError(null); }}
+              className="w-9 h-9 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-slate-300 flex items-center justify-center shrink-0 active:scale-95 transition-all"
+              title="Volver a mis podcasts"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="w-12 h-12 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-2xl shrink-0">
+              {catAbierta.emoji}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-black text-white truncate">{catAbierta.nombre}</div>
+              <div className="text-[11px] text-slate-300 leading-snug">{catAbierta.descripcion}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* A LA CARTA — verificados uno por uno */}
+        <div>
+          <div className="flex items-center gap-1.5 px-1 pb-1.5">
+            <BadgeCheck className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-black text-white">A la carta</span>
+            <span className="text-[10px] text-slate-500">revisados el {FECHA_CATALOGO_LABEL}</span>
+          </div>
+          <div className="rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden">
+            {catAbierta.feeds.map((f) => (
+              <FilaCatalogo
+                key={f.url}
+                imagen={f.imagen}
+                emoji={catAbierta.emoji}
+                titulo={f.titulo}
+                sub={f.nota}
+                eps={f.eps}
+                ingles={f.idioma === 'en'}
+                yaSigue={seguidasUrls.includes(f.url)}
+                cargando={seguirCargando === f.url}
+                alSeguir={() => void seguirCurado(f, catAbierta)}
+                alAbrir={() => abrirSub(f.url)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* LO MÁS ESCUCHADO — búsqueda viva en iTunes */}
+        <div>
+          <div className="flex items-center gap-1.5 px-1 pb-1.5">
+            <TrendingUp className="w-4 h-4 text-violet-400" />
+            <span className="text-xs font-black text-white">Lo más escuchado</span>
+            <span className="text-[10px] text-slate-500 truncate">«{catAbierta.termino}»</span>
+          </div>
+          <div className="rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden">
+            {catCargando && (
+              <div className="p-6 flex flex-col items-center gap-2 text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
+                <div className="text-xs">Buscando en iTunes…</div>
+              </div>
+            )}
+            {!catCargando && catError && (
+              <div className="p-4 text-center text-xs text-amber-400">
+                ⚠️ {catError}
+                <button
+                  onClick={() => void cargarMasEscuchado(catAbierta)}
+                  className="block mx-auto mt-2 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold"
+                >
+                  Reintentar
+                </button>
+              </div>
+            )}
+            {!catCargando && !catError && catResultados && catResultados.length === 0 && (
+              <div className="p-4 text-center text-xs text-slate-500">
+                Sin resultados ahora — arriba tienes los verificados a la carta
+              </div>
+            )}
+            {!catCargando && catResultados && catResultados.map((r) => (
+              <FilaCatalogo
+                key={r.feedUrl}
+                imagen={r.imagen}
+                emoji={catAbierta.emoji}
+                titulo={r.titulo}
+                sub={[r.autor, r.genero].filter(Boolean).join(' · ')}
+                yaSigue={seguidasUrls.includes(r.feedUrl)}
+                cargando={seguirCargando === r.feedUrl}
+                alSeguir={() => void seguirResultado(r)}
+                alAbrir={() => abrirSub(r.feedUrl)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* saltar al buscador con el término de la categoría */}
+        <button
+          onClick={() => { setVista({ tipo: 'mis' }); setQuery(catAbierta.termino); void buscarPorTexto(catAbierta.termino); }}
+          className="w-full py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-2 hover:bg-slate-700/60 active:scale-[0.99] transition-all"
+        >
+          <Search className="w-4 h-4" />
+          Buscar más «{catAbierta.termino}» con la lupa
+        </button>
+
+        <p className="text-[10px] text-slate-500 text-center px-2 leading-relaxed">
+          <Info className="w-3 h-3 inline mr-1 -mt-0.5" />
+          Los «a la carta» se verificaron uno por uno el {FECHA_CATALOGO_LABEL}; «lo más escuchado»
+          viene vivo de iTunes y siempre trae podcasts nuevos.
+        </p>
+      </div>
+    );
+  }
+
   // ═══════════════ VISTA BUSCAR ═══════════════
   return (
     <div className="space-y-3">
@@ -628,6 +862,32 @@ export const TabPodcasts: React.FC = () => {
         )}
       </div>
 
+      {/* CATEGORÍAS — explorar la biblioteca (F3.45) */}
+      <div>
+        <div className="flex items-center gap-2 px-1 pb-1.5">
+          <LayoutGrid className="w-4 h-4 text-violet-400" />
+          <span className="text-xs font-black text-white">Explorar por categorías</span>
+          <span className="text-[10px] text-slate-500">({CATEGORIAS_PODCAST.length})</span>
+        </div>
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5 -mx-1 px-1">
+          {CATEGORIAS_PODCAST.map((c) => {
+            const conSeguidas = categoriaConSeguidas(c.id, subs.map((s) => s.feedUrl));
+            return (
+              <button
+                key={c.id}
+                onClick={() => setVista({ tipo: 'categoria', cat: c })}
+                className="shrink-0 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/25 text-violet-200 text-[11px] font-bold hover:bg-violet-500/20 active:scale-95 transition-all flex items-center gap-1.5"
+                title={c.descripcion}
+              >
+                <span className="text-sm leading-none">{c.emoji}</span>
+                {c.nombre}
+                {conSeguidas && <Check className="w-3 h-3 text-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* MIS PODCASTS */}
       <div>
         <div className="flex items-center gap-2 px-1 pb-1.5">
@@ -697,7 +957,7 @@ export const TabPodcasts: React.FC = () => {
 
       <p className="text-[10px] text-slate-500 text-center px-2 leading-relaxed">
         <Info className="w-3 h-3 inline mr-1 -mt-0.5" />
-        Busca con la lupa o pega la URL del RSS · máx. {formatearMB(MAX_BYTES_DESCARGA)} por descarga
+        Busca con la lupa, toca una categoría o pega la URL del RSS · máx. {formatearMB(MAX_BYTES_DESCARGA)} por descarga
       </p>
     </div>
   );
