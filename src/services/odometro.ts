@@ -18,6 +18,18 @@
 //
 // La calibración: km = metrosCrudos × factor. Si tu marcador
 // de la moto dice 30 y la app 28 → factor 1.07 y listo.
+//
+// FASE 3.37 (fix conteo bajo):
+//   · 🌉 PUENTES: huecos de señal (pantalla apagada / app en
+//     segundo plano) ya no botan los km — se recuperan como
+//     línea recta si la velocidad media es creíble.
+//   · 📊 stats extra: hoyCrudoM (para calibrar por viaje) y
+//     puenteM (km recuperados — para que veas cuándo el GPS
+//     estuvo congelado y confíes en el número).
+//   · 🔆 PANTALLA VIVA: opcional — evita que la pantalla se
+//     apague mientras el cronómetro corre (mantiene el GPS
+//     fluyendo sin puentes). Se activa desde la tarjeta.
+//   · ⚖️ factor ahora 0.50 – 2.00.
 // ═══════════════════════════════════════════════════════════
 
 import { db } from './firebase';
@@ -33,6 +45,8 @@ export interface EstadoOdometro {
   fecha: string;
   /** Metros CRUDOS acumulados hoy (sin calibrar — la fuente de verdad) */
   crudos: number;
+  /** F3.37: metros CRUDOS recuperados por PUENTES hoy (diagóstico) */
+  puenteM: number;
   /** Puntos GPS contados hoy (segmentos válidos) */
   puntos: number;
   /** Histórico acumulado en metros crudos (nunca se resetea) */
@@ -52,6 +66,11 @@ export interface StatsOdometro {
   dias7M: number;
   /** Histórico total en metros calibrados */
   totalM: number;
+  /** Metros CRUDOS de hoy, sin calibrar (F3.37 — base de la calibración por viaje) */
+  hoyCrudoM: number;
+  /** F3.37: metros calibrados recuperados por puentes hoy (los
+   *  km que el GPS tenía congelados y se rescataron) */
+  puenteM: number;
   factor: number;
   /** ¿El motor está contando ahora? (cronómetro activo) */
   contando: boolean;
@@ -76,7 +95,9 @@ interface DiaOdometro {
 
 const EVENTO = 'rt-odometro-cambio';
 const FACTOR_MIN = 0.5;
-const FACTOR_MAX = 1.5;
+/** F3.37: rango ampliado 1.5 → 2.0 por si el puente deja el
+ *  conteo por debajo de lo real (líneas rectas cortan curvas). */
+const FACTOR_MAX = 2.0;
 /** Cada cuánto se baja a Firestore (no cada punto — ahorra writes) */
 const FLUSH_MS = 45 * 1000;
 /** Re-chequeo del cronómetro por si se pierde el evento */
@@ -91,6 +112,7 @@ const DIAS_CONSERVAR = 400;
 const ESTADO_INICIAL: EstadoOdometro = {
   fecha: hoyLocal(),
   crudos: 0,
+  puenteM: 0,
   puntos: 0,
   totalMetros: 0,
   factor: 1,
@@ -118,8 +140,9 @@ function cargarLocal(uid: string): EstadoOdometro {
   try {
     const raw = localStorage.getItem(clave(uid));
     if (raw) {
-      const p = JSON.parse(raw) as EstadoOdometro;
-      return { ...ESTADO_INICIAL, ...p };
+      const p = JSON.parse(raw) as Partial<EstadoOdometro>;
+      // puenteM puede faltar en estados guardados por la 3.35/3.36
+      return { ...ESTADO_INICIAL, ...p, puenteM: p.puenteM || 0 };
     }
   } catch {
     // sin storage
@@ -150,7 +173,7 @@ function iniciarDiaSiCorresponde() {
     // Nuevo día: el conteo de hoy arranca en cero. El total
     // acumulado NO se toca (ya incluye los km de ayer porque
     // se suman al momento de contarlos).
-    estado = { ...estado, fecha: hoy, crudos: 0, puntos: 0 };
+    estado = { ...estado, fecha: hoy, crudos: 0, puenteM: 0, puntos: 0 };
     persistirLocal();
     emitir();
   }
@@ -182,8 +205,15 @@ export function procesarPuntoGPS(uid: string, c: Coordenadas): void {
   if (res.nuevoAncla) {
     if (res.contar && res.metros > 0) {
       const anclaPrevia = estado.ancla;
-      const dtHoras = anclaPrevia ? Math.max(0.001, (p.t - anclaPrevia.t) / 3600000) : 1;
-      velocidadUltima = Math.round((res.metros / 1000) / dtHoras);
+      const dtMs = anclaPrevia ? p.t - anclaPrevia.t : 0;
+      const dtHoras = anclaPrevia ? Math.max(0.001, dtMs / 3600000) : 1;
+      // La velocidad en vivo solo con segmentos cortos — un puente
+      // de 25 min mostraría "28 km/h" mientras estás parado.
+      if (dtMs > 0 && dtMs < 120000) {
+        velocidadUltima = Math.round((res.metros / 1000) / dtHoras);
+      } else {
+        velocidadUltima = 0;
+      }
       // El total acumulado SIEMPRE incluye el día en curso (misma
       // convención local y en Firestore → sin dobles cuentas)
       estado = {
@@ -191,6 +221,8 @@ export function procesarPuntoGPS(uid: string, c: Coordenadas): void {
         crudos: estado.crudos + res.metros,
         totalMetros: estado.totalMetros + res.metros,
         puntos: estado.puntos + 1,
+        // 🌉 los km de puente se etiquetan aparte (diagnóstico)
+        puenteM: res.motivo === 'puente' ? estado.puenteM + res.metros : estado.puenteM,
         ancla: res.nuevoAncla,
       };
       sucio = true;
@@ -307,6 +339,8 @@ function fechaDia(diasAtras: number): string {
 export function statsOdometro(): StatsOdometro {
   const hoy = hoyLocal();
   const hoyM = hoy === estado.fecha ? metrosCalibradosHoy() : 0;
+  const hoyCrudoM = hoy === estado.fecha ? Math.round(estado.crudos) : 0;
+  const puenteM = hoy === estado.fecha ? Math.round(estado.puenteM * estado.factor) : 0;
   const ayerM = (diasCache[fechaDia(-1)] as DiaOdometro | undefined)?.m || 0;
   // 7 días: hoy en vivo + últimos 6 del cache
   let dias7M = hoyM;
@@ -316,6 +350,8 @@ export function statsOdometro(): StatsOdometro {
   const totalM = Math.round(estado.totalMetros * estado.factor);
   return {
     hoyM,
+    hoyCrudoM,
+    puenteM,
     ayerM,
     dias7M,
     totalM,
@@ -362,7 +398,7 @@ export async function recargarStatsRemotas(uid: string): Promise<void> {
   }
 }
 
-/** Ajusta el factor de calibración (0.50 – 1.50) y baja a Firestore */
+/** Ajusta el factor de calibración (0.50 – 2.00) y baja a Firestore */
 export async function ajustarFactor(uid: string, factor: number): Promise<number> {
   const f = Math.round(Math.min(FACTOR_MAX, Math.max(FACTOR_MIN, factor)) * 100) / 100;
   estado = { ...estado, factor: f };
@@ -381,6 +417,7 @@ export async function reiniciarDia(uid: string): Promise<void> {
   estado = {
     ...estado,
     crudos: 0,
+    puenteM: 0,
     puntos: 0,
     ancla: null,
     totalMetros: Math.max(0, estado.totalMetros - crudoHoy),
@@ -390,6 +427,63 @@ export async function reiniciarDia(uid: string): Promise<void> {
   emitir();
   uidActual = uidActual || uid;
   await flushOdometro(true);
+}
+
+// ── 🔆 PANTALLA VIVA (F3.37) ──────────────────────────
+// Opcional: mientras el cronómetro corre, pide un WAKE LOCK al
+// navegador para que la pantalla no se apague. Con la pantalla
+// viva el GPS no se congela → cero puentes, conteo exacto.
+// (Ideal si llevas el teléfono en el soporte de la moto.)
+
+let wakeLock: any = null;
+
+function clavePantalla(uid: string): string {
+  return `rt_odo_pantalla_${uid}`;
+}
+
+/** ¿El rider activó "pantalla viva"? */
+export function pantallaViva(uid: string): boolean {
+  try {
+    return localStorage.getItem(clavePantalla(uid)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Activa/desactiva la pantalla viva. Devuelve el nuevo estado. */
+export function alternarPantallaViva(uid: string): boolean {
+  const nuevo = !pantallaViva(uid);
+  try {
+    localStorage.setItem(clavePantalla(uid), nuevo ? '1' : '0');
+  } catch {
+    // sin storage
+  }
+  if (nuevo) {
+    void pedirWakeLock();
+  } else {
+    liberarWakeLock();
+  }
+  return nuevo;
+}
+
+async function pedirWakeLock(): Promise<void> {
+  try {
+    const nav = navigator as any;
+    if (!nav?.wakeLock?.request) return; // WebView sin la API — silencio
+    wakeLock = await nav.wakeLock.request('screen');
+  } catch {
+    // el sistema puede negarse (batería baja, etc.) — silencio
+    wakeLock = null;
+  }
+}
+
+function liberarWakeLock(): void {
+  try {
+    wakeLock?.release?.();
+  } catch {
+    // ya liberado
+  }
+  wakeLock = null;
 }
 
 // ── MOTOR GPS (montado 1 vez en App.tsx) ─────────────────
@@ -418,10 +512,13 @@ function chequearCrono(uid: string) {
       () => undefined // errores de GPS: silencio (el watchdog reintenta)
     );
     setContando(true);
+    // 🔆 pantalla viva activada → evitar que se apague mientras cuenta
+    if (pantallaViva(uid)) void pedirWakeLock();
   } else if (!queriendo && detenerWatch) {
     // ⏸ Jornada terminada/pausada → cerrar watch y guardar
     try { detenerWatch(); } catch { /* ya muerto */ }
     detenerWatch = null;
+    liberarWakeLock(); // jornada parada → dejar que la pantalla duerma
     setContando(false);
     void flushOdometro(true);
   }
@@ -471,8 +568,14 @@ export function arrancarMotorOdometro(uid: string): () => void {
   }, FLUSH_MS);
 
   // Al minimizar la app → guardar ya (Android puede matar la webview)
+  // Al volver a primer plano → re-pedir el wake lock (el sistema
+  // lo libera automáticamente cuando la página queda oculta)
   const alOcultar = () => {
-    if (document.hidden) void flushOdometro(true);
+    if (document.hidden) {
+      void flushOdometro(true);
+    } else if (contando && uidActual && pantallaViva(uidActual)) {
+      void pedirWakeLock();
+    }
   };
   document.addEventListener('visibilitychange', alOcultar);
   escuchaVisibilidad = () => document.removeEventListener('visibilitychange', alOcultar);
@@ -490,6 +593,7 @@ export function arrancarMotorOdometro(uid: string): () => void {
       try { detenerWatch(); } catch { /* ya muerto */ }
       detenerWatch = null;
     }
+    liberarWakeLock();
     setContando(false);
     void flushOdometro(true);
   };
