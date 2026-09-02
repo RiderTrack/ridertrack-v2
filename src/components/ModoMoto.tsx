@@ -38,7 +38,9 @@ import {
 } from 'lucide-react';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
-import { iniciarRutaConBot } from '../services/firestore';
+import { iniciarRutaConBot, encolarAccionBot, _botCel } from '../services/firestore';
+// 🙏 F3.44: aviso "gracias por tu compra" por cliente
+import { ModoAvisoEntrega, ETIQUETA_MODO, modoAvisoDe, claveAviso, registrarAvisoEnviado } from '../utils/avisoEntrega';
 import { useCronoRuta, persistirCrono, leerCronoRuta, formatearDuracion, horaDe } from '../utils/refrigerio';
 import { planificarRuta, leerVelocidadKmh } from '../utils/etaRuta';
 import {
@@ -100,11 +102,11 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
   onCerrar,
   onShowToast,
 }) => {
-  const { clientes, loading, stats, cambiarEstado, finalizarRutaActual } = useClientes();
+  const { clientes, loading, stats, cambiarEstado, actualizarCliente, finalizarRutaActual } = useClientes();
   const { crono, rutaMs } = useCronoRuta(uid);
   const odo = useSyncExternalStore(suscribirOdometro, snapshotOdometro);
 
-  const [panel, setPanel] = useState<'ninguno' | 'fallido' | 'otros'>('ninguno');
+  const [panel, setPanel] = useState<'ninguno' | 'fallido' | 'otros' | 'aviso'>('ninguno');
   const [appNav, setAppNav] = useState<AppNavegacion>(getAppNavegacion());
   const [finalizando, setFinalizando] = useState(false);
   const [recienFinalizada, setRecienFinalizada] = useState(false);
@@ -208,6 +210,43 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
       `${c.nombre || 'Cliente'} · ${soles(montoCliente(c))} · ${etiqueta}`,
       st === 'efectivo' || st === 'yape-rudy' ? 'success' : 'info'
     );
+  };
+
+  // ═══ 🙏 F3.44 — aviso "gracias por tu compra" de ESTE cliente ═══
+  const fijarModoAviso = (c: Cliente, modo: ModoAvisoEntrega) => {
+    actualizarCliente(c.id, { aviso: modo });
+    setPanel('ninguno');
+    onShowToast?.('🙏 Aviso de entrega', `${c.nombre || 'Cliente'}: ${ETIQUETA_MODO[modo].largo}`, 'success');
+  };
+
+  /** Mandar el "gracias por tu compra" AHORA, aunque el modo sea manual */
+  const mandarGraciasAhora = async (c: Cliente, conImagen: boolean) => {
+    const tel = _botCel(c.cel || '');
+    if (!uid || !tel) {
+      onShowToast?.('Sin celular', `${c.nombre || 'El cliente'} no tiene celular válido`, 'warning');
+      return;
+    }
+    try {
+      await encolarAccionBot(uid, {
+        tipo: 'avisar_entrega',
+        clienteId: c.id,
+        telefono: tel,
+        nombre: c.nombre || 'Cliente',
+        prod: c.prod || '',
+        cobrar: montoCliente(c),
+        dir: c.dir || '',
+        dist: c.dist || '',
+        st: c.st || 'pendiente',
+        rider: { nombre: riderName, telefono: '', empresa: 'MATE' },
+        modo_entrega: conImagen ? 'auto_imagen' : 'auto_texto',
+        enviar_imagen: conImagen,
+      });
+      registrarAvisoEnviado(claveAviso(c.cel));
+      setPanel('ninguno');
+      onShowToast?.('🙏 Gracias enviado', `El bot le manda el mensajito a ${c.nombre || 'el cliente'}`, 'success');
+    } catch {
+      onShowToast?.('Error', 'No se pudo enviar — revisa tu internet', 'error');
+    }
   };
 
   // ── Cronómetro: iniciar / pausar / continuar (desde la moto) ──
@@ -373,6 +412,23 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
               <p className="text-5xl sm:text-6xl font-black text-emerald-400 mt-3 tabular-nums leading-none">
                 {soles(montoCliente(proximo))}
               </p>
+
+              {/* 🙏 F3.44: modo de aviso de ESTE cliente (toca para
+                  cambiarlo) — el mensajito se manda SOLO al cobrar */}
+              <button
+                onClick={() => setPanel(panel === 'aviso' ? 'ninguno' : 'aviso')}
+                className={`mt-3 w-full h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-bold border transition-all active:scale-95 ${
+                  modoAvisoDe(proximo.aviso) === 'auto_imagen'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : modoAvisoDe(proximo.aviso) === 'auto_texto'
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-800 border-slate-600 text-slate-300'
+                }`}
+                title="Cómo avisarle al entregar (automático / manual)"
+              >
+                <span>🙏</span>
+                <span>Aviso: {ETIQUETA_MODO[modoAvisoDe(proximo.aviso)].largo}</span>
+              </button>
             </div>
 
             {/* ════ NAVEGAR (gigante) ════ */}
@@ -409,7 +465,7 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
               </button>
             )}
 
-            {/* ════ PANELES: fallido / otros métodos ════ */}
+            {/* ════ PANELES: fallido / otros métodos / aviso 🙏 ════ */}
             {panel === 'ninguno' ? (
               <>
                 {/* Cobros de un toque */}
@@ -468,6 +524,70 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
                   </div>
                 )}
               </>
+            ) : panel === 'aviso' ? (
+              /* ════ 🙏 Panel del aviso de entrega (F3.44) ════ */
+              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-black uppercase tracking-wide text-slate-300">
+                    🙏 Aviso al entregar
+                  </p>
+                  <button
+                    onClick={() => setPanel('ninguno')}
+                    className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 flex items-center justify-center transition-all"
+                    title="Cancelar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400">
+                  {proximo.nombre || 'Cliente'} — cuando lo marques cobrado:
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['auto_imagen', 'auto_texto', 'manual'] as ModoAvisoEntrega[]).map((m) => {
+                    const activo = modoAvisoDe(proximo.aviso) === m;
+                    return (
+                      <button
+                        key={m}
+                        onClick={() => fijarModoAviso(proximo, m)}
+                        className={`h-20 rounded-2xl flex flex-col items-center justify-center border transition-all active:scale-95 ${
+                          activo
+                            ? m === 'auto_imagen'
+                              ? 'bg-emerald-600 border-emerald-400'
+                              : m === 'auto_texto'
+                              ? 'bg-amber-600 border-amber-400'
+                              : 'bg-slate-600 border-slate-400'
+                            : 'bg-slate-800 border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        <span className="text-2xl leading-none mb-1">{ETIQUETA_MODO[m].icono}</span>
+                        <span className="text-sm font-black leading-tight text-center px-1">
+                          {ETIQUETA_MODO[m].corto}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => void mandarGraciasAhora(proximo, true)}
+                    className="h-14 rounded-2xl bg-emerald-700 hover:bg-emerald-600 active:scale-95 flex items-center justify-center gap-2 text-base font-black transition-all"
+                    title="El bot le manda el mensajito con imagen ahora mismo"
+                  >
+                    📷 Mandar ahora
+                  </button>
+                  <button
+                    onClick={() => void mandarGraciasAhora(proximo, false)}
+                    className="h-14 rounded-2xl bg-amber-700 hover:bg-amber-600 active:scale-95 flex items-center justify-center gap-2 text-base font-black transition-all"
+                    title="El mensajito de gracias, solo texto, ahora mismo"
+                  >
+                    📝 Solo texto
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  El modo se guarda en la ficha del cliente y sigue igual mañana. "Mandar ahora" lo
+                  envía al toque, aunque el modo sea manual.
+                </p>
+              </div>
             ) : (
               <div className="rounded-2xl border border-slate-700 bg-slate-900 p-3 space-y-2.5">
                 <div className="flex items-center justify-between">

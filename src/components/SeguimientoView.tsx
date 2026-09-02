@@ -45,6 +45,15 @@ import {
 } from '../utils/seguimientoLink';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
+// 🙏 F3.44: botoncito por cliente para el "gracias por tu compra"
+import { encolarAccionBot, _botCel } from '../services/firestore';
+import {
+  ModoAvisoEntrega,
+  ETIQUETA_MODO,
+  modoAvisoDe,
+  claveAviso,
+  registrarAvisoEnviado,
+} from '../utils/avisoEntrega';
 import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
 // ⏱️ ETA estilo Circuit (Fase 2.9): viaje entre paradas + ritmo real
 import {
@@ -102,8 +111,8 @@ function celNormalizado(cel: string | number | undefined | null): string {
 type Filtro = 'todos' | 'pendientes' | 'entregados' | 'fallidos';
 
 export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, onActivarModoMoto }) => {
-  const { user } = useAuth();
-  const { clientes, loading, stats } = useClientes();
+  const { user, profile } = useAuth();
+  const { clientes, loading, stats, actualizarCliente } = useClientes();
   const { crono, rutaMs } = useCronoRuta(user?.uid);
   const refri = useRefrigerio(user?.uid);
   // 🚀 Hora de inicio de jornada (Fase 2.8): "empiezo a las 10" →
@@ -129,6 +138,10 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
   const [duracionProg, setDuracionProg] = useState<number>(30);
   const [inicioPanelAbierto, setInicioPanelAbierto] = useState(false);
   const [horaInicioEdit, setHoraInicioEdit] = useState<string>('');
+
+  // 🙏 F3.44: modal del botoncito de aviso por cliente
+  const [avisoModalId, setAvisoModalId] = useState<string | number | null>(null);
+  const avisoCliente = avisoModalId != null ? clientes.find((c) => c.id === avisoModalId) || null : null;
 
   // Cargar valores programados al panel
   useEffect(() => {
@@ -269,6 +282,68 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
       return;
     }
     window.open(`https://wa.me/${tel}`, '_blank');
+  };
+
+  // ═══ 🙏 F3.44: acciones del bot desde el Seguimiento (como el
+  // Control de la v1 — "gracias por tu compra", voy en camino) ═══
+  const enviarAccionAviso = async (
+    c: Cliente,
+    tipo: string,
+    extra?: Record<string, unknown>
+  ) => {
+    if (!user) {
+      onShowToast?.('Error', 'No hay sesión activa', 'error');
+      return;
+    }
+    const telefono = _botCel(c.cel || '');
+    if (!telefono) {
+      onShowToast?.('Sin celular', `${c.nombre || 'El cliente'} no tiene celular válido`, 'warning');
+      return;
+    }
+    try {
+      await encolarAccionBot(user.uid, {
+        tipo,
+        clienteId: c.id,
+        telefono,
+        nombre: c.nombre || 'Cliente',
+        prod: c.prod || '',
+        cobrar: parseFloat(String(c.cobrar || 0)),
+        dir: c.dir || '',
+        dist: c.dist || '',
+        st: c.st || 'pendiente',
+        rider: {
+          nombre: profile?.nombre || 'Rudy',
+          telefono: profile?.email || '',
+          empresa: 'MATE',
+        },
+        ...extra,
+      });
+      if (tipo === 'avisar_entrega') {
+        // Guard anti-doble: si luego marcas entregado, no se repite
+        registrarAvisoEnviado(claveAviso(c.cel));
+      }
+      onShowToast?.(
+        tipo === 'avisar_entrega' ? '🙏 Gracias enviado' : '🤖 Bot',
+        tipo === 'avisar_entrega'
+          ? `El bot le manda el mensajito a ${c.nombre || 'el cliente'}`
+          : `Acción enviada: ${tipo}`,
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('Error', e?.message || 'No se pudo enviar', 'error');
+    }
+  };
+
+  // 🙏 F3.44: fijar el modo de aviso de ESTE cliente (se guarda
+  // en su ficha — sobrevive al cierre de la ruta de hoy)
+  const fijarModoAviso = (c: Cliente, modo: ModoAvisoEntrega) => {
+    actualizarCliente(c.id, { aviso: modo });
+    setAvisoModalId(null);
+    onShowToast?.(
+      '🙏 Aviso de entrega',
+      `${c.nombre || 'Cliente'}: ${ETIQUETA_MODO[modo].largo}`,
+      'success'
+    );
   };
 
   // ── 🔗 Compartir link de seguimiento en vivo (Fase 2.15) ──
@@ -830,8 +905,10 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                     </p>
                   </div>
 
-                  {/* Botones rápidos 📞 WA 🔗 (el link funciona con o sin celular) */}
-                  <div className="flex flex-col gap-1 flex-shrink-0">
+                  {/* Botones rápidos 2×2: 📞 💬 / 🙏 🔗 (F3.44: el
+                      botoncito del aviso por cliente — reemplaza al
+                      Control de la v1; el link va con o sin celular) */}
+                  <div className="grid grid-cols-2 gap-1 flex-shrink-0">
                     {tel && (
                       <>
                         <button
@@ -850,6 +927,19 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                         </button>
                       </>
                     )}
+                      <button
+                        onClick={() => setAvisoModalId(c.id)}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold border transition-all active:scale-90 ${
+                          modoAvisoDe(c.aviso) === 'auto_imagen'
+                            ? 'bg-emerald-500/15 border-emerald-500/50'
+                            : modoAvisoDe(c.aviso) === 'auto_texto'
+                            ? 'bg-amber-500/15 border-amber-500/50'
+                            : 'bg-slate-700 border-slate-600'
+                        }`}
+                        title={`Aviso al entregar — ${ETIQUETA_MODO[modoAvisoDe(c.aviso)].largo}`}
+                      >
+                        🙏
+                      </button>
                       <button
                         onClick={() => compartirSeguimiento(c)}
                         disabled={compartiendo}
@@ -1009,6 +1099,110 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
           </div>
         )}
       </div>
+
+      {/* ══════ 🙏 F3.44 — MODAL DEL BOTONCITO: cómo avisarle a ESTE
+          cliente cuando su pedido pasa a entregado (restaura el
+          Control de mensajes de la v1: automático / manual…) ══════ */}
+      {avisoCliente && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setAvisoModalId(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm space-y-3 max-h-[88vh] overflow-y-auto custom-scrollbar"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">🙏 Aviso al entregar</h3>
+              <button onClick={() => setAvisoModalId(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="text-xs text-slate-400">
+              Cliente: <span className="text-white font-bold">{avisoCliente.nombre}</span>
+              {avisoCliente.cel ? <span className="text-slate-500"> · 📱 {avisoCliente.cel}</span> : <span className="text-red-400"> · sin celular</span>}
+            </div>
+
+            {/* Modo: automático / manual */}
+            <div className="text-[10px] uppercase font-bold text-slate-500 pt-1">
+              Cuando lo marques ENTREGADO (cualquier método)
+            </div>
+            <div className="space-y-2">
+              {(['auto_imagen', 'auto_texto', 'manual'] as ModoAvisoEntrega[]).map((m) => {
+                const activo = modoAvisoDe(avisoCliente.aviso) === m;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => fijarModoAviso(avisoCliente, m)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-all border ${
+                      activo
+                        ? m === 'auto_imagen'
+                          ? 'bg-emerald-500/15 border-emerald-500 text-emerald-400'
+                          : m === 'auto_texto'
+                          ? 'bg-amber-500/15 border-amber-500 text-amber-400'
+                          : 'bg-slate-700/50 border-slate-500 text-slate-200'
+                        : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="text-lg">{ETIQUETA_MODO[m].icono}</span>
+                    <div className="text-left flex-1">
+                      <div>{ETIQUETA_MODO[m].largo}</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        {m === 'auto_imagen'
+                          ? 'El bot le manda la tarjeta "gracias por tu compra" con imagen'
+                          : m === 'auto_texto'
+                          ? 'El mensajito de gracias, sin imagen'
+                          : 'La app no manda nada — tú decides cuándo'}
+                      </div>
+                    </div>
+                    {activo && <Check className="w-4 h-4 flex-shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mandar ahora */}
+            <div className="text-[10px] uppercase font-bold text-slate-500 pt-2">Mandar ahora</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  void enviarAccionAviso(avisoCliente, 'avisar_entrega', { enviar_imagen: true, modo_entrega: 'auto_imagen' });
+                  setAvisoModalId(null);
+                }}
+                className="py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95"
+              >
+                📷 Con imagen
+              </button>
+              <button
+                onClick={() => {
+                  void enviarAccionAviso(avisoCliente, 'avisar_entrega', { enviar_imagen: false, modo_entrega: 'auto_texto' });
+                  setAvisoModalId(null);
+                }}
+                className="py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold transition-all active:scale-95"
+              >
+                📝 Solo texto
+              </button>
+            </div>
+
+            {/* Voy en camino */}
+            <div className="text-[10px] uppercase font-bold text-slate-500 pt-2">Avisar que voy en camino</div>
+            <div className="grid grid-cols-3 gap-2">
+              {['5', '10', '15', '20', '30', '45'].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => {
+                    void enviarAccionAviso(avisoCliente, 'avisar_siguiente', { minutos: parseInt(m) });
+                    setAvisoModalId(null);
+                  }}
+                  className="py-2.5 rounded-xl border-2 border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-sm hover:bg-blue-500/20 transition-all active:scale-95"
+                >
+                  {m} <span className="text-[10px]">min</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Nota al pie */}
       {!rutaVacia && !rutaTerminada && (

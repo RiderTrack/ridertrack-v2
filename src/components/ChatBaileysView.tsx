@@ -145,6 +145,8 @@ import {
   stColorRuta,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
+// 🙏 F3.44: guard anti-doble-envío del "gracias por tu compra"
+import { claveAviso, registrarAvisoEnviado } from '../utils/avisoEntrega';
 import {
   escucharPlantillas,
   PlantillaMensaje,
@@ -1233,6 +1235,9 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
         telefono: profile?.email || '',
         empresa: 'MATE',
       });
+      // 🙏 F3.44: si justo después marcas entregado, el disparo
+      // automático se calla 5 min (no le llega dos veces)
+      registrarAvisoEnviado(claveAviso(convActiva.tel));
       toast(
         '🙏 Gracias enviada',
         conImagen

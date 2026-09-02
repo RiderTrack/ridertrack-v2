@@ -30,6 +30,8 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
+// 🙏 F3.44: modo de aviso por cliente (automático/manual, como la v1)
+import { ModoAvisoEntrega, ETIQUETA_MODO, modoAvisoDe, claveAviso, registrarAvisoEnviado } from '../utils/avisoEntrega';
 import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
@@ -547,6 +549,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         },
         ...extra,
       });
+      // 🙏 F3.44: si acabas de mandar el gracias a mano, el disparo
+      // automático al marcar entregado se calla 5 min (anti doble)
+      if (tipo === 'avisar_entrega') {
+        registrarAvisoEnviado(claveAviso(cliente.cel));
+      }
       onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
     } catch (e: any) {
       onShowToast?.('Error', e.message || 'No se pudo enviar', 'error');
@@ -1613,6 +1620,39 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                           <div className="text-xs text-slate-400 mb-3">
                             Cliente: <span className="text-white font-bold">{c.nombre}</span>
+                          </div>
+
+                          {/* 🙏 F3.44 — MODO de aviso de este cliente:
+                              automático con imagen / solo texto / manual.
+                              Se guarda en su ficha (como la v1). */}
+                          <div className="text-[10px] uppercase font-bold text-slate-500 mb-1.5">
+                            Al marcar entregado (cualquier método)
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5 mb-3">
+                            {(['auto_imagen', 'auto_texto', 'manual'] as ModoAvisoEntrega[]).map((m) => {
+                              const activo = modoAvisoDe(c.aviso) === m;
+                              return (
+                                <button
+                                  key={m}
+                                  onClick={() => {
+                                    actualizarCliente(c.id, { aviso: m });
+                                    onShowToast?.('🙏 Aviso de entrega', `${c.nombre}: ${ETIQUETA_MODO[m].largo}`, 'success');
+                                  }}
+                                  className={`py-2 px-1 rounded-lg text-[10px] font-bold border transition-all active:scale-95 ${
+                                    activo
+                                      ? m === 'auto_imagen'
+                                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                                        : m === 'auto_texto'
+                                        ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                                        : 'bg-slate-600/40 border-slate-400 text-slate-200'
+                                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                  }`}
+                                  title={ETIQUETA_MODO[m].largo}
+                                >
+                                  {ETIQUETA_MODO[m].icono} {ETIQUETA_MODO[m].corto}
+                                </button>
+                              );
+                            })}
                           </div>
 
                           <div className="space-y-2">
