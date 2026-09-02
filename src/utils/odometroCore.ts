@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 🛣️ ODÓMETRO GPS — NÚCLEO PURO (Fase 3.35)
+// 🛣️ ODÓMETRO GPS — NÚCLEO PURO (Fase 3.35 · fix 3.37)
 // Matemática y filtros SIN dependencias (ni React ni Firebase):
 // así se puede probar con Node directo y se puede reusar donde sea.
 //
@@ -13,16 +13,24 @@
 //                     "flota" ±10 m parado y sumaría km falsos)
 //        · salto:     velocidad implícita > 140 km/h → teleport
 //                     (perdió señal y reapareció en otro lado)
-//        · lento:     velocidad < 2 km/h y ya pasó el umbral →
+//        · lento:     velocidad < 1.2 km/h y ya pasó el umbral →
 //                     deriva lenta del GPS, no movimiento real
-//        · hueco:    dt > 8 min sin puntos → la línea recta
-//                     entre ambos no es confiable (pantalla
-//                     apagada / app en segundo plano) → no suma
-//   3. Con el FACTOR DE CALIBRACIÓN el rider corrige el sesgo:
+//   3. 🌉 PUENTE (Fase 3.37 — fix del conteo bajo): si hay un
+//      HUECO > 8 min sin puntos (pantalla apagada, app en segundo
+//      plano — el caso típico: navegas con Waze y RiderTrack
+//      queda atrás, Android congela su GPS), ANTES esos km se
+//      botaban completos. Ahora: si el desplazamiento recto
+//      ancla→punto tiene velocidad media creíble (≤ 80 km/h)
+//      y el hueco no pasa de 90 min, la moto SÍ se movió de A
+//      a B → se cuenta como PUENTE. Línea recta = subestima un
+//      poco el camino real, pero no pierde el tramo. El salto
+//      telepórtico o el hueco eterno sigue sin contar.
+//   4. Con el FACTOR DE CALIBRACIÓN el rider corrige el sesgo:
 //      kmMostrados = metrosCrudos × factor. Si el marcador de
 //      la moto dice 30 km y la app 28 → factor 30/28 ≈ 1.07.
 //
-// PRECISIÓN ESPERADA: ±1-3% con GPS de teléfono en moto urbana.
+// PRECISIÓN ESPERADA: ±1-3% con la app abierta en moto urbana;
+// con tramos recuperados por puente es algo menor — se calibra.
 // ═══════════════════════════════════════════════════════════
 
 /** Un punto GPS crudo tal como llega del watch */
@@ -41,10 +49,16 @@ export const FILTROS_ODOMETRO = {
   MIN_METROS: 8,
   /** Velocidad máxima creíble en moto (km/h) — más = salto GPS */
   MAX_VELOCIDAD_KMH: 140,
-  /** Velocidad mínima creíble moviéndose (km/h) — menos = deriva */
-  MIN_VELOCIDAD_KMH: 2,
-  /** Hueco máximo entre puntos confiable (ms) — 8 minutos */
+  /** Velocidad mínima creíble moviéndose (km/h) — menos = deriva.
+   *  F3.37: bajada de 2 → 1.2 para no perder tráfico pesado
+   *  (avanzone a paso de persona = km reales, no deriva). */
+  MIN_VELOCIDAD_KMH: 1.2,
+  /** Hueco a partir del cual se intenta PUENTE en vez de descartar (ms) */
   GAP_MS: 8 * 60 * 1000,
+  /** F3.37: hueco máximo que un puente puede cubrir (ms) — 90 min */
+  GAP_PUENTE_MS: 90 * 60 * 1000,
+  /** F3.37: velocidad MEDIA máxima para confiar en un puente (km/h) */
+  MAX_MEDIA_KMH: 80,
   /** Precisión máxima aceptable (m) */
   MAX_ACCURACY: 50,
 } as const;
@@ -52,6 +66,7 @@ export const FILTROS_ODOMETRO = {
 export type MotivoPunto =
   | 'primero' // no había ancla — solo fija el ancla
   | 'movimiento' // ✅ distancia válida sumada
+  | 'puente' // 🌉 F3.37: km recuperados tras hueco de señal
   | 'ruido' // muy cerca (moto quieta) — no suma
   | 'salto' // velocidad imposible — no suma
   | 'lento' // deriva lenta — no suma
@@ -130,10 +145,23 @@ export function evaluarPunto(ancla: PuntoGPS | null, p: PuntoGPS): ResultadoPunt
     return { contar: false, metros: 0, motivo: 'ruido', nuevoAncla: null };
   }
 
-  // 4. Hueco largo (pantalla apagada, app muerta) → la línea recta
-  //    no representa el camino real → no suma, pero RE-ANCLA aquí
-  //    para empezar un tramo nuevo limpio
+  // 4. 🌉 Hueco largo (pantalla apagada / app en segundo plano /
+  //    Android congeló el GPS del WebView). F3.37: ANTES se botaba
+  //    el tramo completo — causa del conteo bajo (12 km en la app
+  //    vs 30+ km reales). AHORA se intenta un PUENTE: si el rider
+  //    se movió de A a B con velocidad media creíble (≤ 80 km/h
+  //    en ≤ 90 min), ese desplazamiento ES REAL → se cuenta (línea
+  //    recta: subestima el camino, pero no lo pierde). El salto
+  //    telepórtico o el hueco eterno sigue sin contar y re-ancla.
   if (dt > FILTROS_ODOMETRO.GAP_MS) {
+    const dGap = haversineMetros(ancla.lat, ancla.lng, p.lat, p.lng);
+    const vMediaKmh = (dGap / dt) * 3600;
+    const puenteValido =
+      dt <= FILTROS_ODOMETRO.GAP_PUENTE_MS &&
+      vMediaKmh <= FILTROS_ODOMETRO.MAX_MEDIA_KMH;
+    if (puenteValido) {
+      return { contar: true, metros: dGap, motivo: 'puente', nuevoAncla: { ...p } };
+    }
     return { contar: false, metros: 0, motivo: 'gap', nuevoAncla: { ...p } };
   }
 
