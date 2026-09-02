@@ -1,17 +1,19 @@
 // ═══════════════════════════════════════════════════════════
-// 🛣️ ODÓMETRO GPS — UI (Fase 3.35)
+// 🛣️ ODÓMETRO GPS — UI (Fase 3.35 · fix 3.37)
 // Tres piezas:
 //   · MotorOdometro    → componente INVISIBLE que App.tsx monta
 //                        1 vez: abre el GPS mientras el crono
 //                        de ruta corre. Cuenta en TODAS las tabs.
 //   · OdometroCard     → tarjeta en vivo para Seguimiento de
-//                        ruta: km de hoy, velocidad, calibración.
+//                        ruta: km de hoy, velocidad, calibración
+//                        (F3.37: por viaje con Waze + ayuda +
+//                        pantalla viva + km recuperados 🌉).
 //   · OdometroMenuStats→ bloque compacto Hoy/Ayer/7d/Total para
 //                        el menú hamburguesa (Sidebar).
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Gauge, Settings2, RotateCcw, RefreshCw, Satellite, Check } from 'lucide-react';
+import { Gauge, Settings2, RotateCcw, RefreshCw, Satellite, Check, HelpCircle, Zap, Route } from 'lucide-react';
 import {
   snapshotOdometro,
   suscribirOdometro,
@@ -19,6 +21,8 @@ import {
   ajustarFactor,
   reiniciarDia,
   recargarStatsRemotas,
+  alternarPantallaViva,
+  pantallaViva,
   formatearKm,
   StatsOdometro,
 } from '../services/odometro';
@@ -64,9 +68,18 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
   const stats = useStatsOdometro();
   useTick(4000); // refresca "señal hace Xs"
   const [calibrAbierto, setCalibrAbierto] = useState(false);
+  const [ayudaAbierto, setAyudaAbierto] = useState(false);
   const [factorEdit, setFactorEdit] = useState('1.00');
+  const [viajeKm, setViajeKm] = useState('');
+  const [factorSugerido, setFactorSugerido] = useState<number | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [pantalla, setPantalla] = useState(false);
   const inicializado = useRef(false);
+
+  // Estado del wake lock al montar (persistido por uid)
+  useEffect(() => {
+    if (uid) setPantalla(pantallaViva(uid));
+  }, [uid]);
 
   // Al abrir el panel, cargar el factor actual
   useEffect(() => {
@@ -74,7 +87,10 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
       setFactorEdit(stats.factor.toFixed(2));
       inicializado.current = true;
     }
-    if (!calibrAbierto) inicializado.current = false;
+    if (!calibrAbierto) {
+      inicializado.current = false;
+      setFactorSugerido(null);
+    }
   }, [calibrAbierto, stats.factor]);
 
   const haceSenal = stats.ultimaSenalAt
@@ -84,14 +100,37 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
 
   const abrirCalibr = () => {
     setFactorEdit(stats.factor.toFixed(2));
+    setAyudaAbierto(false);
     setCalibrAbierto(true);
+  };
+
+  // 🌉 MODO 1 — calibración POR VIAJE: el rider pone los km
+  // reales del viaje (Waze / marcador de la moto) y la app
+  // calcula el factor sola. F3.37.
+  const calcularPorViaje = () => {
+    const reales = parseFloat(viajeKm.replace(',', '.'));
+    if (isNaN(reales) || reales <= 0) {
+      onShowToast?.('Pon los km reales', 'Ej: 12.5 — lo que dice Waze o tu marcador', 'warning');
+      return;
+    }
+    if (stats.hoyCrudoM < 500) {
+      onShowToast?.('Muy pocos km hoy', 'Anda un tramo primero (mínimo 0.5 km) y vuelve a calibrar', 'warning');
+      return;
+    }
+    const f = Math.round(((reales * 1000) / stats.hoyCrudoM) * 100) / 100;
+    const fClamp = Math.min(2, Math.max(0.5, f));
+    setFactorSugerido(fClamp);
+    setFactorEdit(fClamp.toFixed(2));
+    if (f !== fClamp) {
+      onShowToast?.('Factor recortado', `Calculado ×${f.toFixed(2)} — el rango permitido es 0.50–2.00`, 'info');
+    }
   };
 
   const guardarFactor = async () => {
     if (!uid) return;
     const f = parseFloat(factorEdit.replace(',', '.'));
-    if (isNaN(f) || f < 0.5 || f > 1.5) {
-      onShowToast?.('Factor inválido', 'Debe estar entre 0.50 y 1.50 (ej: 1.07)', 'warning');
+    if (isNaN(f) || f < 0.5 || f > 2) {
+      onShowToast?.('Factor inválido', 'Debe estar entre 0.50 y 2.00 (ej: 1.07)', 'warning');
       return;
     }
     setGuardando(true);
@@ -110,6 +149,21 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
     }
   };
 
+  // 🔆 PANTALLA VIVA — evita que la pantalla se apague mientras
+  // el cronómetro corre (el GPS sigue fluyendo → conteo exacto).
+  const togglePantalla = () => {
+    if (!uid) return;
+    const v = alternarPantallaViva(uid);
+    setPantalla(v);
+    onShowToast?.(
+      v ? '🔆 Pantalla viva ON' : 'Pantalla viva OFF',
+      v
+        ? 'Mientras el cronómetro corra, la pantalla no se apaga (gasta más batería)'
+        : 'La pantalla puede apagarse — los km se recuperan con puentes',
+      v ? 'success' : 'info'
+    );
+  };
+
   const reiniciarHoy = async () => {
     if (!uid) return;
     if (!confirm('⚠️ ¿Reiniciar el odómetro de HOY?\n\nLos km de hoy vuelven a 0 (el histórico también se corrige).\nÚsalo solo si algo contó mal.')) return;
@@ -118,7 +172,8 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
   };
 
   const kmHoy = formatearKm(stats.hoyM);
-  const kmCrudos = stats.factor !== 1 ? (stats.hoyM / stats.factor) : null;
+  const kmCrudos = stats.factor !== 1 ? stats.hoyCrudoM : null;
+  const kmPuente = stats.puenteM >= 200 ? formatearKm(stats.puenteM) : null;
 
   return (
     <div className={`rounded-2xl border p-3.5 transition-colors ${
@@ -161,6 +216,11 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
             {stats.factor !== 1 && kmCrudos != null && (
               <span className="text-slate-500"> · sin calibrar: {(kmCrudos / 1000).toFixed(1)} km ×{stats.factor.toFixed(2)}</span>
             )}
+            {kmPuente && (
+              <span className="text-cyan-500/80" title="Km rescatados de huecos de señal GPS (app en segundo plano o pantalla apagada)">
+                {' '}· 🌉 {kmPuente} recuperados sin señal
+              </span>
+            )}
           </p>
         </div>
 
@@ -172,6 +232,18 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
           >
             <Settings2 className="w-3.5 h-3.5" />
             Calibrar
+          </button>
+          <button
+            onClick={togglePantalla}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold transition-all active:scale-95 ${
+              pantalla
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-400'
+            }`}
+            title={pantalla ? 'Pantalla viva activa: la pantalla no se apaga mientras cuenta km' : 'Activar pantalla viva (conteo más exacto, más batería)'}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            {pantalla ? 'Viva ON' : 'Viva'}
           </button>
           <button
             onClick={reiniciarHoy}
@@ -194,26 +266,83 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
         </span>
       </div>
 
-      {/* Panel de calibración */}
+      {/* Panel de calibración F3.37: por viaje (auto) + manual + ayuda */}
       {calibrAbierto && (
         <div className="mt-2.5 rounded-xl bg-slate-800/80 border border-slate-700 p-2.5 space-y-2">
-          <p className="text-[10px] text-slate-400 leading-snug">
-            🛣️ ¿La app y el marcador de tu moto no coinciden? Anota cuánto dice tu marcador hoy
-            y divídelo entre lo que dice la app: <b className="text-slate-300">marcador ÷ app = factor</b>.
-            Ej: marcador 30 km ÷ app 28 km = <b className="text-cyan-300">1.07</b>
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+              <Settings2 className="w-3.5 h-3.5 text-cyan-400" />
+              Calibración
+              {factorSugerido != null && (
+                <span className="text-cyan-300 font-mono">sugerido: ×{factorSugerido.toFixed(2)}</span>
+              )}
+            </p>
+            <button
+              onClick={() => setAyudaAbierto((v) => !v)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-slate-400 transition-all"
+              title="Cómo funciona la calibración"
+            >
+              <HelpCircle className="w-3 h-3" />
+              ¿Cómo calibrar?
+            </button>
+          </div>
+
+          {ayudaAbierto && (
+            <div className="rounded-lg bg-slate-900/70 border border-slate-700/60 p-2 text-[10px] text-slate-400 leading-relaxed space-y-1">
+              <p><b className="text-slate-300">¿Qué es?</b> La app une puntos GPS con líneas rectas; en
+              ciudad eso pierde un poquito (las calles curvan y la app queda en segundo plano). El{' '}
+              <b className="text-cyan-300">factor</b> corrige eso: km reales = km de la app × factor.</p>
+              <p><b className="text-slate-300">Paso 1.</b> Arranca el cronómetro y anda tu jornada normal
+              (Waze abierto si quieres — los km sin señal se recuperan 🌉).</p>
+              <p><b className="text-slate-300">Paso 2.</b> Al final mira los km REALES (Waze o el marcador
+              de la moto) y ponlos arriba: <b className="text-slate-300">km reales ÷ km de la app = factor</b>.</p>
+              <p><b className="text-slate-300">Paso 3.</b> Guarda. El factor recalcula TODO el histórico y
+              también los <b className="text-blue-300">recordatorios de mantenimiento</b> (usan estos km).</p>
+              <p className="text-slate-500">Ajusta UNA vez, compara una semana y déjalo fijo.</p>
+            </div>
+          )}
+
+          {/* 🌉 MODO 1 — por viaje (recomendado) */}
           <div className="flex items-center gap-2 flex-wrap">
+            <Route className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0.1"
+              step="0.1"
+              placeholder="km reales de hoy (Waze)"
+              value={viajeKm}
+              onChange={(e) => {
+                setViajeKm(e.target.value);
+                setFactorSugerido(null);
+              }}
+              className="w-40 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 placeholder:font-normal focus:outline-none focus:border-cyan-500 tabular-nums"
+            />
+            <button
+              onClick={calcularPorViaje}
+              className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition-all active:scale-95"
+              title="Calcula el factor solo: km reales ÷ km de la app"
+            >
+              Calcular
+            </button>
+            <span className="text-[10px] text-slate-500">
+              hoy la app lleva <b className="text-slate-300 tabular-nums">{(stats.hoyCrudoM / 1000).toFixed(1)} km</b> sin calibrar
+            </span>
+          </div>
+
+          {/* MODO 2 — manual */}
+          <div className="flex items-center gap-2 flex-wrap border-t border-slate-700/60 pt-2">
             <input
               type="number"
               min="0.50"
-              max="1.50"
+              max="2.00"
               step="0.01"
               value={factorEdit}
               onChange={(e) => setFactorEdit(e.target.value)}
               className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-cyan-500 tabular-nums"
             />
             <div className="flex flex-wrap gap-1.5">
-              {['0.95', '1.00', '1.05', '1.10'].map((f) => (
+              {['0.95', '1.00', '1.05', '1.10', '1.15', '1.20'].map((f) => (
                 <button
                   key={f}
                   onClick={() => setFactorEdit(f)}
@@ -236,6 +365,7 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
+
           <p className="text-[10px] text-slate-500 leading-snug">
             El factor recalcula TODO el histórico (no solo hoy). Ajusta una vez, compara contra tu
             marcador por una semana y déjalo fijo.
