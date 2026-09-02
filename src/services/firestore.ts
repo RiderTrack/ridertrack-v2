@@ -811,6 +811,13 @@ export interface ConfigCuentas {
     /** Logo en base64 JPEG comprimido (~800px máx). Vacío = logo por defecto */
     logoBase64?: string;
   };
+  /** Fase 3.34: “Gracias por tu compra” al marcar un pago — como la v1.
+   *  auto_imagen → el bot manda la tarjeta (imagen) + plantilla al toque;
+   *  auto_texto → solo la plantilla; manual → no manda nada solo (se
+   *  envía desde el botón ✏ Control de mensajes, como hasta ahora). */
+  gracias?: {
+    modo?: 'auto_imagen' | 'auto_texto' | 'manual';
+  };
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -828,6 +835,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   ruta: { inicio: null, fin: null, volverAlInicio: false },
   whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
   apariencia: { logoBase64: '' },
+  gracias: { modo: 'auto_imagen' },
 };
 
 // ── Fase 2.1: utilidades a prueba de red muerta ─────────────
@@ -865,6 +873,7 @@ function fusionarConfig(data: any): ConfigCuentas {
     ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
     whatsappMeta: { ...CONFIG_CUENTAS_DEFAULT.whatsappMeta, ...data?.whatsappMeta },
     apariencia: { ...CONFIG_CUENTAS_DEFAULT.apariencia, ...data?.apariencia },
+    gracias: { ...CONFIG_CUENTAS_DEFAULT.gracias, ...data?.gracias },
   };
 }
 
