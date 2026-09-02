@@ -385,10 +385,13 @@ async function obtenerBinarioExterno(url: string): Promise<ArrayBuffer> {
 
 // ── Buscador (iTunes Search API — pública, sin llave) ──────
 
-export async function buscarPodcastsRSS(q: string): Promise<ResultadoBusquedaPodcast[]> {
+/** F3.45: 50 resultados por defecto (antes 25) — biblioteca más amplia */
+export const LIMITE_BUSQUEDA_ITUNES = 50;
+
+export async function buscarPodcastsRSS(q: string, limite: number = LIMITE_BUSQUEDA_ITUNES): Promise<ResultadoBusquedaPodcast[]> {
   const term = String(q || '').trim();
   if (term.length < 2) return [];
-  const datos = await obtenerJSONExterno(urlBusquedaITunes(term, 25));
+  const datos = await obtenerJSONExterno(urlBusquedaITunes(term, limite));
   const resultados = Array.isArray(datos?.results) ? datos.results : [];
   const vistos = new Set<string>();
   const salida: ResultadoBusquedaPodcast[] = [];
