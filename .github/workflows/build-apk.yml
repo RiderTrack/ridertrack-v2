@@ -58,6 +58,40 @@ jobs:
             echo "⚠️ google-services.json NO encontrado en la raíz del repo"
           fi
 
+      # F3.34: el template de Capacitor trae su robot como ícono —
+      # android-icons/ (repo) tiene el escudo RiderTrack real en todas
+      # las densidades + splash. Se copia ENCIMA del res/ generado por
+      # `cap add android` para que TODA build salga con el logo de la v1.
+      - name: Apply RiderTrack launcher icon + splash (F3.34)
+        run: |
+          if [ -d android-icons ]; then
+            # 1) Borrar los splash por densidad del template Capacitor:
+            #    si quedan, Android los prefiere (drawable-port-hdpi etc.)
+            #    y saldría el splash default en vez del de RiderTrack.
+            rm -rf android/app/src/main/res/drawable-port-hdpi \
+                   android/app/src/main/res/drawable-port-mdpi \
+                   android/app/src/main/res/drawable-port-xhdpi \
+                   android/app/src/main/res/drawable-port-xxhdpi \
+                   android/app/src/main/res/drawable-port-xxxhdpi \
+                   android/app/src/main/res/drawable-land-hdpi \
+                   android/app/src/main/res/drawable-land-mdpi \
+                   android/app/src/main/res/drawable-land-xhdpi \
+                   android/app/src/main/res/drawable-land-xxhdpi \
+                   android/app/src/main/res/drawable-land-xxxhdpi
+            # 2) Borrar los 2 vectores del robot Capacitor que quedan
+            #    huérfanos (teal + foreground v24) por si algo los referencie
+            rm -f android/app/src/main/res/drawable/ic_launcher_background.xml \
+                  android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+            rmdir android/app/src/main/res/drawable-v24 2>/dev/null || true
+            # 3) Nuestro escudo RiderTrack encima del res/ generado
+            cp -r android-icons/. android/app/src/main/res/
+            echo "✅ Ícono RiderTrack aplicado (launcher + round + adaptivo + splash)"
+            echo "res/ final:"
+            ls android/app/src/main/res/ | sort
+          else
+            echo "⚠️ android-icons/ NO existe — el APK saldrá con el ícono default de Capacitor"
+          fi
+
       - name: Apply Google Services Gradle plugin
         run: |
           # Agregar plugin de Google Services al build.gradle del proyecto
