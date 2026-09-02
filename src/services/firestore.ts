@@ -57,6 +57,12 @@ export interface Cliente {
   /** ✅ Registro en la web (Fase 2.6 — como la v1): ya pasó a la
    *  página de la empresa. Se marca desde el panel de Verificación. */
   webReg?: boolean;
+  /** 🙏 F3.44 (restaura la v1): cómo avisarle a ESTE cliente cuando
+   * su pedido pasa a ENTREGADO por cualquier método. El botoncito
+   * de cada cliente lo cambia (Seguimiento / Modo Moto / Control).
+   * undefined = auto_imagen (el bot manda "gracias por tu compra"
+   * con imagen apenas lo marcas cobrado, como la v1). */
+  aviso?: 'auto_imagen' | 'auto_texto' | 'manual';
   /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
    *  no volver a geocodificar la misma dirección nunca más */
   lat?: number;
@@ -235,6 +241,7 @@ export async function publicarRutaActiva(
       nota: c.nota || '',
       obs: c.obs || '',
       hora: c.hora || '',
+      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
     })),
     clienteActualIdx: -1,
     totalClientes: clientes.length,
@@ -265,6 +272,7 @@ export async function actualizarRutaActiva(userId: string, clientes: Cliente[]):
       dir: c.dir || '',
       dist: c.dist || '',
       st: c.st || 'pendiente',
+      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
     })),
     pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
   };
@@ -731,6 +739,8 @@ export async function publicarClientesEnRutaActiva(
       obs: c.obs || '',
       hora: c.hora || '',
       ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
+      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44 (que el modo
+      // sobrereviva el round-trip ruta_activa → listener de la app)
       ...(typeof c.lat === 'number' && typeof c.lng === 'number'
         ? { lat: c.lat, lng: c.lng }
         : {}),
@@ -811,13 +821,6 @@ export interface ConfigCuentas {
     /** Logo en base64 JPEG comprimido (~800px máx). Vacío = logo por defecto */
     logoBase64?: string;
   };
-  /** Fase 3.34: “Gracias por tu compra” al marcar un pago — como la v1.
-   *  auto_imagen → el bot manda la tarjeta (imagen) + plantilla al toque;
-   *  auto_texto → solo la plantilla; manual → no manda nada solo (se
-   *  envía desde el botón ✏ Control de mensajes, como hasta ahora). */
-  gracias?: {
-    modo?: 'auto_imagen' | 'auto_texto' | 'manual';
-  };
 }
 
 export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
@@ -835,7 +838,6 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   ruta: { inicio: null, fin: null, volverAlInicio: false },
   whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
   apariencia: { logoBase64: '' },
-  gracias: { modo: 'auto_imagen' },
 };
 
 // ── Fase 2.1: utilidades a prueba de red muerta ─────────────
@@ -873,7 +875,6 @@ function fusionarConfig(data: any): ConfigCuentas {
     ruta: { ...CONFIG_CUENTAS_DEFAULT.ruta, ...data?.ruta },
     whatsappMeta: { ...CONFIG_CUENTAS_DEFAULT.whatsappMeta, ...data?.whatsappMeta },
     apariencia: { ...CONFIG_CUENTAS_DEFAULT.apariencia, ...data?.apariencia },
-    gracias: { ...CONFIG_CUENTAS_DEFAULT.gracias, ...data?.gracias },
   };
 }
 
@@ -1154,6 +1155,8 @@ export async function iniciarRutaConBot(
         nota: c.nota || '',
         obs: c.obs || '',
         hora: c.hora || '',
+        ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
+        ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
         ...(typeof c.lat === 'number' && typeof c.lng === 'number'
           ? { lat: c.lat, lng: c.lng }
           : {}),
