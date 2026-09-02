@@ -41,14 +41,15 @@ import {
 import { getGoogleApiKey } from '../services/googleMaps';
 import { useAuth } from './useAuth';
 import type { ConfigRuta } from '../services/firestore';
-// 🙏 F3.44: "gracias por tu compra" automático (restaura la v1)
+// 🙏 F3.44 → F3.46: "gracias por tu compra" automático
+// (regla: CADA método de pago dispara, UNA vez por cliente)
 import { ST_ENTREGADOS } from '../utils/cajaCore';
 import {
   modoAvisoDe,
-  esAutomatico,
   claveAviso,
   registrarAvisoEnviado,
   avisoEnviadoHacePoco,
+  decidirGracias,
 } from '../utils/avisoEntrega';
 
 /** Resultado detallado de la optimización (para mostrar en UI) */
@@ -232,35 +233,51 @@ export function useClientes() {
   const cambiarEstado = useCallback((id: string | number, estado: string) => {
     const hora = estado !== 'pendiente' ? new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
     const previa = clientes.find((c) => c.id === id) || null;
+
+    // ═══ 🙏 FASE 3.46 — "GRACIAS POR TU COMPRA" AUTOMÁTICO ═══
+    // REGLA (la que pediste): CADA VEZ que marques un método de
+    // pago, el robot manda el mensajito — UNA SOLA vez por cliente.
+    // El 3.44 exigía la transición "no entregado → entregado": si el
+    // cliente ya venía entregado (repetiste la prueba, corregiste el
+    // método o la data venía vieja) el disparo NUNCA salía. Ahora lo
+    // que evita repetidos es el campo `graciasEnviado` de su ficha
+    // (persistente) + el guard de 5 min. Si se calla, la app te dice
+    // POR QUÉ con un toast — nunca más silencio misterioso.
+    const clave = previa ? claveAviso(previa.cel) : null;
+    const decision = decidirGracias(
+      previa ? { cel: previa.cel, aviso: previa.aviso, graciasEnviado: previa.graciasEnviado } : null,
+      estado,
+      ST_ENTREGADOS,
+      clave ? avisoEnviadoHacePoco(clave) : false
+    );
+
     const nuevos = clientes.map(c => {
       if (c.id === id) {
-        return { ...c, st: estado, hora };
+        return {
+          ...c,
+          st: estado,
+          hora,
+          // El flag viaja con el MISMO guardado del st → persiste en
+          // ruta_activa y en la ficha (no se pierde al reiniciar)
+          ...(decision.dispara ? { graciasEnviado: true } : {}),
+        };
       }
       return c;
     });
     guardar(nuevos);
     // También actualizar en ruta_activa (optimistic update para que el Modular lo vea al instante)
     if (user) {
-      actualizarClienteEnRutaActiva(user.uid, id, { st: estado, hora });
+      actualizarClienteEnRutaActiva(user.uid, id, {
+        st: estado,
+        hora,
+        ...(decision.dispara ? { graciasEnviado: true } : {}),
+      });
     }
 
-    // ═══ 🙏 FASE 3.44 — "GRACIAS POR TU COMPRA" AUTOMÁTICO ═══
-    // Al pasar de NO entregado → ENTREGADO (por el método que sea:
-    // efectivo, yape, pos, transferencia… y desde cualquier vista —
-    // Mi Ruta, Seguimiento o Modo Moto), el bot le manda el
-    // mensajito con imagen — salvo que este cliente esté en MANUAL
-    // (el botoncito 🙏 lo cambia) o que ya se le haya mandado hace
-    // menos de 5 minutos (mandaste el gracias a mano y recién
-    // marcas el estado → no se repite).
-    if (
-      user && previa && previa.cel &&
-      !ST_ENTREGADOS.includes(previa.st) && ST_ENTREGADOS.includes(estado) &&
-      esAutomatico(previa.aviso)
-    ) {
+    if (user && previa && decision.dispara) {
       const tel = _botCel(previa.cel || '');
-      const clave = claveAviso(previa.cel);
       const modo = modoAvisoDe(previa.aviso);
-      if (tel && clave && !avisoEnviadoHacePoco(clave)) {
+      if (tel && clave) {
         registrarAvisoEnviado(clave);
         void encolarAccionBot(user.uid, {
           tipo: 'avisar_entrega',
@@ -287,6 +304,15 @@ export function useClientes() {
           }));
         } catch { /* defensivo */ }
       }
+    } else if (previa && decision.motivo && decision.motivo !== 'no-entregado') {
+      // 🙏 F3.46 — el disparo se calló y hay un motivo EXPENSABLE:
+      // modo manual / ya le llegó / sin celular / anti doble. Mejor
+      // un toast informativo que un silencio que nadie entiende.
+      try {
+        window.dispatchEvent(new CustomEvent('rt-aviso-skip', {
+          detail: { motivo: decision.motivo, nombre: previa.nombre || 'Cliente' },
+        }));
+      } catch { /* defensivo */ }
     }
   }, [clientes, guardar, user, profile]);
 
