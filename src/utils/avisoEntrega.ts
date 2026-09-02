@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 🙏 AVISO DE ENTREGA — Fase 3.44 (restaura el flujo de la v1)
+// 🙏 AVISO DE ENTREGA — Fase 3.44 → 3.46
 //
 // El "botoncito" que iba en cada cliente (Control de mensajes
 // de la v1) decidía CÓMO avisarle al cliente cuando su pedido
@@ -99,3 +99,98 @@ export function claveAviso(cel: string | number | undefined | null): string | nu
   if (d.length === 13 && d.startsWith('0051')) return d.slice(2);
   return d.length >= 9 ? '51' + d.slice(-9) : null;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 🙏 FASE 3.46 — DECISIÓN ÚNICA DEL DISPARO (con motivo)
+//
+// BUG que arregla esta versión: el disparo de la 3.44 exigía
+// la transición "no entregado → entregado". Si el cliente ya
+// venía entregado (repetiste la prueba con el mismo cliente,
+// corregiste el método efectivo→yape, o la data venía vieja),
+// el disparo NUNCA ocurría — y tocabas todo a mano.
+//
+// REGLA NUEVA (la que pediste): CADA VEZ que marques un método
+// de pago, el robot manda el "gracias por tu compra"… UNA SOLA
+// VEZ por cliente. Lo que evita repetidos ya no es la transición
+// del st sino el campo `graciasEnviado` en la FICHA del cliente
+// (persistente: sobrevive reinicios y cambios de método). Para
+// re-mandarlo existe "Mandar ahora" (siempre dispara).
+//
+// El motivo del silencio se devuelve para explicarlo con un
+// toast — nunca más un disparo mudo.
+// ═══════════════════════════════════════════════════════════
+
+/** Por qué el disparo se calló (para el toast informativo) */
+export type MotivoSkip =
+  | 'no-entregado' // marcaste pendiente/fallido — nada que avisar
+  | 'sin-cel'      // el cliente no tiene celular guardado
+  | 'manual'       // el cliente está en modo manual (botoncito 🙏)
+  | 'ya-enviado'   // ya recibió su gracias (campo graciasEnviado)
+  | 'guard';       // se le mandó hace menos de 5 min (anti doble)
+
+/** Resultado de la decisión */
+export interface DecisionGracias {
+  dispara: boolean;
+  motivo?: MotivoSkip;
+}
+
+/** Datos mínimos de la ficha del cliente para decidir */
+export interface ClienteGracias {
+  cel?: string | number | null;
+  aviso?: string | null;
+  /** true = este cliente ya recibió su "gracias por tu compra" */
+  graciasEnviado?: boolean;
+}
+
+/**
+ * ¿El bot debe mandar el "gracias por tu compra" al marcar este
+ * estado? Pure function — un solo lugar, un solo criterio, con
+ * el motivo del silencio para mostrárselo al rider.
+ *
+ * `entregados` = lista de st que cuentan como entrega (la pasa
+ * el llamador para mantener este archivo sin imports).
+ * `guardActivo` = si se mandó un aviso a este teléfono hace
+ * menos de 5 minutos (anti doble-envío).
+ */
+export function decidirGracias(
+  previa: ClienteGracias | null | undefined,
+  estado: string,
+  entregados: readonly string[],
+  guardActivo: boolean
+): DecisionGracias {
+  // Marcaste algo que no es un método de pago → nada que avisar
+  if (!entregados.includes(estado)) return { dispara: false, motivo: 'no-entregado' };
+  // Sin ficha previa (no debería pasar) → silencio
+  if (!previa) return { dispara: false, motivo: 'no-entregado' };
+  // Sin celular no hay a quién mandarle el mensajito
+  if (!previa.cel) return { dispara: false, motivo: 'sin-cel' };
+  // El rider pidió modo manual para este cliente
+  if (modoAvisoDe(previa.aviso) === 'manual') return { dispara: false, motivo: 'manual' };
+  // Ya recibió su gracias (ficha persistente) — no repetimos
+  if (previa.graciasEnviado === true) return { dispara: false, motivo: 'ya-enviado' };
+  // Se acaba de mandar (a mano o por disparo) — anti doble
+  if (guardActivo) return { dispara: false, motivo: 'guard' };
+  // 🎉 Dispara: el robot manda el gracias con imagen
+  return { dispara: true };
+}
+
+/** Textos del toast para cada motivo (App.tsx los usa) */
+export const TEXTO_MOTIVO: Record<MotivoSkip, { titulo: string; detalle: (nombre: string) => string }> = {
+  'no-entregado': { titulo: '', detalle: () => '' },
+  'sin-cel': {
+    titulo: '📱 Sin celular',
+    detalle: (n) => `${n} no tiene celular guardado — no puedo avisarle`,
+  },
+  'manual': {
+    titulo: '✋ Modo manual',
+    detalle: (n) => `${n} está en MANUAL — el bot no le manda el gracias (cámbialo con el botoncito 🙏)`,
+  },
+  'ya-enviado': {
+    titulo: '🙏 Ya le llegó',
+    detalle: (n) => `${n} ya recibió su "gracias por tu compra" — no se repite`,
+  },
+  'guard': {
+    titulo: '🙏 Anti doble',
+    detalle: (n) => `Hace un momento ya se le mandó a ${n} — el disparo se calla 5 min`,
+  },
+};
