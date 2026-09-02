@@ -265,7 +265,7 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
       await finalizarRutaActual();
       setRecienFinalizada(true);
       // F3.41: aviso del resumen diario — la última milla del día
-      onShowToast?.('🏁 Ruta finalizada', 'Buen trabajo — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Podcast)', 'success');
+      onShowToast?.('🏁 Ruta finalizada', 'Buen trabajo — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Jornada hablada)', 'success');
     } finally {
       setFinalizando(false);
     }

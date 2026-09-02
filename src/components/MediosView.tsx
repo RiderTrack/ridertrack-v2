@@ -24,16 +24,18 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Music, Radio as RadioIcon, Youtube, Search, Star, Play, Pause, Square,
+  Music, Radio as RadioIcon, Youtube, Podcast as Podcasts, Search, Star, Play, Pause, Square,
   Volume2, Loader2, Heart, SkipBack, SkipForward, Shuffle, Repeat, Repeat1,
   LogOut, Link2, Trash2, RefreshCw, ExternalLink, Check, Copy, ChevronDown, Info, FlaskConical,
 } from 'lucide-react';
 import { useMedios } from './medios/MediosProvider';
+// F3.43: 🎧 podcasts RSS — tu novelas/audiolibros en el mismo player
+import { TabPodcasts } from './medios/TabPodcasts';
 import { spotifyReconectarPlayer, spotifySimularLlamada } from '../services/spotify';
 import { RADIOS, RadioEstacion, leerFavoritos, guardarFavoritos } from '../services/mediosRadio';
 import { leerFavoritosYT, guardarFavoritosYT, VideoFavorito, extraerVideoId } from '../services/mediosYouTube';
 
-type TabMedios = 'radio' | 'spotify' | 'youtube';
+type TabMedios = 'radio' | 'spotify' | 'youtube' | 'podcasts';
 
 const fmtTiempo = (ms: number): string => {
   if (!ms || ms < 0) return '0:00';
@@ -58,11 +60,11 @@ export const MediosView: React.FC = () => {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Tabs (F3.43: 4 — llegó 🎧 Podcasts) */}
+      <div className="grid grid-cols-4 gap-1.5">
         <button
           onClick={() => setTab('radio')}
-          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
             tab === 'radio'
               ? 'bg-blue-600 border-blue-500 text-white'
               : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
@@ -72,7 +74,7 @@ export const MediosView: React.FC = () => {
         </button>
         <button
           onClick={() => setTab('spotify')}
-          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
             tab === 'spotify'
               ? 'bg-emerald-600 border-emerald-500 text-white'
               : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
@@ -82,7 +84,7 @@ export const MediosView: React.FC = () => {
         </button>
         <button
           onClick={() => setTab('youtube')}
-          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
             tab === 'youtube'
               ? 'bg-red-600 border-red-500 text-white'
               : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
@@ -90,11 +92,22 @@ export const MediosView: React.FC = () => {
         >
           <Youtube className="w-4 h-4" /> YouTube
         </button>
+        <button
+          onClick={() => setTab('podcasts')}
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
+            tab === 'podcasts'
+              ? 'bg-violet-600 border-violet-500 text-white'
+              : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700/50'
+          }`}
+        >
+          <Podcasts className="w-4 h-4" /> Podcasts
+        </button>
       </div>
 
       {tab === 'radio' && <TabRadio />}
       {tab === 'spotify' && <TabSpotify />}
       {tab === 'youtube' && <TabYouTube />}
+      {tab === 'podcasts' && <TabPodcasts />}
     </div>
   );
 };

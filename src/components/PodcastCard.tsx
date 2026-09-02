@@ -66,6 +66,8 @@ import {
   snapshotPodcast,
   suscribirPodcast,
 } from '../services/podcast';
+// F3.43: si está sonando un episodio RSS, se pausa cortésmente
+import { pausarEpisodioRSS } from '../services/podcastRSS';
 
 type OnShowToast = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
@@ -211,13 +213,19 @@ export const PodcastCard: React.FC<PodcastCardProps> = ({ uid, riderName }) => {
   const reproducir = () => {
     if (sonandoEste && pod.fase === 'reproduciendo') pausarPodcast();
     else if (sonandoEste && pod.fase === 'pausado') reanudarPodcast();
-    else reproducirGuion(guion);
+    else {
+      try { pausarEpisodioRSS(); } catch { /* sin episodio sonando */ }
+      reproducirGuion(guion);
+    }
   };
 
   const irACapitulo = (i: number) => {
     const lim = Math.min(Math.max(0, i), guion.segmentos.length - 1);
     if (sonandoEste) saltarASegmento(lim);
-    else reproducirGuion(guion, lim);
+    else {
+      try { pausarEpisodioRSS(); } catch { /* sin episodio sonando */ }
+      reproducirGuion(guion, lim);
+    }
   };
 
   const otroSonando = pod.fase !== 'detenido' && pod.guion?.tipo !== tipo;
@@ -253,7 +261,7 @@ export const PodcastCard: React.FC<PodcastCardProps> = ({ uid, riderName }) => {
           </div>
           <div className="min-w-0">
             <div className="text-[10px] uppercase font-bold tracking-wider text-purple-300">
-              RiderTrack Podcast
+              RiderTrack FM
             </div>
             <div className="text-lg font-black text-white truncate">{guion.titulo}</div>
             <div className="text-[11px] text-slate-400 truncate">{guion.subtitulo}</div>
@@ -484,13 +492,13 @@ export const PodcastMenuBoton: React.FC<PodcastMenuBotonProps> = ({ uid, colapsa
       onClick={onAbrir}
       title={
         colapsado
-          ? 'El podcast de tu jornada'
+          ? 'Jornada hablada'
           : 'Tu día y tu semana, contados en voz alta — toca para escuchar'
       }
       className="group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 active:scale-[0.98]"
     >
       <PodcastIcon className="w-5 h-5 flex-shrink-0 text-purple-400 transition-transform duration-200 group-hover:scale-105" />
-      {!colapsado && <span className="ml-3 truncate font-medium">Podcast</span>}
+      {!colapsado && <span className="ml-3 truncate font-medium">Jornada hablada</span>}
       {!colapsado && (
         <span className={`ml-auto px-2 py-0.5 text-[10px] font-bold rounded-full border tabular-nums ${badge.clase}`}>
           {badge.texto}
@@ -498,7 +506,7 @@ export const PodcastMenuBoton: React.FC<PodcastMenuBotonProps> = ({ uid, colapsa
       )}
       {colapsado && (
         <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-50">
-          Podcast
+          Jornada hablada
         </div>
       )}
     </button>
