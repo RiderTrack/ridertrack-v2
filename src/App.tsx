@@ -754,7 +754,9 @@ export default function App() {
   }
 
   return (
-    <MediosProvider onShowToast={showToast}>
+    // F3.43: uid → el servicio de podcasts guarda tus suscripciones
+    // y posiciones en Firestore (usuarios/{uid}.podcasts)
+    <MediosProvider onShowToast={showToast} uid={user?.uid}>
     <div
       className="min-h-screen bg-slate-950 text-slate-100 font-sans transition-colors duration-200"
     >
