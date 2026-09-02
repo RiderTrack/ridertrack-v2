@@ -63,6 +63,12 @@ export interface Cliente {
    * undefined = auto_imagen (el bot manda "gracias por tu compra"
    * con imagen apenas lo marcas cobrado, como la v1). */
   aviso?: 'auto_imagen' | 'auto_texto' | 'manual';
+  /** 🙏 F3.46: true = este cliente YA recibió su "gracias por
+   *  compra" (auto o manual). Es lo que evita repetidos cuando
+   *  corregís el método (efectivo→yape) o repetís la marca — el
+   *  disparo ya no depende de la transición del st. "Mandar
+   *  ahora" siempre dispara sin mirar este flag. */
+  graciasEnviado?: boolean;
   /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
    *  no volver a geocodificar la misma dirección nunca más */
   lat?: number;
@@ -242,6 +248,7 @@ export async function publicarRutaActiva(
       obs: c.obs || '',
       hora: c.hora || '',
       ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
+      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
     })),
     clienteActualIdx: -1,
     totalClientes: clientes.length,
@@ -273,6 +280,7 @@ export async function actualizarRutaActiva(userId: string, clientes: Cliente[]):
       dist: c.dist || '',
       st: c.st || 'pendiente',
       ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
+      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
     })),
     pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
   };
@@ -586,6 +594,13 @@ export function subscribeToRutaActiva(
             respondioInicioRuta: c.respondioInicioRuta,
             // ✅ Registro web (verificación con la empresa — Fase 2.6)
             webReg: c.webReg === true,
+            // 🙏 F3.44/F3.46 — modo de aviso + flag "ya le llegó el
+            // gracias": viajan dentro del cliente y deben SOBREVIVIR
+            // el round-trip ruta_activa → listener. (F3.44 los botaba
+            // aquí — si ponías MANUAL, al primer snapshot volvía a
+            // AUTO sin que te enteraras.)
+            ...(c.aviso ? { aviso: c.aviso } : {}),
+            ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}),
             // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
             // el cliente para no volver a geocodificar nunca
             ...(typeof c.lat === 'number' && typeof c.lng === 'number'
@@ -652,6 +667,8 @@ export function subscribeToClientesRegistrados(
             mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '',
             hora: '',
             nota: '',
+            ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.46
+            ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
           });
         });
         console.log('🔄 Clientes registrados del Modular cargados:', clientes.length);
@@ -739,8 +756,8 @@ export async function publicarClientesEnRutaActiva(
       obs: c.obs || '',
       hora: c.hora || '',
       ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
-      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44 (que el modo
-      // sobrereviva el round-trip ruta_activa → listener de la app)
+      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
+      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
       ...(typeof c.lat === 'number' && typeof c.lng === 'number'
         ? { lat: c.lat, lng: c.lng }
         : {}),
@@ -1157,6 +1174,7 @@ export async function iniciarRutaConBot(
         hora: c.hora || '',
         ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
         ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
+        ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
         ...(typeof c.lat === 'number' && typeof c.lng === 'number'
           ? { lat: c.lat, lng: c.lng }
           : {}),
