@@ -173,6 +173,9 @@ export function useResumenCaja(uid?: string | null): {
   resumen: ResumenCaja;
   cierreHoy: ReturnType<typeof cierreDeHoy>;
   cargando: boolean;
+  /** clientes de HOY (ruta viva + cerradas hoy) — F3.41: el
+   *  resumen diario los cuenta para el mensaje de WhatsApp */
+  clientes: Cliente[];
 } {
   const caja = useCaja();
   const { clientes, cargando } = useClientesDeHoy(uid);
@@ -189,7 +192,7 @@ export function useResumenCaja(uid?: string | null): {
   );
   const cierreHoy = useMemo(() => cierreDeHoy(caja), [caja]);
 
-  return { caja, gastosHoy, resumen, cierreHoy, cargando };
+  return { caja, gastosHoy, resumen, cierreHoy, cargando, clientes };
 }
 
 // ── Estilos compartidos ───────────────────────────────────
