@@ -58,6 +58,8 @@ import { guardarAvatarRider } from './services/firestore';
 // Fase 3.35: 🛣️ motor del odómetro GPS — 1 solo mount a nivel App:
 // cuenta km en TODAS las pestañas mientras el cronómetro de ruta corre
 import { MotorOdometro } from './components/OdometroCard';
+// F3.36: 🔧 motor de recordatorios de mantenimiento (invisible)
+import { MotorMantenimiento } from './components/MantenimientoCard';
 import { db } from './services/firebase';
 import { collection, onSnapshot, query, where, limit as fsLimit } from 'firebase/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
@@ -954,6 +956,11 @@ export default function App() {
           abre el watch de posición SOLO con el cronómetro de ruta
           activo y guarda los km en usuarios/{uid}.odometro. */}
       <MotorOdometro uid={user?.uid} />
+
+      {/* 🔧 Fase 3.36: motor de mantenimiento — invisible, 1 mount:
+          arranca el store de mantenimientos y avisa con toast
+          cuando algo VENCE (1 aviso por ítem por día). */}
+      <MotorMantenimiento uid={user?.uid} onShowToast={showToast} />
 
       {/* 🎭 Picker de avatar (desde el header) */}
       <AvatarPicker
