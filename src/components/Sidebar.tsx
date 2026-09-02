@@ -34,7 +34,10 @@ import { AvatarPicker } from './AvatarPicker';
 // Fase 3.35: 🛣️ kilometraje en el menú (hoy/ayer/7 días/total)
 import { OdometroMenuStats } from './OdometroCard';
 // F3.36: 🔧 mantenimiento de la moto (estado rápido en el menú)
-import { MantenimientoMenuStats } from './MantenimientoCard';
+// F3.38: el GESTOR COMPLETO vive aquí, en un modal — ya no
+// satura el Seguimiento de ruta (los clientes van primero)
+import { MantenimientoMenuStats, MantenimientoCard } from './MantenimientoCard';
+import { Modal } from './ui';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -90,6 +93,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   uid,
 }) => {
   const [pickerAbierto, setPickerAbierto] = useState(false);
+  // F3.38: 🔧 modal del gestor de mantenimiento (menú hamburguesa)
+  const [mantGestionAbierto, setMantGestionAbierto] = useState(false);
 
   // Secciones del menú
   const secciones: MenuSection[] = [
@@ -190,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.37</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.38</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -261,9 +266,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           Hoy / Ayer / 7 días / Total (se actualizan en vivo) */}
       <OdometroMenuStats uid={uid} colapsado={isCollapsed} />
 
-      {/* 🔧 Fase 3.36: mantenimiento de la moto — vencidos / por
-          vencer / próximo, con badge rojo si algo venció */}
-      <MantenimientoMenuStats uid={uid} colapsado={isCollapsed} />
+      {/* 🔧 Fase 3.36/3.38: mantenimiento de la moto — vencidos /
+          por vencer / próximo, con badge rojo si algo venció.
+          Al tocarlo se abre el GESTOR COMPLETO en un modal. */}
+      <MantenimientoMenuStats
+        uid={uid}
+        colapsado={isCollapsed}
+        onAbrirGestion={() => {
+          // En móvil: cerrar el drawer primero para que el modal
+          // quede visible (el drawer va en z-[1200], el modal z-50)
+          if (isMobileOpen) onCloseMobile();
+          setMantGestionAbierto(true);
+        }}
+      />
 
       {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
@@ -338,6 +353,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       )}
+
+      {/* 🔧 F3.38: GESTOR COMPLETO de mantenimiento — modal que abre
+          desde el menú hamburguesa. Se renderiza UNA sola vez (fuera
+          de sidebarContent, que existe doble: desktop + drawer) para
+          no duplicar el backdrop. En móvil el drawer se cierra antes. */}
+      <Modal
+        isOpen={mantGestionAbierto}
+        onClose={() => setMantGestionAbierto(false)}
+        title="🔧 Mantenimiento de la moto"
+        subtitle="Recordatorios con los km del odómetro GPS"
+        maxWidth="lg"
+      >
+        <MantenimientoCard uid={uid} onShowToast={onShowToast} />
+      </Modal>
     </>
   );
 };

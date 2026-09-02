@@ -1,16 +1,19 @@
 // ═══════════════════════════════════════════════════════════
-// 🔧 MANTENIMIENTO DE LA MOTO — UI (Fase 3.36)
+// 🔧 MANTENIMIENTO DE LA MOTO — UI (Fase 3.36 · 3.38)
 // Tres piezas (mismo patrón del odómetro F3.35):
 //   · MotorMantenimiento   → invisible, App.tsx lo monta 1 vez:
 //                            arranca el servicio y avisa con
 //                            toast cuando algo VENCE (1 aviso
 //                            por ítem y por día, sin molestar).
-//   · MantenimientoCard    → tarjeta para Seguimiento de ruta:
-//                            lista de mantenimientos con barra
-//                            de avance, ✓ registrar hecho,
-//                            historial e intervalos editables.
-//   · MantenimientoMenuStats→ bloque compacto para el menú
-//                            hamburguesa (Sidebar).
+//   · MantenimientoCard    → (F3.38) gestor completo: lista de
+//                            mantenimientos con barra de avance,
+//                            ✓ registrar hecho, historial e
+//                            intervalos editables. Vive en el
+//                            MODAL del menú hamburguesa ☰ — ya
+//                            NO satura el Seguimiento de ruta.
+//   · MantenimientoMenuStats→ bloque del menú hamburguesa:
+//                            estado rápido + al tocarlo abre
+//                            el gestor completo (F3.38).
 //
 // Los km salen del ODÓMETRO GPS (F3.35): total calibrado →
 // los recordatorios respetan la calibración de la moto.
@@ -101,7 +104,7 @@ export const MotorMantenimiento: React.FC<{ uid?: string | null; onShowToast?: O
 
     onShowToast?.(
       '🔧 Mantenimiento vencido',
-      `${partes}${extra} — regístralos cuando llegues al taller (Seguimiento de ruta)`,
+      `${partes}${extra} — regístralos cuando llegues al taller (menú ☰ → Mantenimiento)`,
       'warning'
     );
     for (const v of vencidos) marcarAvisado(uid, v.id);
@@ -111,7 +114,7 @@ export const MotorMantenimiento: React.FC<{ uid?: string | null; onShowToast?: O
 };
 
 // ═══════════════════════════════════════════════════════════
-// 🔧 TARJETA — Seguimiento de ruta
+// 🔧 GESTOR — modal del menú hamburguesa (F3.38)
 // ═══════════════════════════════════════════════════════════
 
 interface MantenimientoCardProps {
@@ -627,9 +630,11 @@ export const MantenimientoCard: React.FC<MantenimientoCardProps> = ({ uid, onSho
 interface MantenimientoMenuStatsProps {
   uid?: string | null;
   colapsado?: boolean;
+  /** F3.38: al tocar el bloque se abre el gestor completo (modal) */
+  onAbrirGestion?: () => void;
 }
 
-export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ uid, colapsado }) => {
+export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ uid, colapsado, onAbrirGestion }) => {
   const mant = useMantenimiento();
   const stats = useStatsOdometro();
   const [cargando, setCargando] = useState(true);
@@ -648,7 +653,11 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
   if (colapsado) {
     const hay = resumen.vencidos.length > 0 || resumen.acerca.length > 0;
     return (
-      <div className="px-3 py-2 border-t border-slate-800" title={`Mantenimiento: ${resumen.vencidos.length} vencidos`}>
+      <button
+        onClick={onAbrirGestion}
+        className="px-3 py-2 border-t border-slate-800 w-full"
+        title={`Mantenimiento: ${resumen.vencidos.length} vencidos — toca para gestionar`}
+      >
         <div className="relative flex flex-col items-center gap-0.5">
           <Wrench className={`w-4 h-4 ${resumen.vencidos.length > 0 ? 'text-red-400' : hay ? 'text-amber-400' : 'text-slate-500'}`} />
           {resumen.vencidos.length > 0 && (
@@ -658,7 +667,7 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
           )}
           <span className="text-[8px] font-bold text-slate-500 uppercase">mantto</span>
         </div>
-      </div>
+      </button>
     );
   }
 
@@ -684,7 +693,13 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
   }
 
   return (
-    <div className="mx-2 mb-2 rounded-xl border border-slate-800 bg-slate-800/40 p-2.5 group/mant">
+    <div
+      onClick={onAbrirGestion}
+      className={`mx-2 mb-2 rounded-xl border border-slate-800 bg-slate-800/40 p-2.5 group/mant ${
+        onAbrirGestion ? 'cursor-pointer hover:border-slate-600 hover:bg-slate-800/70 transition-colors active:scale-[0.98]' : ''
+      }`}
+      title="Toca para gestionar tus mantenimientos"
+    >
       <div className="flex items-center justify-between mb-1">
         <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold flex items-center gap-1">
           <Wrench className={`w-3 h-3 ${resumen.vencidos.length > 0 ? 'text-red-400' : 'text-slate-500'}`} />
@@ -692,7 +707,8 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
           {resumen.vencidos.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse ml-0.5" />}
         </span>
         <button
-          onClick={async () => {
+          onClick={async (e) => {
+            e.stopPropagation(); // el bloque entero abre el gestor
             if (!uid) return;
             setCargando(true);
             await recargarMantenimiento(uid);
@@ -709,8 +725,9 @@ export const MantenimientoMenuStats: React.FC<MantenimientoMenuStatsProps> = ({ 
       ) : (
         <p className="text-[11px] text-slate-500">{cargando ? '…' : 'todo al día ✓'}</p>
       )}
-      <p className="text-[8px] text-slate-600 leading-tight mt-1">
-        gestiona en Seguimiento de ruta · km del odómetro
+      <p className="text-[8px] text-slate-600 leading-tight mt-1 flex items-center gap-1">
+        <span>toca para gestionar · km del odómetro</span>
+        <Settings2 className="w-2.5 h-2.5 flex-shrink-0" />
       </p>
     </div>
   );

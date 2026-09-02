@@ -1,19 +1,23 @@
 // ═══════════════════════════════════════════════════════════
-// 🛣️ ODÓMETRO GPS — UI (Fase 3.35 · fix 3.37)
-// Tres piezas:
+// 🛣️ ODÓMETRO GPS — UI (Fase 3.35 · fix 3.37 · 3.38)
+// Cuatro piezas:
 //   · MotorOdometro    → componente INVISIBLE que App.tsx monta
 //                        1 vez: abre el GPS mientras el crono
 //                        de ruta corre. Cuenta en TODAS las tabs.
-//   · OdometroCard     → tarjeta en vivo para Seguimiento de
-//                        ruta: km de hoy, velocidad, calibración
-//                        (F3.37: por viaje con Waze + ayuda +
-//                        pantalla viva + km recuperados 🌉).
+//   · OdometroMini     → (F3.38) tira COMPACTA de una línea para
+//                        Seguimiento de ruta: km de hoy + velo —
+//                        al tocarla se despliega la tarjeta
+//                        completa. Los clientes van PRIMERO.
+//   · OdometroCard     → tarjeta en vivo completa: km de hoy,
+//                        velocidad, calibración (F3.37: por viaje
+//                        con Waze + ayuda + pantalla viva + km
+//                        recuperados 🌉). Vive dentro del Mini.
 //   · OdometroMenuStats→ bloque compacto Hoy/Ayer/7d/Total para
 //                        el menú hamburguesa (Sidebar).
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Gauge, Settings2, RotateCcw, RefreshCw, Satellite, Check, HelpCircle, Zap, Route } from 'lucide-react';
+import { Gauge, Settings2, RotateCcw, RefreshCw, Satellite, Check, HelpCircle, Zap, Route, ChevronDown } from 'lucide-react';
 import {
   snapshotOdometro,
   suscribirOdometro,
@@ -377,6 +381,89 @@ export const OdometroCard: React.FC<OdometroCardProps> = ({ uid, onShowToast }) 
 };
 
 // ═══════════════════════════════════════════════════════════
+// 📏 MINI — tira compacta para Seguimiento de ruta (F3.38)
+// Una sola línea (km hoy + velocidad + estado); al tocar se
+// despliega la tarjeta completa. Así los CLIENTES siguen siendo
+// lo primero que se ve, y el odómetro queda visible sin saturar.
+// ═══════════════════════════════════════════════════════════
+
+interface OdometroMiniProps {
+  uid?: string | null;
+  onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+}
+
+export const OdometroMini: React.FC<OdometroMiniProps> = ({ uid, onShowToast }) => {
+  const stats = useStatsOdometro();
+  useTick(4000); // refresca "señal hace Xs"
+  const [abierto, setAbierto] = useState(false);
+
+  const haceSenal = stats.ultimaSenalAt
+    ? Math.floor((Date.now() - stats.ultimaSenalAt) / 1000)
+    : null;
+  const sinSenal = stats.contando && (haceSenal == null || haceSenal > 45);
+
+  return (
+    <div>
+      {/* Tira compacta — SIEMPRE visible, ocupa una sola línea */}
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className={`w-full rounded-xl border px-3 py-2 flex items-center gap-2 transition-colors active:scale-[0.99] ${
+          stats.contando
+            ? 'border-cyan-500/40 bg-cyan-500/5'
+            : 'border-slate-700/60 bg-slate-900/60'
+        }`}
+        title={abierto ? 'Cerrar odómetro' : 'Toca para ver el odómetro completo: calibrar, pantalla viva, reiniciar'}
+      >
+        <Gauge className={`w-4 h-4 flex-shrink-0 ${stats.contando ? 'text-cyan-400' : 'text-slate-500'}`} />
+        <span className="text-lg font-black text-white tabular-nums leading-none flex-shrink-0">
+          {formatearKm(stats.hoyM)}
+        </span>
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex-shrink-0">km hoy</span>
+
+        {stats.contando && stats.velocidadKmh > 0 && (
+          <span className="text-[11px] font-bold text-cyan-400 tabular-nums flex-shrink-0">
+            {stats.velocidadKmh} km/h
+          </span>
+        )}
+        {stats.contando && (
+          <span
+            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sinSenal ? 'bg-amber-400' : 'bg-cyan-400 animate-pulse'}`}
+            title={sinSenal ? 'Sin señal GPS' : 'Contando km'}
+          />
+        )}
+        {stats.puenteM >= 200 && (
+          <span
+            className="text-[10px] text-cyan-500/80 font-bold flex-shrink-0"
+            title="Km rescatados de huecos de señal GPS (app en segundo plano o pantalla apagada)"
+          >
+            🌉 {formatearKm(stats.puenteM)}
+          </span>
+        )}
+        {sinSenal && (
+          <span className="text-[10px] font-bold text-amber-400 truncate">⚠ sin señal</span>
+        )}
+        {!stats.contando && (
+          <span className="text-[10px] text-slate-500 truncate hidden sm:inline">
+            inicia el cronómetro para contar
+          </span>
+        )}
+
+        <ChevronDown
+          className={`w-4 h-4 text-slate-500 ml-auto flex-shrink-0 transition-transform ${abierto ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {/* Tarjeta completa (calibración, pantalla viva, reiniciar) */}
+      {abierto && (
+        <div className="mt-2">
+          <OdometroCard uid={uid} onShowToast={onShowToast} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
 // 📊 STATS — bloque del menú hamburguesa (Sidebar)
 // ═══════════════════════════════════════════════════════════
 
@@ -447,7 +534,7 @@ export const OdometroMenuStats: React.FC<OdometroMenuStatsProps> = ({ uid, colap
       {fila('7 días', formatearKm(stats.dias7M))}
       {fila('Total', formatearKm(stats.totalM))}
       <p className="text-[8px] text-slate-600 leading-tight mt-1">
-        cuenta con el cronómetro de ruta activo · calibra en Seguimiento de ruta
+        cuenta con el cronómetro de ruta activo · calibra tocando el km en Seguimiento
       </p>
     </div>
   );
