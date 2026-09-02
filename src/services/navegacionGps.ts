@@ -200,6 +200,12 @@ function hablarWeb(texto: string, interrumpir: boolean): void {
 export function hablar(texto: string, interrumpir = false): void {
   const limpio = String(texto || '').replace(/\s+/g, ' ').trim();
   if (!limpio) return;
+  // F3.42: avisa que la navegación va a hablar — el podcast se
+  // auto-pausa (la voz de la navegación MANDA, es seguridad) y
+  // vuelve solo un rato después del último anuncio.
+  try {
+    window.dispatchEvent(new CustomEvent('rt-voz-nav'));
+  } catch {}
   try {
     const TTS = (window as any).Capacitor?.Plugins?.TextToSpeech;
     if (TTS?.speak) {

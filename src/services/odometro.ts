@@ -374,6 +374,24 @@ export function snapshotOdometro(): StatsOdometro {
   return snapCache;
 }
 
+/**
+ * F3.42 (podcast): km calibrados de los últimos N días (hoy
+ * incluido, del más viejo al más nuevo) — para el episodio
+ * semanal. LECTURA pura del cache de días, sin side effects.
+ */
+export function diasUltimosKm(n: number): { fecha: string; m: number }[] {
+  const total = Math.max(1, Math.round(n || 7));
+  const out: { fecha: string; m: number }[] = [];
+  for (let i = total - 1; i >= 0; i--) {
+    const fecha = i === 0 ? hoyLocal() : fechaDia(-i);
+    const m = i === 0
+      ? (hoyLocal() === estado.fecha ? metrosCalibradosHoy() : 0)
+      : (diasCache[fecha] as DiaOdometro | undefined)?.m || 0;
+    out.push({ fecha, m });
+  }
+  return out;
+}
+
 /** Suscripción a cambios del odómetro (para useSyncExternalStore) */
 export function suscribirOdometro(cb: () => void): () => void {
   oyentes.add(cb);
