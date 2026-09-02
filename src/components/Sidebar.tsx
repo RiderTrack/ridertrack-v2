@@ -37,6 +37,9 @@ import { OdometroMenuStats } from './OdometroCard';
 // F3.38: el GESTOR COMPLETO vive aquí, en un modal — ya no
 // satura el Seguimiento de ruta (los clientes van primero)
 import { MantenimientoMenuStats, MantenimientoCard } from './MantenimientoCard';
+// F3.39: 💰 caja del día (gastos + cierre) — mismo patrón: bloque
+// en el menú ☰ + gestor completo en modal
+import { CajaMenuStats, CajaCard } from './CajaCard';
 import { Modal } from './ui';
 
 interface SidebarProps {
@@ -95,6 +98,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [pickerAbierto, setPickerAbierto] = useState(false);
   // F3.38: 🔧 modal del gestor de mantenimiento (menú hamburguesa)
   const [mantGestionAbierto, setMantGestionAbierto] = useState(false);
+  // F3.39: 💰 modal del gestor de caja (menú hamburguesa)
+  const [cajaGestionAbierto, setCajaGestionAbierto] = useState(false);
 
   // Secciones del menú
   const secciones: MenuSection[] = [
@@ -195,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.38</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.39</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -277,6 +282,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           // quede visible (el drawer va en z-[1200], el modal z-50)
           if (isMobileOpen) onCloseMobile();
           setMantGestionAbierto(true);
+        }}
+      />
+
+      {/* 💰 Fase 3.39: caja del día — esperado en caja + gastos +
+          candado si ya cerraste. Al tocarlo se abre el GESTOR
+          COMPLETO (fondo, gastos, cierre con conteo, MATE) en modal. */}
+      <CajaMenuStats
+        uid={uid}
+        colapsado={isCollapsed}
+        onAbrirGestion={() => {
+          if (isMobileOpen) onCloseMobile();
+          setCajaGestionAbierto(true);
         }}
       />
 
@@ -366,6 +383,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         maxWidth="lg"
       >
         <MantenimientoCard uid={uid} onShowToast={onShowToast} />
+      </Modal>
+
+      {/* 💰 F3.39: GESTOR de la caja del día — modal que abre desde
+          el menú hamburguesa. Mismo patrón del de mantenimiento:
+          UNA sola renderización fuera de sidebarContent. */}
+      <Modal
+        isOpen={cajaGestionAbierto}
+        onClose={() => setCajaGestionAbierto(false)}
+        title="💰 Caja del día"
+        subtitle="Gastos + cierre con conteo físico"
+        maxWidth="lg"
+      >
+        <CajaCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
       </Modal>
     </>
   );
