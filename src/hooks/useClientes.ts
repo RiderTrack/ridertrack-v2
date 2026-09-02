@@ -16,6 +16,8 @@ import {
   finalizarRuta,
   limpiarRutaSinGuardar,
   subirFotoEntrega,
+  encolarAccionBot,
+  _botCel,
 } from '../services/firestore';
 import {
   batchGeocodificar,
@@ -39,6 +41,15 @@ import {
 import { getGoogleApiKey } from '../services/googleMaps';
 import { useAuth } from './useAuth';
 import type { ConfigRuta } from '../services/firestore';
+// 🙏 F3.44: "gracias por tu compra" automático (restaura la v1)
+import { ST_ENTREGADOS } from '../utils/cajaCore';
+import {
+  modoAvisoDe,
+  esAutomatico,
+  claveAviso,
+  registrarAvisoEnviado,
+  avisoEnviadoHacePoco,
+} from '../utils/avisoEntrega';
 
 /** Resultado detallado de la optimización (para mostrar en UI) */
 export interface ResultadoOptimizarRuta {
@@ -220,6 +231,7 @@ export function useClientes() {
   // Cambiar estado (pago) - sincroniza con ruta_activa en tiempo real
   const cambiarEstado = useCallback((id: string | number, estado: string) => {
     const hora = estado !== 'pendiente' ? new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
+    const previa = clientes.find((c) => c.id === id) || null;
     const nuevos = clientes.map(c => {
       if (c.id === id) {
         return { ...c, st: estado, hora };
@@ -231,7 +243,52 @@ export function useClientes() {
     if (user) {
       actualizarClienteEnRutaActiva(user.uid, id, { st: estado, hora });
     }
-  }, [clientes, guardar, user]);
+
+    // ═══ 🙏 FASE 3.44 — "GRACIAS POR TU COMPRA" AUTOMÁTICO ═══
+    // Al pasar de NO entregado → ENTREGADO (por el método que sea:
+    // efectivo, yape, pos, transferencia… y desde cualquier vista —
+    // Mi Ruta, Seguimiento o Modo Moto), el bot le manda el
+    // mensajito con imagen — salvo que este cliente esté en MANUAL
+    // (el botoncito 🙏 lo cambia) o que ya se le haya mandado hace
+    // menos de 5 minutos (mandaste el gracias a mano y recién
+    // marcas el estado → no se repite).
+    if (
+      user && previa && previa.cel &&
+      !ST_ENTREGADOS.includes(previa.st) && ST_ENTREGADOS.includes(estado) &&
+      esAutomatico(previa.aviso)
+    ) {
+      const tel = _botCel(previa.cel || '');
+      const clave = claveAviso(previa.cel);
+      const modo = modoAvisoDe(previa.aviso);
+      if (tel && clave && !avisoEnviadoHacePoco(clave)) {
+        registrarAvisoEnviado(clave);
+        void encolarAccionBot(user.uid, {
+          tipo: 'avisar_entrega',
+          clienteId: previa.id,
+          telefono: tel,
+          nombre: previa.nombre || 'Cliente',
+          prod: previa.prod || '',
+          cobrar: parseFloat(String(previa.cobrar || 0)),
+          dir: previa.dir || '',
+          dist: previa.dist || '',
+          st: estado,
+          rider: {
+            nombre: profile?.nombre || 'Rudy',
+            telefono: profile?.email || '',
+            empresa: 'MATE',
+          },
+          modo_entrega: modo,
+          enviar_imagen: modo === 'auto_imagen',
+        }).catch(() => { /* el bot está caído: la acción queda encolada */ });
+        // Toast en pantalla — App.tsx escucha y lo muestra en cualquier vista
+        try {
+          window.dispatchEvent(new CustomEvent('rt-aviso-entrega', {
+            detail: { nombre: previa.nombre || 'Cliente', modo },
+          }));
+        } catch { /* defensivo */ }
+      }
+    }
+  }, [clientes, guardar, user, profile]);
 
   // Importar desde Excel - sincroniza con ruta_activa automáticamente
   const importarDesdeExcel = useCallback(async (file: File): Promise<number> => {
