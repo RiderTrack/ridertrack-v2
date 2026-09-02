@@ -54,10 +54,10 @@ import { BroadcastView } from './components/BroadcastView';
 import { BackupsView } from './components/BackupsView';
 import { EstadisticasView } from './components/EstadisticasView';
 import { GaleriaView } from './components/GaleriaView';
-import { guardarAvatarRider, encolarAccionBot, _botCel } from './services/firestore';
-// 🙏 F3.34: modo del "gracias por tu compra" (auto/manual como la v1)
-import { useConfig } from './hooks/useConfig';
-import { leerModoGracias } from './utils/modoGracias';
+import { guardarAvatarRider } from './services/firestore';
+// Fase 3.35: 🛣️ motor del odómetro GPS — 1 solo mount a nivel App:
+// cuenta km en TODAS las pestañas mientras el cronómetro de ruta corre
+import { MotorOdometro } from './components/OdometroCard';
 import { db } from './services/firebase';
 import { collection, onSnapshot, query, where, limit as fsLimit } from 'firebase/firestore';
 import { getEstiloMapa, setEstiloMapa, EstiloMapa } from './services/mapStyle';
@@ -152,8 +152,6 @@ class VistaBoundary extends ReactComponentBase {
 export default function App() {
   // 🔐 Autenticación
   const { user, profile, loading: authLoading } = useAuth();
-  // 🙏 F3.34: modo "gracias por tu compra" — se lee de config_empresa
-  const { config: configGracias } = useConfig();
 
   // 📋 Datos REALES de la ruta (Firestore: ruta_activa + clientes_registrados)
   const {
@@ -522,59 +520,12 @@ export default function App() {
     );
   };
 
-  // 🙏 F3.34: "Gracias por tu compra" automático — como la v1. Si el
-  // modo es auto (imagen o texto), al registrar un pago o marcar un
-  // estado de entrega se encola avisar_entrega y el BOT manda su
-  // tarjeta+plantilla de siempre. Solo la primera vez que el cliente
-  // pasa a "entregado" (corregir el método de pago no re-envía).
-  const ESTADOS_ENTREGADOS_APP = [
-    'efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos',
-    'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio',
-  ];
-  const enviarGraciasSiAuto = async (cliente: Cliente, nuevoSt: string) => {
-    // Se lee AL MOMENTO del clic (localStorage) — así si cambiaste el modo
-    // en la pestaña Ruta, la pestaña Pedidos lo respeta al toque.
-    const modo = leerModoGracias(configGracias);
-    if (modo === 'manual') return;
-    if (!user) return;
-    // Ya estaba entregado → no re-enviar
-    if (ESTADOS_ENTREGADOS_APP.includes(String(cliente.st || ''))) return;
-    const telefono = _botCel(cliente.cel || '');
-    if (!telefono) return; // sin celular válido: el pago se registra igual
-    try {
-      await encolarAccionBot(user.uid, {
-        tipo: 'avisar_entrega',
-        clienteId: cliente.id,
-        telefono,
-        nombre: cliente.nombre || 'Cliente',
-        prod: cliente.prod || '',
-        cobrar: parseFloat(String(cliente.cobrar || 0)),
-        dir: cliente.dir || '',
-        dist: cliente.dist || '',
-        st: nuevoSt,
-        modo_entrega: modo,
-        enviar_imagen: modo === 'auto_imagen',
-        rider: {
-          nombre: profile?.nombre || 'Rudy',
-          telefono: profile?.email || '',
-          empresa: 'MATE',
-        },
-      });
-      showToast('🙏 Gracias por tu compra', `El bot le está avisando a ${cliente.nombre}`, 'success');
-    } catch (e: any) {
-      console.error('❌ Error encolando el gracias:', e);
-    }
-  };
-
   // Registrar pago: método del panel → st real + hora
   const handleRegistrarPago = (orderId: string, metodoPanel: string) => {
     const cliente = clientePorOrdenId(orderId);
     if (!cliente) return;
     const st = METODO_PANEL_A_ST[metodoPanel] || 'efectivo';
     cambiarEstado(cliente.id, st);
-
-    // 🙏 F3.34: modo automático → el bot manda el "gracias por tu compra"
-    enviarGraciasSiAuto(cliente, st);
 
     registrarActividad(
       'Pago registrado',
@@ -596,13 +547,6 @@ export default function App() {
     const cliente = clientePorOrdenId(orderId);
     if (!cliente) return;
     cambiarEstado(cliente.id, st);
-
-    // 🙏 F3.34: si el nuevo estado cuenta como ENTREGADO (pago) y el
-    // modo es automático → el bot manda el "gracias por tu compra"
-    // (solo la primera vez; los estados fallidos NO lo disparan).
-    if (ESTADOS_ENTREGADOS_APP.includes(st)) {
-      enviarGraciasSiAuto(cliente, st);
-    }
 
     const esReapertura = st === 'pendiente';
     registrarActividad(
@@ -823,6 +767,7 @@ export default function App() {
           riderAvatar={avatarEfectivo}
           onSeleccionarAvatar={handleSeleccionarAvatar}
           onShowToast={showToast}
+          uid={user?.uid}
         />
 
         {/* Content Area - Mobile first: full width, no left margin on mobile */}
@@ -1004,6 +949,11 @@ export default function App() {
       {/* ⏱️ Nota: el cronómetro de ruta vive en Mi Ruta (CronometroRuta
           Fase 2.2) — integrado arriba de la lista de clientes, con
           aviso silencioso al bot y voz al iniciar. Sin pill flotante. */}
+
+      {/* 🛣️ Fase 3.35: motor del odómetro GPS — invisible, 1 mount:
+          abre el watch de posición SOLO con el cronómetro de ruta
+          activo y guarda los km en usuarios/{uid}.odometro. */}
+      <MotorOdometro uid={user?.uid} />
 
       {/* 🎭 Picker de avatar (desde el header) */}
       <AvatarPicker
