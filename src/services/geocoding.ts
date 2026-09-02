@@ -43,6 +43,10 @@ export interface Coordenadas {
   lat: number;
   lng: number;
   src?: 'google' | 'nominatim' | 'aprox' | 'manual';
+  /** Fase 3.35 (odómetro): precisión de la lectura en metros, si el GPS la reporta */
+  accuracy?: number;
+  /** Fase 3.35 (odómetro): epoch ms de la lectura GPS (cuando viene del watch) */
+  t?: number;
 }
 
 interface EntradaCache {
@@ -513,9 +517,10 @@ export function vigilarPosicion(
   let ultimaPosicionAt = Date.now();
   let erroresSeguidosWeb = 0;
 
-  const marcarPosicion = (lat: number, lng: number) => {
+  const marcarPosicion = (lat: number, lng: number, accuracy?: number, t?: number) => {
     ultimaPosicionAt = Date.now();
-    onPosicion({ lat, lng, src: 'manual' });
+    // Fase 3.35: el odómetro necesita accuracy + timestamp para filtrar ruido
+    onPosicion({ lat, lng, src: 'manual', accuracy, t });
   };
 
   // 1. Plugin nativo (APK) — mejor precisión y manejo de permisos
@@ -531,7 +536,7 @@ export function vigilarPosicion(
             (pos, err) => {
               if (cancelado) return;
               if (pos?.coords && !isNaN(pos.coords.latitude)) {
-                marcarPosicion(pos.coords.latitude, pos.coords.longitude);
+                marcarPosicion(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.timestamp);
               } else if (err) {
                 // Re-armar tras una pausa (el watch nativo a veces muere)
                 limpiarNativo?.();
@@ -566,7 +571,7 @@ export function vigilarPosicion(
         erroresSeguidosWeb = 0;
         const { latitude, longitude } = pos.coords;
         if (!isNaN(latitude) && !isNaN(longitude)) {
-          marcarPosicion(latitude, longitude);
+          marcarPosicion(latitude, longitude, pos.coords.accuracy, pos.timestamp);
         }
       },
       (err) => {
