@@ -14,6 +14,7 @@ import {
   deleteDoc,
   serverTimestamp,
   query,
+  where,
   orderBy,
   limit,
   getDocs,
@@ -142,6 +143,10 @@ export interface BackupNube {
   fallidos: number;
   cobradoTotal: number;
   clientes: Cliente[];
+  /** ⚡ F3.53: 'cierre-ruta' (🏁 al finalizar) | 'auto-guardado' (respaldo vivo 15 min) */
+  tipo?: string;
+  /** ⚡ F3.53: 'v1' = viene de usuarios/{uid}/backups (Rider Modular v1 / legacy) */
+  origen?: 'v1' | 'v2';
   auto?: boolean;           // creado automáticamente
 }
 
@@ -1870,21 +1875,29 @@ export async function guardarBackupNube(
   return id;
 }
 
+/** Estados entregados para contarlos en backups v1 sin registro */
+const ST_ENTREGADOS_NUBE = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
+
 /** Lista los backups del usuario (los últimos 40) — ⚡ F3.48:
  *  ahora UNE los de backups_v2 (la pantalla) con los auto-cierres de
  *  usuarios/{uid}/backups (la ruta que usaba la v1 y que la pantalla
- *  nunca mostró). Si una colección falla (permisos), la otra sigue. */
+ *  nunca mostró). Si una colección falla (permisos), la otra sigue.
+ *  ⚡ F3.53: el query de backups_v2 ahora filtra por uid en el
+ *  SERVIDOR (where) — la regla nueva de firestore.rules exige que el
+ *  campo uid sea del dueño, y un listado sin filtro sería rechazado
+ *  (permission-denied). Además ya no solo se listan los auto-cierre
+ *  de la v1: cualquier backup v1 con clientes restaurables (campo cl)
+ *  aparece, marcado con origen 'v1' para el chip de la pantalla. */
 export async function listarBackupsNube(userId: string, max = 40): Promise<BackupNube[]> {
   if (!db || !userId) return [];
   const backups: BackupNube[] = [];
-  // 1) backups_v2 — manual + auto-cierre (F3.48)
+  // 1) backups_v2 — manual + auto-cierre + auto-guardado vivo (F3.48/F3.53)
   try {
     const ref = collection(db, 'backups_v2');
-    const q = query(ref, limit(200));
+    const q = query(ref, where('uid', '==', userId), limit(200));
     const snap = await getDocs(q);
     snap.forEach((d) => {
       const data = d.data() as any;
-      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
       backups.push({
         id: d.id,
         uid: data.uid || userId,
@@ -1897,26 +1910,33 @@ export async function listarBackupsNube(userId: string, max = 40): Promise<Backu
         fallidos: data.fallidos || 0,
         cobradoTotal: data.cobradoTotal || 0,
         clientes: data.clientes || [],
+        tipo: data.tipo || '',
+        origen: 'v2',
         auto: data.auto,
       });
     });
   } catch (e) {
     console.error('❌ Error listando backups_v2:', e);
   }
-  // 2) ⚡ F3.48: auto-cierres de la ruta v1 (usuarios/{uid}/backups) —
-  //    los que guardaba la v1 en la nube y que esta pantalla NUNCA mostró
+  // 2) ⚡ F3.48/F3.53: backups de la ruta v1 (usuarios/{uid}/backups) —
+  //    los que guardaba la v1 en la nube y que esta pantalla NUNCA mostró.
+  //    Se incluyen TODOS los restaurables (campo cl con clientes): los
+  //    auto-cierre (auto:true) y los manuales de la v1. Los docs .hist
+  //    gigantes (hist sin cl) NO se listan: son para el importador del
+  //    historial v1 (☰ → Historial → 📥 Importar v1).
   try {
     const snapV1 = await getDocs(query(collection(db, 'usuarios', userId, 'backups'), limit(80)));
     snapV1.forEach((d) => {
       const data = d.data() as any;
-      // Solo los auto-cierre (los docs .hist gigantes son para el importador de la v1)
-      if (!data?.auto || !data?.fecha) return;
+      // Restaurable = tiene clientes (cl). Sin cl → es un .hist de historial
+      const cl = Array.isArray(data.cl) ? data.cl : [];
+      if (cl.length === 0) return;
       const reg = data.registro || {};
-      const regFecha = data.registro?.fecha || data.fecha;
-      const total = Number(data.clientes) || 0;
+      const regFecha = data.registro?.fecha || data.fecha || d.id.replace('auto_', '');
+      const total = cl.length;
       // Des-duplicar: el mismo cierre se guarda en ambas colecciones desde F3.48
       const dupe = backups.some(
-        (b) => b.fecha === regFecha && b.hora === (data.hora || '') && b.totalClientes === total,
+        (b) => b.origen === 'v2' && b.fecha === regFecha && b.hora === (data.hora || '') && b.totalClientes === total,
       );
       if (dupe) return;
       backups.push({
@@ -1926,12 +1946,14 @@ export async function listarBackupsNube(userId: string, max = 40): Promise<Backu
         fecha: regFecha,
         hora: data.hora || '',
         totalClientes: total,
-        entregados: Number(reg.entregados) || 0,
+        entregados: Number(reg.entregados) || cl.filter((c: any) => ST_ENTREGADOS_NUBE.includes(c.st)).length,
         pendientes: Math.max(0, total - (Number(reg.entregados) || 0) - (Number(reg.fallidos) || 0)),
         fallidos: Number(reg.fallidos) || 0,
         cobradoTotal: Number(reg.cobradoTotal) || 0,
-        clientes: Array.isArray(data.cl) ? data.cl : [],
-        auto: true,
+        clientes: cl,
+        tipo: data.tipo || 'cierre-ruta',
+        origen: 'v1',
+        auto: data.auto || false,
       });
     });
   } catch (e) {
@@ -1973,4 +1995,45 @@ export async function cargarBackupNube(userId: string, backup: BackupNube): Prom
   await guardarClientes(userId, clientes);
   console.log('⬆️ Backup cargado:', backup.id, clientes.length, 'clientes');
   return clientes.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ⚡ F3.53 — RESPALDO VIVO EN LA NUBE (cada 15 min durante la ruta)
+// ═══════════════════════════════════════════════════════════
+/**
+ * Guarda un ÚNICO doc por día (merge) con el estado ACTUAL de la ruta:
+ *   backups_v2/{uid}_{fecha}_auto  →  tipo 'auto-guardado', auto: true
+ * El id fijo hace que NO se acumulen docs: siempre el mismo, pisado con
+ * lo último. Si el celular se pierde o muere a MEDIA RUTA, ese doc es
+ * el que te salva (el cierre de ruta 🏁 ya tiene su propio backup).
+ * Silencioso: devuelve false si falla (permisos/red) — el llamador
+ * decide si avisar. No lanza nunca.
+ */
+export async function guardarAutoBackupVivo(userId: string, clientes: Cliente[]): Promise<boolean> {
+  if (!db || !userId || clientes.length === 0) return false;
+  try {
+    const fecha = hoyISO(); // hora de Lima (F3.48)
+    const entregados = clientes.filter(c => ST_ENTREGADOS_NUBE.includes(c.st)).length;
+    const cobrado = clientes
+      .filter(c => ST_ENTREGADOS_NUBE.includes(c.st))
+      .reduce((s, c) => s + parseFloat(String(c.cobrar || 0)), 0);
+    await setDoc(doc(db, 'backups_v2', `${userId}_${fecha}_auto`), limpiarUndefined({
+      uid: userId,
+      creadoAt: new Date().toISOString(),
+      fecha,
+      hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      totalClientes: clientes.length,
+      entregados,
+      pendientes: clientes.length - entregados,
+      fallidos: 0,
+      cobradoTotal: cobrado,
+      clientes: JSON.parse(JSON.stringify(clientes)),
+      auto: true,
+      tipo: 'auto-guardado',
+    }), { merge: true });
+    return true;
+  } catch (e) {
+    console.warn('⚠️ Auto-guardado vivo falló (no bloquea nada):', (e as Error).message);
+    return false;
+  }
 }
