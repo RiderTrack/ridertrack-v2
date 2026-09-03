@@ -433,3 +433,160 @@ html {
 [data-acento="ambar"]:not(.light) .bg-blue-600 {
   color: #431407;
 }
+
+/* ═════════════════════════════════════════════════════════════
+   🎨 F3.52 — ESTUDIO DE TEMAS · PARTE 2 (letras y comodidad)
+   ═════════════════════════════════════════════════════════════
+   El motor (src/theme/motor.ts) agrega a lo de F3.51:
+     • data-densidad="compacta|comoda"  → spacing sin tocar letra
+     • data-tono="intenso|suave|calido"  → color/intensidad letra
+     • data-peso="medio|fuerte"          → grosor de letra
+     • data-contraste="alto"             → textos+bordes reforzados
+     • data-animaciones="off"            → todo estático
+   Sin atributo = valor neutro de fábrica (compatibilidad F3.51).
+   Todo trabaja sobre las mismas --color-* de Tailwind v4, así
+   que se invierte solo en modo claro y sigue al acento.
+   ORDEN DE CASCADA: tono → contraste (si combinas tono + alto
+   contraste, el contraste manda — prioridad legibilidad).
+   ═════════════════════════════════════════════════════════════ */
+
+/* ── 📏 DENSIDAD — Tailwind v4 multiplica TODO su spacing
+     (p-*, m-*, gap-*, w-*, h-* de la escala) por --spacing.
+     Al tocar SOLO esa variable, el layout aprieta o respira
+     sin que la letra se mueva un pelo (la letra va aparte en
+     --escala-letra, que sigue en el html font-size). ── */
+[data-densidad="compacta"] {
+  --spacing: 0.22rem; /* 0.25 * 0.88 = −12% de aire */
+}
+[data-densidad="comoda"] {
+  --spacing: 0.28rem; /* 0.25 * 1.12 = +12% de aire */
+}
+
+/* ── 🔤 FUENTE ATKINSON (F3.52) — alta legibilidad ── */
+[data-fuente="atkinson"] {
+  --font-sans: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ── ✍️ PESO DE LETRA — el "más negrita" pedido.
+     Estrategia: el texto base (sin clase de peso) engorda desde
+     <body>, y las utilidades existentes se RE-MAPEAN escalonadas
+     (font-normal→500/600, font-medium→700…) para que la
+     jerarquía visual se conserve: lo que era más grueso sigue
+     siendo más grueso. Especificidad (0,2,0) > (0,1,0) gana sin
+     !important. ── */
+[data-peso="medio"] body {
+  font-weight: 500;
+}
+[data-peso="medio"] .font-light {
+  font-weight: 400;
+}
+[data-peso="medio"] .font-normal {
+  font-weight: 500;
+}
+[data-peso="fuerte"] body {
+  font-weight: 600;
+}
+[data-peso="fuerte"] .font-light {
+  font-weight: 500;
+}
+[data-peso="fuerte"] .font-normal {
+  font-weight: 600;
+}
+[data-peso="fuerte"] .font-medium {
+  font-weight: 700;
+}
+[data-peso="fuerte"] .font-semibold {
+  font-weight: 800;
+}
+
+/* ── 🎨 TONO DE LETRA — remapea los grises "slate" que usa el
+     texto de toda la app. Por modo (dark: valores Tailwind
+     originales; light: la inversión de la fase 1.5). ── */
+/* INTENSO: blanco puro / negro profundo */
+[data-tono="intenso"]:not(.light) {
+  --color-slate-500: #94a3b8;
+  --color-slate-400: #cbd5e1;
+  --color-slate-300: #e8eef5;
+  --color-slate-200: #f1f5f9;
+  --color-slate-100: #fcfdff;
+  --color-slate-50: #ffffff;
+}
+[data-tono="intenso"].light {
+  --color-slate-500: #475569;
+  --color-slate-400: #33415e;
+  --color-slate-300: #1c2a45;
+  --color-slate-200: #0f1c33;
+  --color-slate-100: #060f22;
+  --color-slate-50: #000814;
+}
+/* SUAVE: descansa la vista */
+[data-tono="suave"]:not(.light) {
+  --color-slate-500: #55657d;
+  --color-slate-400: #7c8aa0;
+  --color-slate-300: #b0bcd0;
+  --color-slate-200: #c8d2e0;
+  --color-slate-100: #dbe3ec;
+}
+[data-tono="suave"].light {
+  --color-slate-500: #76839b;
+  --color-slate-400: #6b7a94;
+  --color-slate-300: #5a6c8c;
+  --color-slate-200: #4a5d80;
+  --color-slate-100: #3d5074;
+}
+/* CÁLIDO: tinta crema (modo oscuro) / sepia (modo claro) */
+[data-tono="calido"]:not(.light) {
+  --color-slate-500: #8a8074;
+  --color-slate-400: #a89e8c;
+  --color-slate-300: #d8cdb4;
+  --color-slate-200: #e6dcc3;
+  --color-slate-100: #f4ecd8;
+  --color-slate-50: #faf4e6;
+}
+[data-tono="calido"].light {
+  --color-slate-500: #7a7062;
+  --color-slate-400: #5f564a;
+  --color-slate-300: #4a4034;
+  --color-slate-200: #362e23;
+  --color-slate-100: #241e15;
+  --color-slate-50: #171208;
+}
+
+/* ── 👁️ ALTO CONTRASTE (VA AL FINAL: si se combina con un tono,
+     el contraste manda — legibilidad primero). Refuerza textos
+     Y bordes (slate-600/700) en ambos modos. ── */
+[data-contraste="alto"]:not(.light) {
+  --color-slate-500: #9fb0c6;
+  --color-slate-400: #c3cfe0;
+  --color-slate-300: #e0e8f2;
+  --color-slate-200: #eef2f8;
+  --color-slate-100: #fcfdff;
+  --color-slate-50: #ffffff;
+  --color-slate-700: #3f4d63;
+  --color-slate-600: #4c5b73;
+}
+[data-contraste="alto"].light {
+  --color-slate-500: #3f4e68;
+  --color-slate-400: #2c3a55;
+  --color-slate-300: #1a2842;
+  --color-slate-200: #0d1a31;
+  --color-slate-100: #050e20;
+  --color-slate-50: #000000;
+  --color-slate-700: #a3b3cb;
+  --color-slate-600: #8fa2c0;
+}
+
+/* ── 🎞️ ANIMACIONES OFF — el patrón clásico de accesibilidad:
+     todas las transiciones y animaciones CSS caen a casi-cero.
+     (Las animaciones JS tipo framer-motion no se ven afectadas,
+     pero el 95% de los micro-movimientos de la app son CSS.) ── */
+[data-animaciones="off"] *,
+[data-animaciones="off"] *::before,
+[data-animaciones="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}

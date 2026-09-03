@@ -64,6 +64,9 @@ import { MotorOdometro } from './components/OdometroCard';
 // a TODA la app) + el modal del estudio (se abre desde el header)
 import { useTema } from './theme/useTema';
 import { ThemeStudioModal } from './components/ThemeStudioModal';
+// ☁️ F3.52 — respaldo del tema en la cuenta (Firestore): baja el
+// tema al iniciar sesión y sube cada cambio con debounce
+import { useSincronizacionTema } from './theme/useSincronizacionTema';
 // F3.36: 🔧 motor de recordatorios de mantenimiento (invisible)
 import { MotorMantenimiento } from './components/MantenimientoCard';
 // F3.40: 🏍️ MODO MOTO — pantalla de conducción con botones
@@ -163,6 +166,11 @@ class VistaBoundary extends ReactComponentBase {
 export default function App() {
   // 🔐 Autenticación
   const { user, profile, loading: authLoading } = useAuth();
+
+  // ☁️ F3.52 — Estudio de Temas: mientras haya sesión, el tema se
+  // respalda en usuarios/{uid}.tema (reinstalo / otro celular →
+  // el look vuelve solo). Sin sesión: todo local como en F3.51.
+  useSincronizacionTema(user?.uid);
 
   // 📋 Datos REALES de la ruta (Firestore: ruta_activa + clientes_registrados)
   const {
