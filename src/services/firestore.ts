@@ -57,18 +57,6 @@ export interface Cliente {
   /** ✅ Registro en la web (Fase 2.6 — como la v1): ya pasó a la
    *  página de la empresa. Se marca desde el panel de Verificación. */
   webReg?: boolean;
-  /** 🙏 F3.44 (restaura la v1): cómo avisarle a ESTE cliente cuando
-   * su pedido pasa a ENTREGADO por cualquier método. El botoncito
-   * de cada cliente lo cambia (Seguimiento / Modo Moto / Control).
-   * undefined = auto_imagen (el bot manda "gracias por tu compra"
-   * con imagen apenas lo marcas cobrado, como la v1). */
-  aviso?: 'auto_imagen' | 'auto_texto' | 'manual';
-  /** 🙏 F3.46: true = este cliente YA recibió su "gracias por
-   *  compra" (auto o manual). Es lo que evita repetidos cuando
-   *  corregís el método (efectivo→yape) o repetís la marca — el
-   *  disparo ya no depende de la transición del st. "Mandar
-   *  ahora" siempre dispara sin mirar este flag. */
-  graciasEnviado?: boolean;
   /** Coordenadas geocodificadas (Fase 1.3) — se persisten para
    *  no volver a geocodificar la misma dirección nunca más */
   lat?: number;
@@ -247,8 +235,6 @@ export async function publicarRutaActiva(
       nota: c.nota || '',
       obs: c.obs || '',
       hora: c.hora || '',
-      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
-      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
     })),
     clienteActualIdx: -1,
     totalClientes: clientes.length,
@@ -279,8 +265,6 @@ export async function actualizarRutaActiva(userId: string, clientes: Cliente[]):
       dir: c.dir || '',
       dist: c.dist || '',
       st: c.st || 'pendiente',
-      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
-      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
     })),
     pendientes: clientes.filter(c => c.st === 'pendiente' || !c.st).length,
   };
@@ -594,13 +578,6 @@ export function subscribeToRutaActiva(
             respondioInicioRuta: c.respondioInicioRuta,
             // ✅ Registro web (verificación con la empresa — Fase 2.6)
             webReg: c.webReg === true,
-            // 🙏 F3.44/F3.46 — modo de aviso + flag "ya le llegó el
-            // gracias": viajan dentro del cliente y deben SOBREVIVIR
-            // el round-trip ruta_activa → listener. (F3.44 los botaba
-            // aquí — si ponías MANUAL, al primer snapshot volvía a
-            // AUTO sin que te enteraras.)
-            ...(c.aviso ? { aviso: c.aviso } : {}),
-            ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}),
             // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
             // el cliente para no volver a geocodificar nunca
             ...(typeof c.lat === 'number' && typeof c.lng === 'number'
@@ -667,8 +644,6 @@ export function subscribeToClientesRegistrados(
             mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '',
             hora: '',
             nota: '',
-            ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.46
-            ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
           });
         });
         console.log('🔄 Clientes registrados del Modular cargados:', clientes.length);
@@ -756,8 +731,6 @@ export async function publicarClientesEnRutaActiva(
       obs: c.obs || '',
       hora: c.hora || '',
       ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
-      ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
-      ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
       ...(typeof c.lat === 'number' && typeof c.lng === 'number'
         ? { lat: c.lat, lng: c.lng }
         : {}),
@@ -1172,9 +1145,6 @@ export async function iniciarRutaConBot(
         nota: c.nota || '',
         obs: c.obs || '',
         hora: c.hora || '',
-        ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
-        ...(c.aviso ? { aviso: c.aviso } : {}), // 🙏 F3.44
-        ...(c.graciasEnviado === true ? { graciasEnviado: true } : {}), // 🙏 F3.46
         ...(typeof c.lat === 'number' && typeof c.lng === 'number'
           ? { lat: c.lat, lng: c.lng }
           : {}),
@@ -1518,6 +1488,35 @@ export async function publicarPosicionRider(userId: string, pos: PosicionRider):
   } catch (e) {
     // Silencioso: la posición es best-effort (se reintenta en el próximo tick)
     console.warn('⚠️ No se pudo publicar posición GPS:', e);
+  }
+}
+
+/**
+ * 📡 (F3.36) Suscripción EN VIVO a la posición publicada de un rider
+ * (ruta_activa/{uid}.posicion). Devuelve null si no hay doc.
+ * El caller decide si el latido es fresco (actualizadoAt).
+ */
+export function suscribirPosicionRider(
+  userId: string,
+  cb: (pos: PosicionRider | null) => void
+): () => void {
+  if (!db || !userId) {
+    cb(null);
+    return () => undefined;
+  }
+  try {
+    const ref = doc(db, 'ruta_activa', userId);
+    return onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.data() as { posicion?: PosicionRider } | undefined;
+        cb(data?.posicion ?? null);
+      },
+      () => cb(null)
+    );
+  } catch {
+    cb(null);
+    return () => undefined;
   }
 }
 
