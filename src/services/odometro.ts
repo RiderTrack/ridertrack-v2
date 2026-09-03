@@ -195,7 +195,10 @@ export function procesarPuntoGPS(uid: string, c: Coordenadas): void {
   const p: PuntoGPS = {
     lat: c.lat,
     lng: c.lng,
-    t: c.t ?? Date.now(),
+    // ⚡ F3.47: el campo del timestamp del fix es `ts` (lo llena vigilarPosicion
+    // en geocoding.ts) — antes decía `c.t` que nunca existió → siempre caía
+    // en el Date.now() de respaldo. Ahora usa la hora REAL del fix GPS.
+    t: c.ts ?? Date.now(),
     accuracy: c.accuracy,
   };
 
