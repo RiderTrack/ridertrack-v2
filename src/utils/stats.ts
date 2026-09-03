@@ -83,8 +83,40 @@ export interface FotoHistorial {
 }
 
 // ─── Fechas ───
+// ⚡ F3.48 — FIX "EL DÍA COMIDO": antes se usaba new Date().toISOString()
+// que devuelve la fecha en UTC (hora de Londres). Lima está 5 horas
+// atrás, así que desde las 7:00 pm la app "creía" que ya era MAÑANA:
+// una ruta cerrada a las 8 pm del miércoles se guardaba como jueves.
+// La v1 nunca tuvo este bug porque usaba la hora del celular.
+// Ahora TODO el app pregunta la fecha en HORA DE LIMA (America/Lima).
+const _fmtLima = (() => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch {
+    return null; // WebView muy viejo → usar respaldo local
+  }
+})();
+
+/** Fecha ISO (YYYY-MM-DD) de un Date en HORA DE LIMA — nunca UTC */
+export function fechaLimaISO(d: Date = new Date()): string {
+  if (_fmtLima) {
+    try {
+      const s = _fmtLima.format(d); // 'en-CA' da "YYYY-MM-DD"
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    } catch { /* cae al respaldo */ }
+  }
+  // Respaldo: hora del dispositivo (lo que hacía la v1 — nunca come un día)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** HOY en Lima (YYYY-MM-DD) — la única forma correcta de preguntar el día */
 export function hoyISO(): string {
-  return new Date().toISOString().split('T')[0];
+  return fechaLimaISO(new Date());
 }
 
 /** lunes de la semana de la fecha dada (semana peruana: lunes a domingo) */
@@ -166,8 +198,9 @@ export interface ComparativaSemanas {
 }
 
 function rangoDe(dias: DiaAgregado[], ini: Date, fin: Date) {
-  const iniISO = ini.toISOString().split('T')[0];
-  const finISO = fin.toISOString().split('T')[0];
+  // ⚡ F3.48: límites de la semana en hora de Lima (antes UTC)
+  const iniISO = fechaLimaISO(ini);
+  const finISO = fechaLimaISO(fin);
   const delRango = dias.filter(d => d.fecha >= iniISO && d.fecha <= finISO);
   return {
     soles: delRango.reduce((s, d) => s + d.soles, 0),
@@ -235,14 +268,14 @@ export function calcularRecords(dias: DiaAgregado[]): Records | null {
   for (const d of dias) {
     const [y, m, dd] = d.fecha.split('-').map(Number);
     const lunes = lunesDe(new Date(y, m - 1, dd));
-    const clave = lunes.toISOString().split('T')[0];
+    const clave = fechaLimaISO(lunes); // ⚡ F3.48: lunes en Lima, no UTC
     const actual = semanasMap.get(clave) || { soles: 0, entregas: 0, fin: d.fecha };
     actual.soles += d.soles;
     actual.entregas += d.entregas;
     if (d.fecha > actual.fin) actual.fin = d.fecha;
     semanasMap.set(clave, actual);
   }
-  const lunesActual = lunesDe(new Date()).toISOString().split('T')[0];
+  const lunesActual = fechaLimaISO(lunesDe(new Date())); // ⚡ F3.48
   const cerradas = Array.from(semanasMap.entries()).filter(([clave]) => clave !== lunesActual);
   const mejorSemana = cerradas.length > 0
     ? cerradas.sort((a, b) => b[1].soles - a[1].soles)[0]
