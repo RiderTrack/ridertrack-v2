@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 // F3.28: deep link de Spotify capturado a NIVEL TOP (login incluido)
 import { parsearCallbackSpotify, spotifyExchangeCode } from './services/spotify';
-import { NavigationTab, ThemeMode, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
+import { NavigationTab, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
 import { Cliente } from './services/firestore';
 // 🙏 F3.46 — textos del toast cuando el disparo del gracias se calla
 import { TEXTO_MOTIVO, type MotivoSkip } from './utils/avisoEntrega';
@@ -60,6 +60,10 @@ import { guardarAvatarRider } from './services/firestore';
 // Fase 3.35: 🛣️ motor del odómetro GPS — 1 solo mount a nivel App:
 // cuenta km en TODAS las pestañas mientras el cronómetro de ruta corre
 import { MotorOdometro } from './components/OdometroCard';
+// 🎨 F3.51 — ESTUDIO DE TEMAS: hook del contexto (provee modo/tema
+// a TODA la app) + el modal del estudio (se abre desde el header)
+import { useTema } from './theme/useTema';
+import { ThemeStudioModal } from './components/ThemeStudioModal';
 // F3.36: 🔧 motor de recordatorios de mantenimiento (invisible)
 import { MotorMantenimiento } from './components/MantenimientoCard';
 // F3.40: 🏍️ MODO MOTO — pantalla de conducción con botones
@@ -173,15 +177,12 @@ export default function App() {
     guardarFotoEntrega,
   } = useClientes();
 
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    try {
-      const guardado = localStorage.getItem('rt_theme');
-      if (guardado === 'light' || guardado === 'dark') return guardado;
-    } catch {
-      // sin storage
-    }
-    return 'dark';
-  });
+  // 🎨 F3.51 — El tema vive en el módulo src/theme/ (contexto):
+  // config completa (modo, acento, fuente, escala, fondo, radio),
+  // se aplica al <html> al instante y se guarda solo. El estado
+  // local `theme` de la fase 1.5 se jubila — el modo CLARO/OSCURO
+  // sigue funcionando igual (misma clase .light en el CSS).
+  const { modoEfectivo, actualizarConfig } = useTema();
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -210,6 +211,9 @@ export default function App() {
 
   // Picker de avatar (se abre desde header y sidebar) — Fase 1.5
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+
+  // 🎨 F3.51 — Estudio de Temas (modal de personalización)
+  const [estudioAbierto, setEstudioAbierto] = useState(false);
 
   // Log de mensajes WhatsApp despachados desde la app (sesión actual)
   const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
@@ -441,17 +445,13 @@ export default function App() {
     ]);
   };
 
-  // Theme Toggler effect — Fase 1.5: conversión COMPLETA (la
-  // paleta se invierte por variables CSS en index.css) + el mapa
-  // sigue al tema + se recuerda tu preferencia.
+  // Theme Toggler effect — Fase 1.5 + F3.51: el botón ☀️/🌙 del header
+  // ahora escribe en el contexto del Estudio de Temas (mismo .light
+  // en el CSS, misma persistencia + la nueva rt2_tema completa) y
+  // el mapa sigue al tema como siempre.
   const handleToggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(nextTheme);
-    try {
-      localStorage.setItem('rt_theme', nextTheme);
-    } catch {
-      // sin storage
-    }
+    const nextTheme: 'dark' | 'light' = modoEfectivo === 'dark' ? 'light' : 'dark';
+    actualizarConfig({ modo: nextTheme });
 
     // El mapa acompaña al tema (si usas un skin auto: oscuro/claro)
     const estiloActual = getEstiloMapa();
@@ -472,16 +472,25 @@ export default function App() {
     );
   };
 
+  // F3.51: si el modo cambia DESDE EL ESTUDIO (preset, modo Auto o
+  // el sistema del teléfono), el mapa también acompaña — mismo
+  // criterio del toggle del header, sin toast (el cambio se ve
+  // en vivo). Se omite la primera pasada (arranque).
+  const primerModoRef = useRef(true);
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'light') {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    } else {
-      root.classList.add('dark');
-      root.classList.remove('light');
+    if (primerModoRef.current) {
+      primerModoRef.current = false;
+      return;
     }
-  }, [theme]);
+    const estiloActual = getEstiloMapa();
+    if (estiloActual === 'oscuro' || estiloActual === 'claro') {
+      const nuevoEstilo: EstiloMapa = modoEfectivo === 'light' ? 'claro' : 'oscuro';
+      if (nuevoEstilo !== estiloActual) {
+        setEstiloMapa(nuevoEstilo);
+        window.dispatchEvent(new Event('rt_theme'));
+      }
+    }
+  }, [modoEfectivo]);
 
   // 🔐 Inicializar GoogleAuth plugin (solo en APK)
   useEffect(() => {
@@ -793,12 +802,13 @@ export default function App() {
     // y posiciones en Firestore (usuarios/{uid}.podcasts)
     <MediosProvider onShowToast={showToast} uid={user?.uid}>
     <div
-      className="min-h-screen bg-slate-950 text-slate-100 font-sans transition-colors duration-200"
+      className="min-h-screen bg-slate-950 text-slate-100 font-sans transition-colors duration-200 fondo-app"
     >
       {/* Top Bar Header */}
       <Header
-        theme={theme}
+        theme={modoEfectivo}
         onToggleTheme={handleToggleTheme}
+        onAbrirEstudio={() => setEstudioAbierto(true)}
         onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
         notifications={notifications}
         onMarkNotificationsRead={handleMarkNotificationsRead}
@@ -1063,6 +1073,15 @@ export default function App() {
         isOpen={newOrderModalOpen}
         onClose={() => setNewOrderModalOpen(false)}
         onCreateOrder={handleCreateOrder}
+      />
+
+      {/* 🎨 F3.51 — ESTUDIO DE TEMAS: presets, modo claro/oscuro/auto,
+          acento, tipografía, tamaño de letra, fondo y redondeo.
+          Se abre desde el botón 🎨 del header. Todo se aplica en vivo. */}
+      <ThemeStudioModal
+        isOpen={estudioAbierto}
+        onClose={() => setEstudioAbierto(false)}
+        onShowToast={showToast}
       />
 
       {/* 🎵 Fase 3.11: mini-reproductor global (radio/Spotify/YouTube) —

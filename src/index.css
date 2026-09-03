@@ -242,3 +242,194 @@
   0%, 100% { transform: scaleY(0.5); }
   50% { transform: scaleY(1); }
 }
+
+/* ═════════════════════════════════════════════════════════════
+   🎨 F3.51 — ESTUDIO DE TEMAS (src/theme/)
+   ═════════════════════════════════════════════════════════════
+   El motor (src/theme/motor.ts) pone en el <html>:
+     • clase .light / .dark          → modo (sistema fase 1.5)
+     • data-acento="turquesa|..."    → remapea la paleta azul+índigo
+     • data-fuente="inter|..."       → tipografía de toda la app
+     • data-fondo="puntos|..."       → textura detrás de las tarjetas
+     • data-radio="sutil|..."        → redondeo de bordes
+     • --escala-letra (inline)       → tamaño de letra (rem-based)
+   Este CSS traduce esos atributos a variables. Sin atributos =
+   look exacto de la F3.50 (compatibilidad total: si el estudio
+   nunca se abre, nada cambia).
+   ═════════════════════════════════════════════════════════════ */
+
+/* ── Tamaño de letra: TODO lo rem-based escala junto ── */
+html {
+  font-size: calc(100% * var(--escala-letra, 1));
+}
+
+/* ── Tipografía (fuente del sistema = sin regla = default) ── */
+[data-fuente="inter"] {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+[data-fuente="roboto"] {
+  --font-sans: 'Roboto', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Roboto', ui-sans-serif, system-ui, sans-serif;
+}
+[data-fuente="montserrat"] {
+  --font-sans: 'Montserrat', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Montserrat', ui-sans-serif, system-ui, sans-serif;
+}
+[data-fuente="nunito"] {
+  --font-sans: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+}
+[data-fuente="raleway"] {
+  --font-sans: 'Raleway', ui-sans-serif, system-ui, sans-serif;
+  --default-font-family: 'Raleway', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ── Redondeo de bordes (estándar = sin regla = default) ── */
+[data-radio="sutil"] {
+  --radius-sm: 0.125rem;  --radius-md: 0.25rem;  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;    --radius-2xl: 0.625rem; --radius-3xl: 0.875rem;
+}
+[data-radio="redondeado"] {
+  --radius-sm: 0.375rem;  --radius-md: 0.5rem;   --radius-lg: 0.75rem;
+  --radius-xl: 1rem;      --radius-2xl: 1.375rem; --radius-3xl: 1.875rem;
+}
+
+/* ── Fondos: textura sobre el contenedor .fondo-app (App.tsx).
+     Los colores usan var(--color-*) → se invierten solos en
+     modo claro y siguen al acento (color-mix) ── */
+[data-fondo="degradado"] .fondo-app {
+  background-image: linear-gradient(
+    170deg,
+    transparent 35%,
+    color-mix(in srgb, var(--color-blue-500) 10%, transparent) 100%
+  );
+}
+[data-fondo="puntos"] .fondo-app {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-slate-400) 16%, transparent) 1px,
+    transparent 1.6px
+  );
+  background-size: 24px 24px;
+}
+[data-fondo="cuadricula"] .fondo-app {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--color-slate-500) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-slate-500) 10%, transparent) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* ═══ ACENTOS ═══
+   Remapeo azul→acento (base) + índigo→tono profundo del acento
+   (para que los gradientes from-blue via-indigo to-blue conserven
+   profundidad). "azul" = sin reglas = look original.
+   Estructura por acento:
+     [data-acento]              → 500/600/700/800 (ambos modos)
+     [data-acento]:not(.light)  → tintes claros 100-400 (modo oscuro)
+     [data-acento].light        → tonos legibles + 900/950 claros */
+
+/* ── TURQUESA ── */
+[data-acento="turquesa"] {
+  --color-blue-500: #14b8a6; --color-blue-600: #0d9488;
+  --color-blue-700: #0f766e; --color-blue-800: #115e59;
+  --color-indigo-500: #0f766e; --color-indigo-600: #115e59;
+  --color-indigo-700: #134e4a; --color-indigo-800: #134e4a;
+}
+[data-acento="turquesa"]:not(.light) {
+  --color-blue-100: #f0fdfa; --color-blue-200: #ccfbf1;
+  --color-blue-300: #5eead4; --color-blue-400: #2dd4bf;
+  --color-indigo-300: #14b8a6; --color-indigo-400: #0d9488;
+}
+[data-acento="turquesa"].light {
+  --color-blue-100: #134e4a; --color-blue-200: #115e59;
+  --color-blue-300: #0f766e; --color-blue-400: #0d9488;
+  --color-blue-900: #99f6e4; --color-blue-950: #f0fdfa;
+  --color-indigo-300: #0f766e; --color-indigo-400: #0d9488;
+  --color-indigo-900: #99f6e4; --color-indigo-950: #f0fdfa;
+}
+
+/* ── ESMERALDA ── */
+[data-acento="esmeralda"] {
+  --color-blue-500: #10b981; --color-blue-600: #059669;
+  --color-blue-700: #047857; --color-blue-800: #065f46;
+  --color-indigo-500: #047857; --color-indigo-600: #065f46;
+  --color-indigo-700: #064e3b; --color-indigo-800: #064e3b;
+}
+[data-acento="esmeralda"]:not(.light) {
+  --color-blue-100: #ecfdf5; --color-blue-200: #a7f3d0;
+  --color-blue-300: #6ee7b7; --color-blue-400: #34d399;
+  --color-indigo-300: #10b981; --color-indigo-400: #059669;
+}
+[data-acento="esmeralda"].light {
+  --color-blue-100: #064e3b; --color-blue-200: #065f46;
+  --color-blue-300: #047857; --color-blue-400: #059669;
+  --color-blue-900: #a7f3d0; --color-blue-950: #ecfdf5;
+  --color-indigo-300: #047857; --color-indigo-400: #059669;
+  --color-indigo-900: #a7f3d0; --color-indigo-950: #ecfdf5;
+}
+
+/* ── VIOLETA ── */
+[data-acento="violeta"] {
+  --color-blue-500: #8b5cf6; --color-blue-600: #7c3aed;
+  --color-blue-700: #6d28d9; --color-blue-800: #5b21b6;
+  --color-indigo-500: #6d28d9; --color-indigo-600: #5b21b6;
+  --color-indigo-700: #4c1d95; --color-indigo-800: #4c1d95;
+}
+[data-acento="violeta"]:not(.light) {
+  --color-blue-100: #f5f3ff; --color-blue-200: #ddd6fe;
+  --color-blue-300: #c4b5fd; --color-blue-400: #a78bfa;
+  --color-indigo-300: #8b5cf6; --color-indigo-400: #7c3aed;
+}
+[data-acento="violeta"].light {
+  --color-blue-100: #4c1d95; --color-blue-200: #5b21b6;
+  --color-blue-300: #6d28d9; --color-blue-400: #7c3aed;
+  --color-blue-900: #ddd6fe; --color-blue-950: #f5f3ff;
+  --color-indigo-300: #6d28d9; --color-indigo-400: #7c3aed;
+  --color-indigo-900: #ddd6fe; --color-indigo-950: #f5f3ff;
+}
+
+/* ── ROSA ── */
+[data-acento="rosa"] {
+  --color-blue-500: #f43f5e; --color-blue-600: #e11d48;
+  --color-blue-700: #be123c; --color-blue-800: #9f1239;
+  --color-indigo-500: #be123c; --color-indigo-600: #9f1239;
+  --color-indigo-700: #881337; --color-indigo-800: #881337;
+}
+[data-acento="rosa"]:not(.light) {
+  --color-blue-100: #fff1f2; --color-blue-200: #ffe4e6;
+  --color-blue-300: #fda4af; --color-blue-400: #fb7185;
+  --color-indigo-300: #f43f5e; --color-indigo-400: #e11d48;
+}
+[data-acento="rosa"].light {
+  --color-blue-100: #881337; --color-blue-200: #9f1239;
+  --color-blue-300: #be123c; --color-blue-400: #e11d48;
+  --color-blue-900: #ffe4e6; --color-blue-950: #fff1f2;
+  --color-indigo-300: #be123c; --color-indigo-400: #e11d48;
+  --color-indigo-900: #ffe4e6; --color-indigo-950: #fff1f2;
+}
+
+/* ── ÁMBAR ── */
+[data-acento="ambar"] {
+  --color-blue-500: #f59e0b; --color-blue-600: #d97706;
+  --color-blue-700: #b45309; --color-blue-800: #92400e;
+  --color-indigo-500: #b45309; --color-indigo-600: #92400e;
+  --color-indigo-700: #78350f; --color-indigo-800: #78350f;
+}
+[data-acento="ambar"]:not(.light) {
+  --color-blue-100: #fffbeb; --color-blue-200: #fef3c7;
+  --color-blue-300: #fcd34d; --color-blue-400: #fbbf24;
+  --color-indigo-300: #f59e0b; --color-indigo-400: #d97706;
+}
+[data-acento="ambar"].light {
+  --color-blue-100: #78350f; --color-blue-200: #92400e;
+  --color-blue-300: #b45309; --color-blue-400: #d97706;
+  --color-blue-900: #fef3c7; --color-blue-950: #fffbeb;
+  --color-indigo-300: #b45309; --color-indigo-400: #d97706;
+  --color-indigo-900: #fef3c7; --color-indigo-950: #fffbeb;
+}
+/* ── ÁMBAR extra: en modo oscuro los textos sobre botones ámbar
+     van en tinta oscura para contraste (como hace WhatsApp) ── */
+[data-acento="ambar"]:not(.light) .bg-blue-500,
+[data-acento="ambar"]:not(.light) .bg-blue-600 {
+  color: #431407;
+}
