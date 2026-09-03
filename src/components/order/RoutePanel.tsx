@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   MapPin,
   Navigation,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Order, Driver } from '../../types';
 import { Button, Badge, Card } from '../ui';
+import { suscribirPosicionRider, type PosicionRider } from '../../services/firestore';
 
 interface RoutePanelProps {
   order: Order;
@@ -27,6 +28,39 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const assignedDriver = drivers.find((d) => d.id === order.repartidorId);
+
+  // ⚡ F3.36: velocidad REAL del rider — suscripción en vivo a su
+  // posición publicada (ruta_activa/{uid}). Hasta la 3.35 aquí
+  // salía un “0 km/h · GPS Activo” SIMULADO (velocidadActual: 0
+  // hardcodeado) — de ahí el “0 km” que nunca se movía.
+  const [posRider, setPosRider] = useState<PosicionRider | null>(null);
+  const uidRider =
+    assignedDriver && assignedDriver.id.length >= 20 ? assignedDriver.id : null;
+
+  useEffect(() => {
+    if (!uidRider) {
+      setPosRider(null);
+      return;
+    }
+    return suscribirPosicionRider(uidRider, setPosRider);
+  }, [uidRider]);
+
+  // Re-chequear la frescura del latido cada 15 s (para que “GPS
+  // activo” se apague solo si el rider cerró su vista de GPS)
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  const latidoFresco = (() => {
+    if (!posRider?.actualizadoAt) return false;
+    try {
+      return Date.now() - new Date(posRider.actualizadoAt).getTime() < 45000;
+    } catch {
+      return false;
+    }
+  })();
 
   const fullAddressQuery = encodeURIComponent(`${order.direccion}, ${order.distrito}, Lima, Peru`);
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${fullAddressQuery}`;
@@ -101,9 +135,21 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
           {assignedDriver && (
             <div className="text-right">
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono">
-                {assignedDriver.velocidadActual} km/h • GPS Activo
-              </span>
+              {latidoFresco ? (
+                <span
+                  className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono"
+                  title="Velocidad en vivo del rider — publicada por su GPS (vista GPS del Motorizado o el velocímetro del Seguimiento)"
+                >
+                  ⚡ {Math.round(posRider?.velocidadKmh ?? 0)} km/h · GPS activo
+                </span>
+              ) : (
+                <span
+                  className="text-[10px] bg-slate-700/40 text-slate-400 px-2 py-0.5 rounded-full font-mono"
+                  title="El rider no está publicando señal ahora. Se enciende solo cuando tiene abierto su GPS (vista GPS del Motorizado o el velocímetro del Seguimiento)"
+                >
+                  ⚪ Sin señal GPS
+                </span>
+              )}
             </div>
           )}
         </div>
