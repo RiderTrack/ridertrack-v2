@@ -1,25 +1,45 @@
 // ═══════════════════════════════════════════════════════════
-// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.51
+// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.52
 // Componente: ThemeStudioModal — la UI del estudio
 // ═══════════════════════════════════════════════════════════
 // Un solo lugar para personalizar TODO el look de la app:
-// presets de un toque, modo claro/oscuro/auto, color de acento,
-// tipografía, tamaño de letra, fondo y redondeo. Los cambios se
-// aplican EN VIVO (sin botón "aplicar") y se guardan solos.
-// El motor vive en src/theme/ (modular: esta UI no sabe nada
-// de rutas, pagos ni Firestore — solo tema).
+// presets de un toque, modo claro/oscuro/auto/horario, color de
+// acento, tipografía, tamaño/peso/tono de letra, fondo, redondeo,
+// densidad, alto contraste y animaciones. Los cambios se aplican
+// EN VIVO (sin botón "aplicar") y se guardan solos (local +
+// cuenta). El motor vive en src/theme/ (modular: esta UI no sabe
+// nada de rutas, pagos ni Firestore — solo tema).
 // ═══════════════════════════════════════════════════════════
 
 import React from 'react';
-import { Check, RotateCcw, Sun, Moon, Smartphone, Type, Sparkles } from 'lucide-react';
+import {
+  Check,
+  RotateCcw,
+  Sun,
+  Moon,
+  Smartphone,
+  Type,
+  Sparkles,
+  Clock,
+  Bold,
+  Palette,
+  Eye,
+  Zap,
+  Cloud,
+  Contrast,
+} from 'lucide-react';
 import { Modal } from './ui';
 import { useTema } from '../theme/useTema';
 import {
   ACENTOS,
+  DENSIDADES,
   FONDOS,
   FUENTES,
+  PESOS,
   PRESETS,
   RADIOS,
+  TONOS_TEXTO,
+  mismoLook,
   type PresetTema,
 } from '../theme/catalogo';
 import {
@@ -45,6 +65,51 @@ const TituloSeccion: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   </div>
 );
 
+/** Interruptor estilo switch (F3.52 — alto contraste / animaciones). */
+const Switch: React.FC<{
+  activo: boolean;
+  onChange: (v: boolean) => void;
+  etiqueta: string;
+  descripcion: string;
+  icono: React.ReactNode;
+}> = ({ activo, onChange, etiqueta, descripcion, icono }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={activo}
+    onClick={() => onChange(!activo)}
+    className={`flex items-center gap-3 w-full p-3 rounded-xl border text-left transition-all duration-200 ${
+      activo
+        ? 'border-blue-500/70 bg-blue-500/10'
+        : 'border-slate-700 bg-slate-900/60 hover:border-slate-600'
+    }`}
+    title={descripcion}
+  >
+    <span
+      className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
+        activo ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-slate-500'
+      }`}
+    >
+      {icono}
+    </span>
+    <span className="flex-1 min-w-0">
+      <span className="block text-xs font-bold text-slate-200">{etiqueta}</span>
+      <span className="block text-[9px] leading-tight text-slate-500 line-clamp-2">{descripcion}</span>
+    </span>
+    <span
+      className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${
+        activo ? 'bg-blue-500' : 'bg-slate-700'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-200 ${
+          activo ? 'left-[1.375rem]' : 'left-0.5'
+        }`}
+      />
+    </span>
+  </button>
+);
+
 export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
   isOpen,
   onClose,
@@ -55,14 +120,7 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
 
   // ¿Qué preset está activo? (ignora la escala: si cambiaste solo el
   // tamaño de letra, el look del preset sigue siendo el activo)
-  const presetActivo = PRESETS.find(
-    (p) =>
-      p.config.modo === config.modo &&
-      p.config.acento === config.acento &&
-      p.config.fuente === config.fuente &&
-      p.config.fondo === config.fondo &&
-      p.config.radio === config.radio
-  )?.id;
+  const presetActivo = PRESETS.find((p) => mismoLook(config, p.config))?.id;
 
   const aplicar = (preset: PresetTema) => {
     aplicarPreset(preset);
@@ -83,7 +141,22 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
       icono: <Smartphone className="w-4 h-4" />,
       sub: sistemaPrefiereClaro ? '→ claro ahora' : '→ oscuro ahora',
     },
+    {
+      id: 'horario',
+      nombre: 'Horario',
+      icono: <Clock className="w-4 h-4" />,
+      sub: `→ ${modoEfectivo === 'light' ? 'claro' : 'oscuro'} ahora`,
+    },
   ];
+
+  // Opciones del select de horas (modo horario)
+  const horas = Array.from({ length: 24 }, (_, i) => i);
+  const horaTxt = (h: number) => `${String(h).padStart(2, '0')}:00`;
+  // Rango que se muestra en el chip (soporta cruce de medianoche)
+  const rangoHorario =
+    config.horaClaro === config.horaOscuro
+      ? `${horaTxt(config.horaClaro)} todo el día`
+      : `${horaTxt(config.horaClaro)} – ${horaTxt(config.horaOscuro)}`;
 
   return (
     <Modal
@@ -94,9 +167,14 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
       maxWidth="2xl"
       footer={
         <div className="w-full flex items-center justify-between gap-3">
-          <span className="text-[9px] font-mono font-bold text-slate-500 tracking-wider">
-            ESTUDIO · F3.51
-          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] font-mono font-bold text-slate-500 tracking-wider">
+              ESTUDIO · F3.52
+            </span>
+            <span className="text-[8px] text-slate-600 flex items-center gap-1 truncate">
+              <Cloud className="w-2.5 h-2.5 flex-shrink-0" /> Se guarda en tu teléfono y en tu cuenta
+            </span>
+          </div>
           <button
             onClick={restaurar}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl text-slate-300 bg-slate-700/50 border border-slate-600/60 hover:bg-slate-600/50 hover:text-white transition-colors"
@@ -152,11 +230,11 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
         })}
       </div>
 
-      {/* ═══ 2) MODO — oscuro / claro / auto ═══ */}
+      {/* ═══ 2) MODO — oscuro / claro / auto / horario ═══ */}
       <TituloSeccion>
         <Sun className="w-3 h-3 text-blue-400" /> Modo
       </TituloSeccion>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {opcionesModo.map((m) => {
           const activo = config.modo === m.id;
           return (
@@ -177,10 +255,60 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
         })}
       </div>
       <p className="text-[10px] text-slate-500 leading-relaxed">
-        Modo <b>Auto</b>: la app sigue al teléfono — si activas el ahorro de batería / tema claro
-        del sistema, RiderTrack cambia sola. Ahora mismo está en{' '}
+        <b>Auto</b> sigue al teléfono · <b>Horario</b> sigue al reloj. Ahora mismo la app está en{' '}
         <b>{modoEfectivo === 'light' ? 'claro' : 'oscuro'}</b>.
       </p>
+
+      {/* ⏰ F3.52 — Horas del modo horario (solo visible en ese modo) */}
+      {config.modo === 'horario' && (
+        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-blue-400" /> Horas del modo horario
+            </span>
+            <span className="text-[9px] font-bold text-blue-400">{rangoHorario}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                Claro desde
+              </span>
+              <select
+                value={config.horaClaro}
+                onChange={(e) => actualizarConfig({ horaClaro: parseInt(e.target.value, 10) })}
+                className="bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-200 focus:border-blue-500 focus:outline-none cursor-pointer"
+              >
+                {horas.map((h) => (
+                  <option key={h} value={h}>
+                    {horaTxt(h)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                Oscuro desde
+              </span>
+              <select
+                value={config.horaOscuro}
+                onChange={(e) => actualizarConfig({ horaOscuro: parseInt(e.target.value, 10) })}
+                className="bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-200 focus:border-blue-500 focus:outline-none cursor-pointer"
+              >
+                {horas.map((h) => (
+                  <option key={h} value={h}>
+                    {horaTxt(h)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="text-[9px] text-slate-500 leading-relaxed">
+            Entre esas horas la app se pone clara, el resto oscuro. Si pones el claro más tarde que el
+            oscuro (ej. 22:00 → 04:00) el rango cruza la medianoche y funciona igual. Con la app
+            abierta cambia sola al cruzar la hora.
+          </p>
+        </div>
+      )}
 
       {/* ═══ 3) ACENTO — color principal ═══ */}
       <TituloSeccion>
@@ -282,6 +410,89 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
         </p>
       </div>
 
+      {/* ✍️ F3.52 — PESO DE LA LETRA (más negrita / más tenue) */}
+      <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+            <Bold className="w-3.5 h-3.5 text-blue-400" /> Peso de la letra
+          </span>
+          <span className="text-[9px] text-slate-500">grosor del texto</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {PESOS.map((p) => {
+            const activo = config.peso === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() => actualizarConfig({ peso: p.id })}
+                className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border transition-all duration-200 ${
+                  activo
+                    ? 'border-blue-500/70 ring-2 ring-blue-500/40 bg-blue-500/10'
+                    : 'border-slate-700 bg-slate-900/60 hover:border-slate-600'
+                }`}
+                title={p.descripcion}
+              >
+                <span
+                  className="text-lg leading-none text-white"
+                  style={{ fontWeight: p.css }}
+                >
+                  Aa
+                </span>
+                <span className="text-xs font-bold text-slate-200">{p.nombre}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[9px] text-slate-500 leading-relaxed">
+          El peso engorda TODO el texto de la app conservando la jerarquía (lo que ya era negrita
+          sigue siendo más grueso que el resto). <b>Medio</b> para pantalla en la moto,{' '}
+          <b>Fuerte</b> si la vista ya pide refuerzo.
+        </p>
+      </div>
+
+      {/* 🎨 F3.52 — TONO DE LA LETRA (color / intensidad) */}
+      <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+            <Palette className="w-3.5 h-3.5 text-blue-400" /> Tono de la letra
+          </span>
+          <span className="text-[9px] text-slate-500">color e intensidad</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {TONOS_TEXTO.map((t) => {
+            const activo = config.tonoTexto === t.id;
+            const muestra = modoEfectivo === 'light' ? t.muestraLight : t.muestraDark;
+            return (
+              <button
+                key={t.id}
+                onClick={() => actualizarConfig({ tonoTexto: t.id })}
+                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition-all duration-200 ${
+                  activo
+                    ? 'border-blue-500/70 ring-2 ring-blue-500/40 bg-blue-500/10'
+                    : 'border-slate-700 bg-slate-900/60 hover:border-slate-600'
+                }`}
+                title={t.descripcion}
+              >
+                <span
+                  className="w-8 h-8 rounded-lg flex-shrink-0 border border-slate-600/60"
+                  style={{ background: muestra }}
+                />
+                <span className="flex flex-col min-w-0">
+                  <span className="text-xs font-bold text-slate-200">{t.nombre}</span>
+                  <span className="text-[9px] leading-tight text-slate-500 truncate">
+                    {t.descripcion}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[9px] text-slate-500 leading-relaxed">
+          <b>Intenso</b> = blanco puro (o negro en claro), <b>Suave</b> baja un paso el brillo y
+          descansa la vista, <b>Cálido</b> tinta crema tipo libro de noche.
+        </p>
+      </div>
+
       {/* ═══ 5) FONDO — textura detrás de las tarjetas ═══ */}
       <TituloSeccion>
         <Sparkles className="w-3 h-3 text-blue-400" /> Fondo
@@ -338,7 +549,72 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
         })}
       </div>
 
-      {/* ═══ 7) VISTA PREVIA — mini app con el tema actual ═══ */}
+      {/* ═══ 7) COMODIDAD VISUAL — F3.52 ═══ */}
+      <TituloSeccion>
+        <Eye className="w-3 h-3 text-blue-400" /> Comodidad visual
+      </TituloSeccion>
+
+      {/* 📏 Densidad del layout */}
+      <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-200">Densidad de la interfaz</span>
+          <span className="text-[9px] text-slate-500">espaciado sin tocar la letra</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {DENSIDADES.map((d) => {
+            const activo = config.densidad === d.id;
+            // Miniatura: filas que se aprietan o respiran
+            const gap = d.id === 'compacta' ? 'gap-1' : d.id === 'normal' ? 'gap-1.5' : 'gap-2.5';
+            return (
+              <button
+                key={d.id}
+                onClick={() => actualizarConfig({ densidad: d.id })}
+                className={`flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-all duration-200 ${
+                  activo
+                    ? 'border-blue-500/70 ring-2 ring-blue-500/40 bg-blue-500/10'
+                    : 'border-slate-700 bg-slate-900/60 hover:border-slate-600'
+                }`}
+                title={d.descripcion}
+              >
+                <span className={`flex flex-col w-14 ${gap}`}>
+                  <span className="h-2.5 rounded bg-slate-600" />
+                  <span className="h-2.5 rounded bg-slate-600" />
+                  <span className="h-2.5 rounded bg-slate-700" />
+                </span>
+                <span className="text-xs font-bold text-slate-200">{d.nombre}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[9px] text-slate-500 leading-relaxed">
+          <b>Compacta</b> mete más pedidos por pantalla · <b>Cómoda</b> da aire extra a tarjetas y
+          botones. La letra NO cambia — para eso está el tamaño de arriba.
+        </p>
+      </div>
+
+      {/* 👁️ Alto contraste + 🎞️ animaciones */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <Switch
+          activo={config.altoContraste}
+          onChange={(v) => actualizarConfig({ altoContraste: v })}
+          etiqueta="Alto contraste"
+          descripcion="Textos y bordes reforzados — para leer con sol de frente"
+          icono={<Contrast className="w-4 h-4" />}
+        />
+        <Switch
+          activo={config.animaciones}
+          onChange={(v) => actualizarConfig({ animaciones: v })}
+          etiqueta="Animaciones"
+          descripcion="Micro-movimientos de la interfaz · apágalas y ahorra batería"
+          icono={<Zap className="w-4 h-4" />}
+        />
+      </div>
+      <p className="text-[10px] text-slate-500 leading-relaxed">
+        <b>Alto contraste</b> pisa el tono de letra si los combinas — gana la legibilidad. Ideal
+        en la moto a mediodía.
+      </p>
+
+      {/* ═══ 8) VISTA PREVIA — mini app con el tema actual ═══ */}
       <TituloSeccion>Vista previa en vivo</TituloSeccion>
       <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-700/60 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
@@ -352,7 +628,7 @@ export const ThemeStudioModal: React.FC<ThemeStudioModalProps> = ({
             </div>
           </div>
           <span className="px-2 py-0.5 text-[9px] font-bold rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
-            F3.51
+            F3.52
           </span>
         </div>
         <div className="p-3 rounded-xl bg-slate-800 border border-slate-700">
