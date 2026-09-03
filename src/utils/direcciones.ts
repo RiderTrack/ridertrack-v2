@@ -149,6 +149,80 @@ export function extraerCoordenadas(texto: string | null | undefined): { lat: num
 }
 
 /**
+ * 📍 (Fase 3.49) Detector FLEXIBLE de coordenadas — encuentra un par
+ * lat,lng DENTRO de cualquier texto pegado, no solo cuando el texto
+ * es puro el par:
+ *
+ *   • "-11.988690,-77.078981"                       (pegado directo)
+ *   • "https://www.google.com/maps?q=-11.988690,-77.078981&z=17"
+ *   • "...maps?q=-11.988690%2C-77.078981..."        (coma URL-encoded)
+ *   • "...maps/@-11.988690,-77.078981,17z..."       (formato @ del navegador)
+ *   • "...maps/place/...!3d-11.988690!4d-77.078981" (pin soltado en el mapa)
+ *   • "Ubicación: -11.988690, -77.078981 (casa azul)"
+ *
+ * ¿POR QUÉ? extraerCoordenadas solo ve el par si TODO el texto es el
+ * par. El caso real que rompía todo: el cliente manda su 📍 por
+ * WhatsApp, el link de Google Maps queda guardado en la observación
+ * del cliente, y cuando el rider lo pegaba en el buscador la app
+ * mandaba el texto a búsqueda libre → Google devolvía 0 y Nominatim
+ * basura difusa (Carabayllo, Villa El Salvador… a 77 km). Con este
+ * detector el texto NUNCA llega al buscador: va directo a
+ * geocodificación inversa (coordenadas → dirección exacta).
+ *
+ * Seguridad anti-falsos-positivos: exige 2+ decimales en ambos
+ * números (una dirección nunca trae "-12.05,-77.04" suelto) y valida
+ * rango lat ≤ 90 / lng ≤ 180. "Av. Larco 123, Miraflores" no matchea.
+ */
+export function detectarCoordenadas(texto: string | null | undefined): { lat: number; lng: number } | null {
+  if (!texto) return null;
+  const t = String(texto);
+
+  // 1) ¿Todo el texto ES el par? (ruta rápida del Fix 2.18)
+  const directo = extraerCoordenadas(t.trim());
+  if (directo) return directo;
+
+  // 2) Par con decimales dentro de un texto más largo (",", ";",
+  //    "%2C" o " " como separador — el espacio solo si ambos traen
+  //    4+ decimales, para no confundir con "jr 2.5 4.5")
+  const patrones: RegExp[] = [
+    /(-?\d{1,3}\.\d{2,})\s*(?:%2C|[,;])\s*(-?\d{1,3}\.\d{2,})/i,
+    /(-?\d{1,3}\.\d{4,})\s+(-?\d{1,3}\.\d{4,})/,
+    /!3d(-?\d{1,3}\.\d{2,})!4d(-?\d{1,3}\.\d{2,})/i,
+  ];
+  for (const re of patrones) {
+    const m = t.match(re);
+    if (m) {
+      const lat = parseFloat(m[1]);
+      const lng = parseFloat(m[2]);
+      if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        if (lat !== 0 || lng !== 0) return { lat, lng };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 📏 Distancia aprox. en metros entre dos puntos (Haversine
+ * simplificado) — la usa UbicarClienteModal para saber si las
+ * coordenadas detectadas en las observaciones del cliente son
+ * DISTINTAS de las que ya tiene guardadas (y valen la pena mostrar).
+ */
+export function distanciaMetros(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6371000; // radio terrestre en metros
+  const rad = (x: number) => (x * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(s)));
+}
+
+/**
  * Mensaje de WhatsApp para pedir la ubicación exacta
  * (mismo espíritu que la v1 enviarMsgDirIA).
  */
