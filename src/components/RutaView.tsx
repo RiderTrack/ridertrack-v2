@@ -1059,6 +1059,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 clientesFiltrados.map((c) => {
                   const entregado = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st);
                   const fallido = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st);
+                  // ⚡ F3.47: lo que cobra la EMPRESA se pinta AZUL 🔵 — igual que el
+                  // rojito de las fallidas, para distinguir lo mío 🟢 de lo de la empresa
+                  const deEmpresa = esPagoEmpresa(c.st);
                   const verif = c.webReg === true;
                   return (
                     <div
@@ -1079,7 +1082,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         >
                           <Check className="w-3.5 h-3.5" strokeWidth={3} />
                         </span>
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entregado ? 'bg-emerald-500' : fallido ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${deEmpresa ? 'bg-blue-500' : entregado ? 'bg-emerald-500' : fallido ? 'bg-red-500' : 'bg-amber-500'}`} />
                         <span className={`text-[11px] font-bold truncate ${verif ? 'text-emerald-400' : 'text-white'}`}>
                           {c.num ? `${c.num}. ` : ''}{c.nombre || 'Cliente'}
                         </span>
@@ -1087,7 +1090,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       </div>
                       <div className="text-right shrink-0">
                         <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</span>
-                        <span className={`ml-1.5 text-[9px] font-bold ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
+                        <span className={`ml-1.5 text-[9px] font-bold ${deEmpresa ? 'text-blue-400' : entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
                           {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
                         </span>
                       </div>
@@ -1096,6 +1099,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 })
               )}
             </div>
+
+            {/* ⚡ F3.47: leyenda de los colores — para leer el listado de un vistazo */}
+            {clientesFiltrados.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-2.5 py-1.5 border-t border-slate-700/50 text-[8px] text-slate-500">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />cobrado por mí</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />cobra la empresa</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />fallido</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />pendiente</span>
+              </div>
+            )}
 
             {/* Marcar / limpiar (como v1) */}
             {clientesFiltrados.length > 0 && (
@@ -1288,7 +1301,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     <div>
                         <div className="text-[9px] text-slate-500 uppercase mb-1">Pago</div>
                         <div className="grid grid-cols-3 gap-1">
-                          {pagosList.map(([id, emoji, label]) => (
+                          {/* ⚡ F3.47: el botón del pago ACTIVO queda RESALTADO con anillo +
+                            brillo + ✓ — así ves de un vistazo cómo quedó cobrado el cliente */}
+                        {pagosList.map(([id, emoji, label]) => {
+                          const activo = (c.st || '') === id;
+                          return (
                             <button
                               key={id}
                               onClick={() => {
@@ -1297,31 +1314,45 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                 onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
                               }}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
-                                id === 'efectivo' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                : id === 'yape-rudy' || id === 'yape-efectivo' || id === 'yape-plin' ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
-                                : 'bg-slate-700/50 text-slate-300 border border-slate-600'
+                                activo
+                                  ? id === 'efectivo' ? 'bg-emerald-500/40 text-emerald-200 ring-2 ring-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
+                                  : id === 'yape-rudy' || id === 'yape-efectivo' || id === 'yape-plin' ? 'bg-purple-500/40 text-purple-200 ring-2 ring-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.45)]'
+                                  : esPagoEmpresa(id) ? 'bg-blue-500/40 text-blue-200 ring-2 ring-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.45)]'
+                                  : 'bg-slate-600/60 text-white ring-2 ring-slate-300 shadow-[0_0_10px_rgba(203,213,225,0.35)]'
+                                  : id === 'efectivo' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                  : id === 'yape-rudy' || id === 'yape-efectivo' || id === 'yape-plin' ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+                                  : 'bg-slate-700/50 text-slate-300 border border-slate-600'
                               }`}
                             >
-                              {emoji} {label}
+                              {activo ? '✓ ' : ''}{emoji} {label}
                             </button>
-                          ))}
+                          );
+                        })}
                         </div>
 
                         {/* Estados fallidos */}
                         <div className="text-[9px] text-slate-500 uppercase mt-1.5 mb-1">No entregado</div>
                         <div className="grid grid-cols-3 gap-1">
-                          {estadosFallidos.map(([id, emoji, label]) => (
+                          {/* ⚡ F3.47: el fallido ACTIVO también queda resaltado (anillo rojo + ✓) */}
+                        {estadosFallidos.map(([id, emoji, label]) => {
+                          const activo = (c.st || '') === id;
+                          return (
                             <button
                               key={id}
                               onClick={() => {
                                 cambiarEstado(c.id, id);
                                 onShowToast?.('Estado actualizado', `${c.nombre}: ${label}`, 'warning');
                               }}
-                              className="px-1.5 py-1.5 rounded-md text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 transition-all active:scale-95"
+                              className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
+                                activo
+                                  ? 'bg-red-500/35 text-red-200 ring-2 ring-red-400 shadow-[0_0_10px_rgba(239,68,68,0.45)]'
+                                  : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              }`}
                             >
-                              {emoji} {label}
+                              {activo ? '✓ ' : ''}{emoji} {label}
                             </button>
-                          ))}
+                          );
+                        })}
                         </div>
                       </div>
 
@@ -2272,7 +2303,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <div className="bg-slate-800 rounded-lg p-3 text-xs">
                               <div className="flex items-center justify-between mb-1">
                                 <div className="font-bold text-white text-sm">{c.nombre}</div>
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${c.st === 'pendiente' ? 'bg-amber-500/20 text-amber-400' : ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st || '') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{c.st || 'pendiente'}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${c.st === 'pendiente' ? 'bg-amber-500/20 text-amber-400' : esPagoEmpresa(c.st) ? 'bg-blue-500/20 text-blue-400' : ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st || '') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{c.st || 'pendiente'}</span>
                               </div>
                               {c.prod && <div className="text-slate-400">📦 {c.prod}</div>}
                               <div className="mt-1 text-emerald-400 font-bold">💰 S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
