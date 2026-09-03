@@ -24,6 +24,8 @@ import {
   DireccionSugerida,
 } from '../services/geocoding';
 import { getGoogleApiKey } from '../services/googleMaps';
+import { detectarCoordenadas } from '../utils/direcciones';
+import { ClipboardPaste, Crosshair } from 'lucide-react';
 
 export interface DireccionElegida {
   nombre: string;      // etiqueta completa "Avenida Sucre 523, San Miguel"
@@ -66,6 +68,8 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
   const [detalleCargando, setDetalleCargando] = useState(false);
   /** ¿Las sugerencias vienen de Google Places? (para el badge) */
   const [deGoogle, setDeGoogle] = useState(false);
+  /** ⚡ F3.49: aviso del pegado desde el portapapeles */
+  const [avisoPegado, setAvisoPegado] = useState('');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contenedorRef = useRef<HTMLDivElement>(null);
@@ -77,6 +81,32 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
   // Ref siempre fresca a `elegir` (evita closures obsoletas al
   // auto-elegir desde el debounce, que corre render atrás)
   const elegirRef = useRef<(s: DireccionSugerida) => void>(() => {});
+
+  /** ⚡ F3.49 — Detección INSTANTÁNEA de coordenadas en lo escrito:
+   *  si pegaste "-11.988690,-77.078981" o un link de Google Maps,
+   *  se muestra el aviso verde al toque (sin esperar al buscador)
+   *  y Enter elige el punto EXACTO, no una búsqueda difusa. */
+  const coordsDetectadas = texto.trim().length >= 3 ? detectarCoordenadas(texto) : null;
+
+  /** ⚡ F3.49 — Botón 📋 pegar: lee el portapapeles directo al campo
+   *  (dirección copiada de Circuit/Excel/WhatsApp, o coordenadas). */
+  const pegarDesdePortapapeles = async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      const limpio = (clip || '').trim();
+      if (!limpio) {
+        setAvisoPegado('El portapapeles está vacío');
+        setTimeout(() => setAvisoPegado(''), 2500);
+        return;
+      }
+      setTexto(limpio);
+      setAvisoPegado('📋 Pegado — busca o dale Enter');
+      setTimeout(() => setAvisoPegado(''), 2500);
+    } catch {
+      setAvisoPegado('Tu sistema no dejó leer el portapapeles — pega con toque largo ✋');
+      setTimeout(() => setAvisoPegado(''), 3500);
+    }
+  };
 
   // Cerrar sugerencias al tocar fuera
   useEffect(() => {
@@ -283,6 +313,18 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
               autoCapitalize="sentences"
               autoCorrect="off"
             />
+            {/* ⚡ F3.49 — botón 📋 pegar (dirección o coordenadas del
+                portapapeles — copiada de Circuit, Excel, WhatsApp…) */}
+            {!buscando && !detalleCargando && (
+              <button
+                onClick={pegarDesdePortapapeles}
+                className="p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all shrink-0"
+                title="Pegar desde el portapapeles (dirección o coordenadas)"
+                aria-label="Pegar desde el portapapeles"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+              </button>
+            )}
             {(buscando || detalleCargando) && (
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
             )}
@@ -300,8 +342,29 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
             )}
           </div>
 
+          {/* ⚡ F3.49 — Coordenadas exactas detectadas al toque: el pin
+              caerá EXACTO ahí (geocodificación inversa solo para la
+              etiqueta). Antes este texto iba a búsqueda difusa y el
+              punto salía en OTRO distrito. */}
+          {coordsDetectadas && !abierto && (
+            <div className="mt-1.5 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 flex items-center gap-1.5">
+              <Crosshair className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <p className="text-[10px] font-bold text-emerald-300 leading-tight">
+                📍 Coordenadas exactas detectadas — Enter o la 1ª opción pone el pin AHÍ MISMO
+                <span className="text-emerald-400/80 font-normal">
+                  {' '}(lat {coordsDetectadas.lat.toFixed(6)}, lng {coordsDetectadas.lng.toFixed(6)})
+                </span>
+              </p>
+            </div>
+          )}
+
+          {/* ⚡ F3.49 — aviso del pegado (éxito o bloqueo del sistema) */}
+          {avisoPegado && !coordsDetectadas && (
+            <p className="text-[10px] text-indigo-300/90 mt-1">{avisoPegado}</p>
+          )}
+
           {/* Error / sin resultados */}
-          {error && !abierto && (
+          {error && !abierto && !coordsDetectadas && (
             <p className="text-[10px] text-amber-400/80 mt-1">{error}</p>
           )}
 
