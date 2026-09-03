@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.51
+// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.52
 // Módulo: motor.ts — lógica pura + aplicación al documento
 // ═══════════════════════════════════════════════════════════
 // Todo lo que NO es React vive aquí (fácil de probar con el
@@ -12,6 +12,9 @@ import {
   FUENTES,
   FONDOS,
   RADIOS,
+  DENSIDADES,
+  PESOS,
+  TONOS_TEXTO,
   URL_GOOGLE_FONTS,
 } from './catalogo';
 import {
@@ -20,12 +23,17 @@ import {
   CONFIG_DEFECTO,
   ESCALA_MAX,
   ESCALA_MIN,
+  HORA_MAX,
+  HORA_MIN,
   type AcentoId,
   type ConfigTema,
+  type DensidadId,
   type FondoId,
   type FuenteId,
   type ModoTema,
+  type PesoId,
   type RadioId,
+  type TonoTextoId,
 } from './tipos';
 import type { ThemeMode } from '../types';
 
@@ -33,7 +41,7 @@ import type { ThemeMode } from '../types';
 // ✅ VALIDACIÓN / NORMALIZACIÓN
 // ─────────────────────────────────────────────
 
-const MODOS: ModoTema[] = ['dark', 'light', 'auto'];
+const MODOS: ModoTema[] = ['dark', 'light', 'auto', 'horario'];
 
 /** ¿El valor es un acento del catálogo? */
 export const esAcentoValido = (v: unknown): v is AcentoId =>
@@ -51,10 +59,37 @@ export const esFondoValido = (v: unknown): v is FondoId =>
 export const esRadioValido = (v: unknown): v is RadioId =>
   RADIOS.some((r) => r.id === v);
 
+/** ¿El valor es una densidad del catálogo? (F3.52) */
+export const esDensidadValida = (v: unknown): v is DensidadId =>
+  DENSIDADES.some((d) => d.id === v);
+
+/** ¿El valor es un peso del catálogo? (F3.52) */
+export const esPesoValido = (v: unknown): v is PesoId =>
+  PESOS.some((p) => p.id === v);
+
+/** ¿El valor es un tono de texto del catálogo? (F3.52) */
+export const esTonoTextoValido = (v: unknown): v is TonoTextoId =>
+  TONOS_TEXTO.some((t) => t.id === v);
+
+/** Hora entera 0–23 (para el modo horario). Si viene basura,
+ *  cae al valor por defecto que toque. (F3.52) */
+const horaValida = (v: unknown, porDefecto: number): number => {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return porDefecto;
+  const entero = Math.floor(v);
+  return Math.min(HORA_MAX, Math.max(HORA_MIN, entero));
+};
+
+/** Booleano estricto: solo `true` cuenta como true (un string
+ *  "true" corrupto no engaña). (F3.52) */
+const booleanoEstricto = (v: unknown, porDefecto: boolean): boolean =>
+  typeof v === 'boolean' ? v : porDefecto;
+
 /**
  * Convierte "cualquier cosa" (JSON viejo, datos corruptos, un
  * parcial) en una ConfigTema COMPLETA y válida: lo desconocido
  * cae al valor de fábrica y la escala se recorta al rango.
+ * F3.52: las configs F3.51 guardadas (sin campos nuevos) pasan
+ * por aquí limpias y heredan los valores neutros de fábrica.
  */
 export function normalizarConfig(bruto: unknown): ConfigTema {
   const base = (typeof bruto === 'object' && bruto !== null ? bruto : {}) as Record<string, unknown>;
@@ -68,15 +103,50 @@ export function normalizarConfig(bruto: unknown): ConfigTema {
     escala,
     fondo: esFondoValido(base.fondo) ? base.fondo : CONFIG_DEFECTO.fondo,
     radio: esRadioValido(base.radio) ? base.radio : CONFIG_DEFECTO.radio,
+    densidad: esDensidadValida(base.densidad) ? base.densidad : CONFIG_DEFECTO.densidad,
+    altoContraste: booleanoEstricto(base.altoContraste, CONFIG_DEFECTO.altoContraste),
+    animaciones: booleanoEstricto(base.animaciones, CONFIG_DEFECTO.animaciones),
+    peso: esPesoValido(base.peso) ? base.peso : CONFIG_DEFECTO.peso,
+    tonoTexto: esTonoTextoValido(base.tonoTexto) ? base.tonoTexto : CONFIG_DEFECTO.tonoTexto,
+    horaClaro: horaValida(base.horaClaro, CONFIG_DEFECTO.horaClaro),
+    horaOscuro: horaValida(base.horaOscuro, CONFIG_DEFECTO.horaOscuro),
   };
 }
 
+/** Opciones del modo horario (F3.52). */
+export interface OpcionesHorario {
+  /** Hora a la que arranca el claro (0–23). Default 6. */
+  horaClaro?: number;
+  /** Hora a la que arranca el oscuro (0–23). Default 18. */
+  horaOscuro?: number;
+  /** Reloj a consultar (inyectable para tests). Default ahora. */
+  ahora?: Date;
+}
+
 /**
- * Modo efectivo: `auto` se resuelve con la preferencia del
- * teléfono (claro del sistema → light, si no → dark).
+ * Modo efectivo:
+ *  • `auto`      → la preferencia del teléfono (claro → light).
+ *  • `horario`   → el reloj: claro entre horaClaro y horaOscuro.
+ *                  Soporta rangos que cruzan medianoche (ej. claro
+ *                  de 22 a 4 — útil si el rider trabaja de noche:
+ *                  se lee al revés como "claro solo de 22:00–04:00").
+ *  • dark/light  → tal cual.
  */
-export function resolverModo(modo: ModoTema, sistemaPrefiereClaro: boolean): ThemeMode {
+export function resolverModo(
+  modo: ModoTema,
+  sistemaPrefiereClaro: boolean,
+  horario?: OpcionesHorario
+): ThemeMode {
   if (modo === 'auto') return sistemaPrefiereClaro ? 'light' : 'dark';
+  if (modo === 'horario') {
+    const { horaClaro = 6, horaOscuro = 18, ahora = new Date() } = horario ?? {};
+    const h = ahora.getHours();
+    const cruzaMedianoche = horaClaro > horaOscuro;
+    const esClaro = cruzaMedianoche
+      ? h >= horaClaro || h < horaOscuro
+      : h >= horaClaro && h < horaOscuro;
+    return esClaro ? 'light' : 'dark';
+  }
   return modo;
 }
 
@@ -108,11 +178,18 @@ export function cargarTemaGuardado(storage: Almacenamiento): ConfigTema {
 }
 
 /** Guarda la config completa Y la clave legado (por si algo
- *  viejo la lee). Nunca lanza. */
+ *  viejo la lee). Nunca lanza. El modo horario se resuelve con
+ *  la hora ACTUAL para que la clave legado quede coherente. */
 export function guardarTema(cfg: ConfigTema, storage: Almacenamiento): void {
   try {
     storage.setItem(CLAVE_TEMA, JSON.stringify(cfg));
-    storage.setItem(CLAVE_TEMA_LEGADO, resolverModo(cfg.modo, false));
+    storage.setItem(
+      CLAVE_TEMA_LEGADO,
+      resolverModo(cfg.modo, false, {
+        horaClaro: cfg.horaClaro,
+        horaOscuro: cfg.horaOscuro,
+      })
+    );
   } catch {
     // sin storage (modo privado): la app sigue funcionando
   }
@@ -143,22 +220,39 @@ export interface DocumentoMinimo {
 /**
  * Aplica la configuración al documento: clase .light/.dark (el
  * sistema de la fase 1.5 sigue mandando), data-atributos para
- * acento/fuente/fondo/radio, var --escala-letra, meta
- * theme-color del navegador y la etiqueta de Google Fonts.
+ * acento/fuente/fondo/radio/densidad/tono/peso (F3.52),
+ * var --escala-letra, data-contraste/animaciones solo cuando se
+ * activan (DOM limpio), meta theme-color del navegador y la
+ * etiqueta de Google Fonts.
  */
 export function aplicarTemaEnDocumento(cfg: ConfigTema, doc: DocumentoMinimo): void {
   const root = doc.documentElement;
-  const modo = cfg.modo === 'light' ? 'light' : 'dark';
+  // Modo efectivo con las horas del horario (si aplica) — usa la
+  // hora real del dispositivo, así el arranque ya sale correcto.
+  const modo = resolverModo(cfg.modo, false, {
+    horaClaro: cfg.horaClaro,
+    horaOscuro: cfg.horaOscuro,
+  }) === 'light' ? 'light' : 'dark';
 
   // 1) Clases de modo (mismo mecanismo de la fase 1.5)
   root.classList.remove('light', 'dark');
   root.classList.add(modo);
 
-  // 2) Data-atributos que el CSS de index.css (sección F3.51) lee
+  // 2) Data-atributos que el CSS de index.css (sección F3.51+F3.52) lee
   root.dataset.acento = cfg.acento;
   root.dataset.fuente = cfg.fuente;
   root.dataset.fondo = cfg.fondo;
   root.dataset.radio = cfg.radio;
+  root.dataset.densidad = cfg.densidad;
+  root.dataset.tono = cfg.tonoTexto;
+  root.dataset.peso = cfg.peso;
+
+  // 2b) Booleanos: SOLO se marcan cuando NO son el default — sin
+  // atributo = comportamiento normal (compatibilidad total).
+  if (cfg.altoContraste) root.dataset.contraste = 'alto';
+  else delete root.dataset.contraste;
+  if (!cfg.animaciones) root.dataset.animaciones = 'off';
+  else delete root.dataset.animaciones;
 
   // 3) Escala de letra (rem-based: TODO escala junto)
   root.style.setProperty('--escala-letra', String(cfg.escala));

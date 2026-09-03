@@ -1,11 +1,14 @@
 // ═══════════════════════════════════════════════════════════
-// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.51
+// 🎨 ESTUDIO DE TEMAS — RiderTrack V2 · F3.52
 // Módulo: TemaProvider.tsx — contexto React (estado vivo)
 // ═══════════════════════════════════════════════════════════
 // Monta UNA vez en main.tsx alrededor de <App/>. Mantiene la
 // config en estado, la aplica al <html> al instante (sin botón
 // "aplicar": se ve el cambio en vivo) y la guarda en localStorage.
-// También escucha el modo AUTO del teléfono.
+// También escucha el modo AUTO del teléfono y el reloj del modo
+// HORARIO (F3.52: re-chequea cada minuto).
+// El respaldo en la nube lo engancha aparte
+// useSincronizacionTema() desde App.tsx (donde vive la sesión).
 // ═══════════════════════════════════════════════════════════
 
 import React, {
@@ -29,7 +32,7 @@ import type { ThemeMode } from '../types';
 export interface ContextoTema {
   /** Config completa actual (persistida). */
   config: ConfigTema;
-  /** Modo ya resuelto (auto → según el teléfono). 'dark'|'light'. */
+  /** Modo ya resuelto (auto→teléfono, horario→reloj). 'dark'|'light'. */
   modoEfectivo: ThemeMode;
   /** Cambia campos puntuales: actualizarConfig({ acento: 'rosa' }). */
   actualizarConfig: (parcial: Partial<ConfigTema>) => void;
@@ -58,6 +61,9 @@ export const TemaProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
+  // ⏰ F3.52 — tick del reloj para el modo horario
+  const [latidoHorario, setLatidoHorario] = useState(0);
+
   // Aplicar + persistir en cada cambio (instantáneo)
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -74,6 +80,16 @@ export const TemaProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const onChange = (e: MediaQueryListEvent) => setSistemaPrefiereClaro(e.matches);
     mq.addEventListener?.('change', onChange);
     return () => mq.removeEventListener?.('change', onChange);
+  }, [config.modo]);
+
+  // ⏰ F3.52 — Modo HORARIO: re-chequear el reloj cada minuto
+  // (con la app abierta, al cruzar la horaClaro/horaOscuro el
+  // tema cambia solo). latidoHorario fuerza el recompute del
+  // useMemo de abajo.
+  useEffect(() => {
+    if (config.modo !== 'horario' || typeof window === 'undefined') return;
+    const id = window.setInterval(() => setLatidoHorario((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
   }, [config.modo]);
 
   const actualizarConfig = useCallback((parcial: Partial<ConfigTema>) => {
@@ -95,8 +111,13 @@ export const TemaProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const modoEfectivo = useMemo(
-    () => resolverModo(config.modo, sistemaPrefiereClaro),
-    [config.modo, sistemaPrefiereClaro]
+    () =>
+      resolverModo(config.modo, sistemaPrefiereClaro, {
+        horaClaro: config.horaClaro,
+        horaOscuro: config.horaOscuro,
+      }),
+    // latidoHorario: re-evalúa el reloj cada minuto en modo horario
+    [config.modo, config.horaClaro, config.horaOscuro, sistemaPrefiereClaro, latidoHorario]
   );
 
   const valor = useMemo<ContextoTema>(
