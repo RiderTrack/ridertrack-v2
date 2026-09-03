@@ -11,6 +11,21 @@ export const ST_ENTREGADOS = [
   'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio',
 ];
 
+/** st que fallaron (nunca se cobraron) */
+export const ST_FALLIDOS = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'];
+
+/** ⚡ F3.50 — st que cobra la EMPRESA directa: NUNCA pasan por el
+ *  bolsillo del rider. La regla del usuario es EXPLÍCITA:
+ *  "solo efectivo y yape son míos, TODAS las demás son de empresa".
+ *  El bug del que nació esta fase: 'yape-plin' faltaba en las listas
+ *  de firestore.ts y stats.ts → al finalizar la ruta, la plata del
+ *  yape-plin de la empresa se sumaba como EFECTIVO DEL RIDER y le
+ *  descuadraba la caja (le "faltaban" S/ 60 al cuadrar). */
+export const ST_EMPRESA = ['empresa', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith'];
+
+/** st que la cobra el RIDER (efectivo en caja, su yape, o cambio) */
+export const ST_RIDER = ['efectivo', 'yape-rudy', 'cambio'];
+
 export const ETIQUETAS_METODO: Record<string, string> = {
   'efectivo': '💵 Efectivo',
   'yape-rudy': '📱 Yape Rudy',
@@ -56,6 +71,113 @@ export function registroHoyVivo(
     totalRider: tuyo,
     totalEmpresa: empresa,
     clientes: [],
+  };
+}
+
+// ── ⚡ F3.50: DESGLOSE DE COBROS — única fuente de verdad ──
+
+export interface DesgloseCobros {
+  entregados: number;
+  fallidos: number;
+  /** S/ que pasan por el RIDER (efectivo, yape-rudy, cambio, parte
+   *  efectivo del mixto, yape-efectivo con vuelto descontado) */
+  totalRider: number;
+  /** S/ que cobra la EMPRESA directa (pos, transferencia, yape-plin,
+   *  pago-link, jose-smith, empresa, parte digital del mixto) */
+  totalEmpresa: number;
+  /** S/ por método ('efectivo': 120, 'yape-plin': 60, …) */
+  porMetodo: Record<string, number>;
+  /** totalRider + totalEmpresa */
+  cobradoTotal: number;
+}
+
+/**
+ * ⚡ F3.50 — Calcula el desglose tuyo/empresa de una lista de
+ * clientes con las REGLAS CORRECTAS. Es la ÚNICA fuente de verdad:
+ * la usan finalizarRuta (firestore.ts, al cerrar la ruta),
+ * resumenDiaVivo (estadísticas en vivo) y conTotalesCorregidos
+ * (repara rutas viejas mal guardadas al leerlas).
+ *
+ * Reglas (las de siempre + el fix del yape-plin):
+ *   · mixto        → la parte efectivo (mEf) es tuya, la digital
+ *                    (mEmp) la cobra la empresa (como la v1)
+ *   · yape-efectivo→ mEf + mYp − vuelto (mVt), lo que queda es tuyo
+ *   · ST_EMPRESA   → TODO a la empresa (pos, transferencia,
+ *                    YAPE-PLIN ← el fix, pago-link, jose-smith, empresa)
+ *   · ST_RIDER     → todo tuyo (efectivo, yape-rudy, cambio)
+ *   · entregado desconocido → a la empresa: NUNCA inventamos
+ *     efectivo del rider (misma regla de seguridad de cajaCore)
+ */
+export function desglosarCobros(clientes: any[]): DesgloseCobros {
+  let entregados = 0, fallidos = 0;
+  let totalRider = 0, totalEmpresa = 0;
+  const porMetodo: Record<string, number> = {};
+
+  for (const c of clientes || []) {
+    const st = String(c?.st || '');
+    if (ST_FALLIDOS.includes(st)) { fallidos++; continue; }
+    if (!ST_ENTREGADOS.includes(st)) continue; // pendientes y otros
+    entregados++;
+    const cobrar = parseFloat(String(c.cobrar || 0));
+
+    if (st === 'mixto') {
+      // Como la v1: la parte en efectivo es tuya, la parte digital
+      // la cobra la empresa
+      const mEf = parseFloat(String(c.mEf || 0));
+      const mEmp = parseFloat(String(c.mEmp || 0));
+      porMetodo['mixto'] = (porMetodo['mixto'] || 0) + mEf;
+      totalRider += mEf;
+      totalEmpresa += mEmp;
+    } else if (st === 'yape-efectivo') {
+      // Como la v1: efectivo + yape − vuelto entregado
+      const m = Math.max(0, parseFloat(String(c.mEf || 0)) + parseFloat(String(c.mYp || 0)) - parseFloat(String(c.mVt || 0)));
+      porMetodo['yape-efectivo'] = (porMetodo['yape-efectivo'] || 0) + m;
+      totalRider += m;
+    } else if (ST_EMPRESA.includes(st)) {
+      porMetodo[st] = (porMetodo[st] || 0) + cobrar;
+      totalEmpresa += cobrar;
+    } else if (ST_RIDER.includes(st)) {
+      porMetodo[st] = (porMetodo[st] || 0) + cobrar;
+      totalRider += cobrar;
+    } else {
+      // Entregado con método desconocido → empresa (no inventar
+      // efectivo del rider: que no le vuelva a "faltar" plata)
+      porMetodo[st] = (porMetodo[st] || 0) + cobrar;
+      totalEmpresa += cobrar;
+    }
+  }
+
+  return {
+    entregados,
+    fallidos,
+    totalRider,
+    totalEmpresa,
+    porMetodo,
+    cobradoTotal: totalRider + totalEmpresa,
+  };
+}
+
+/**
+ * ⚡ F3.50 — REPARA rutas viejas mal guardadas (al leerlas).
+ * Las rutas cerradas ANTES de esta fase guardaron totalRider/
+ * totalEmpresa/porMetodo con el bug del yape-plin (contado como
+ * efectivo del rider). Este función recalcula la PLATA desde el
+ * snapshot de clientes de cada ruta — que siempre estuvo completo
+ * — y devuelve el registro con los totales CORREGIDOS. Así la ruta
+ * de HOY que ya cerraste se ve bien en Historial y Estadísticas sin
+ * tocar la base de datos. Los conteos (entregados/fallidos/
+ * pendientes) se respetan del documento original.
+ */
+export function conTotalesCorregidos<T extends RegistroLike>(reg: T): T {
+  const cl = reg?.clientes;
+  if (!Array.isArray(cl) || cl.length === 0) return reg;
+  const d = desglosarCobros(cl);
+  return {
+    ...reg,
+    totalRider: d.totalRider,
+    totalEmpresa: d.totalEmpresa,
+    porMetodo: d.porMetodo,
+    cobradoTotal: d.cobradoTotal,
   };
 }
 
@@ -346,19 +468,10 @@ export function fotosDeHistorial(
 
 /** S/ del día vivo (tuyo / empresa) desde la lista de clientes en curso */
 export function resumenDiaVivo(clientes: any[]): { entregas: number; tuyo: number; empresa: number } {
-  let entregas = 0, tuyo = 0, empresa = 0;
-  for (const c of clientes || []) {
-    if (!ST_ENTREGADOS.includes(c?.st)) continue;
-    entregas++;
-    const cobrar = parseFloat(String(c.cobrar || 0));
-    if (c.st === 'mixto') {
-      tuyo += parseFloat(String(c.mEf || 0));
-      empresa += parseFloat(String(c.mEmp || 0));
-    } else if (['empresa', 'pos', 'transferencia', 'pago-link', 'jose-smith'].includes(c.st)) {
-      empresa += cobrar;
-    } else {
-      tuyo += cobrar;
-    }
-  }
-  return { entregas, tuyo, empresa };
+  // ⚡ F3.50: usa desglosarCobros — misma fuente de verdad que el
+  // cierre de ruta. ANTES tenía su propia lista de empresa SIN
+  // 'yape-plin' → las estadísticas en vivo contaban el yape-plin de
+  // la empresa como plata TUYA.
+  const d = desglosarCobros(clientes);
+  return { entregas: d.entregados, tuyo: d.totalRider, empresa: d.totalEmpresa };
 }
