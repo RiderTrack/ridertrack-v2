@@ -28,6 +28,7 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import * as XLSX from 'xlsx';
+import { hoyISO } from '../utils/stats'; // ⚡ F3.48: fecha de Lima (fix día comido)
 
 // ═══════════════════════════════════════════════════════════
 // 📋 TIPOS DE CLIENTE
@@ -308,8 +309,8 @@ export async function finalizarRutaActiva(userId: string): Promise<void> {
  * consulta” y “Guardar y cerrar” ni siquiera guardaba en historial —
  * el usuario se quedaba con la lista vieja y sin historial.
  */
-export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
-  if (!db || !userId) return;
+export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<{ backupNube: boolean }> {
+  if (!db || !userId) return { backupNube: false };
   try {
     // 1. Calcular resumen del día
     const total = clientes.length;
@@ -328,7 +329,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     //  para la empresa — y yape-efectivo descuenta el vuelto. El
     //  snapshot de clientes ahora guarda mEf/mYp/mEmp/mVt para el
     //  Excel y el detalle.)
-    const fechaHoy = new Date().toISOString().split('T')[0];
+    const fechaHoy = hoyISO(); // ⚡ F3.48: HORA DE LIMA — antes usaba toISOString() (UTC) y después de las 7pm la ruta se guardaba como MAÑANA
 
     // Desglose por método de pago (reglas del cierre de la v1)
     const porMetodo: Record<string, number> = {};
@@ -410,7 +411,12 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     }));
 
     // 2b. ☁️ Backup automático a la nube (v1: _backupAutoAlCerrar).
-    //     Si falla, NO bloquea el cierre — el historial ya está guardado.
+    //     ⚡ F3.48: ahora se guarda en DOS sitios y ya NO falla en silencio:
+    //       · usuarios/{uid}/backups/auto_{fecha} → igual que la v1 (legacy)
+    //       · backups_v2 → el que VE la pantalla ☁️ Backups (chip "auto")
+    //     Si ambos fallan, NO bloquea el cierre — el historial ya está guardado,
+    //     pero ahora el usuario se entera (toast en el cierre de la ruta).
+    let backupNube = false;
     try {
       await setDoc(doc(db, 'usuarios', userId, 'backups', `auto_${fechaHoy}`), limpiarUndefined({
         cl: clientesSnapshot,
@@ -422,9 +428,32 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
         tipo: 'cierre-ruta',
         creadoAt: new Date().toISOString(),
       }), { merge: true });
-      console.log('☁️ Backup automático de cierre guardado (auto_' + fechaHoy + ')');
+      backupNube = true;
+      console.log('☁️ Backup automático de cierre guardado (auto_' + fechaHoy + ') — ruta v1');
     } catch (e) {
-      console.warn('⚠️ Backup de cierre falló (el historial SÍ se guardó):', (e as Error).message);
+      console.warn('⚠️ Backup de cierre (ruta v1) falló — el historial SÍ se guardó:', (e as Error).message);
+    }
+    try {
+      await setDoc(doc(db, 'backups_v2', `${userId}_${Date.now()}`), limpiarUndefined({
+        uid: userId,
+        creadoAt: new Date().toISOString(),
+        fecha: fechaHoy,
+        hora: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+        totalClientes: total,
+        entregados,
+        fallidos,
+        pendientes: total - entregados - fallidos,
+        cobradoTotal: cobrado,
+        totalRider,
+        totalEmpresa,
+        clientes: clientesSnapshot,
+        auto: true,
+        tipo: 'cierre-ruta',
+      }));
+      backupNube = true;
+      console.log('☁️ Backup automático de cierre guardado en backups_v2 (visible en ☁️ Backups)');
+    } catch (e) {
+      console.warn('⚠️ Backup de cierre (backups_v2) falló — el historial SÍ se guardó:', (e as Error).message);
     }
 
     // 2c. Registrar clientes (respaldo histórico — como hacía
@@ -476,6 +505,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     }
 
     console.log('🏁 Ruta finalizada: historial + backup nube + lista limpia');
+    return { backupNube };
   } catch (e) {
     console.error('❌ Error finalizando ruta:', e);
     throw e;
@@ -488,7 +518,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
  * + lista limpia). Antes guardaba en clientes_registrados pero NO en
  * el historial y dejaba la lista sucia — confundía al usuario.
  */
-export async function guardarYCerrarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<void> {
+export async function guardarYCerrarRuta(userId: string, clientes: Cliente[], tiempoRutaMs?: number): Promise<{ backupNube: boolean }> {
   return finalizarRuta(userId, clientes, tiempoRutaMs);
 }
 
@@ -1841,7 +1871,7 @@ export async function guardarBackupNube(
   const backup: Omit<BackupNube, 'id'> & { id?: string } = {
     uid: userId,
     creadoAt: ahora.toISOString(),
-    fecha: ahora.toISOString().split('T')[0],
+    fecha: hoyISO(), // ⚡ F3.48: fecha de Lima (antes UTC: después de 7pm quedaba con fecha de mañana)
     hora: ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
     totalClientes: clientes.length,
     entregados,
@@ -1857,14 +1887,18 @@ export async function guardarBackupNube(
   return id;
 }
 
-/** Lista los backups del usuario (los últimos 40) */
+/** Lista los backups del usuario (los últimos 40) — ⚡ F3.48:
+ *  ahora UNE los de backups_v2 (la pantalla) con los auto-cierres de
+ *  usuarios/{uid}/backups (la ruta que usaba la v1 y que la pantalla
+ *  nunca mostró). Si una colección falla (permisos), la otra sigue. */
 export async function listarBackupsNube(userId: string, max = 40): Promise<BackupNube[]> {
   if (!db || !userId) return [];
+  const backups: BackupNube[] = [];
+  // 1) backups_v2 — manual + auto-cierre (F3.48)
   try {
     const ref = collection(db, 'backups_v2');
     const q = query(ref, limit(200));
     const snap = await getDocs(q);
-    const backups: BackupNube[] = [];
     snap.forEach((d) => {
       const data = d.data() as any;
       if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
@@ -1883,19 +1917,58 @@ export async function listarBackupsNube(userId: string, max = 40): Promise<Backu
         auto: data.auto,
       });
     });
-    backups.sort((a, b) => (b.creadoAt || '').localeCompare(a.creadoAt || ''));
-    return backups.slice(0, max);
   } catch (e) {
-    console.error('❌ Error listando backups:', e);
-    return [];
+    console.error('❌ Error listando backups_v2:', e);
   }
+  // 2) ⚡ F3.48: auto-cierres de la ruta v1 (usuarios/{uid}/backups) —
+  //    los que guardaba la v1 en la nube y que esta pantalla NUNCA mostró
+  try {
+    const snapV1 = await getDocs(query(collection(db, 'usuarios', userId, 'backups'), limit(80)));
+    snapV1.forEach((d) => {
+      const data = d.data() as any;
+      // Solo los auto-cierre (los docs .hist gigantes son para el importador de la v1)
+      if (!data?.auto || !data?.fecha) return;
+      const reg = data.registro || {};
+      const regFecha = data.registro?.fecha || data.fecha;
+      const total = Number(data.clientes) || 0;
+      // Des-duplicar: el mismo cierre se guarda en ambas colecciones desde F3.48
+      const dupe = backups.some(
+        (b) => b.fecha === regFecha && b.hora === (data.hora || '') && b.totalClientes === total,
+      );
+      if (dupe) return;
+      backups.push({
+        id: d.id,
+        uid: userId,
+        creadoAt: data.creadoAt || `${regFecha}T${(data.hora || '00:00')}:00`,
+        fecha: regFecha,
+        hora: data.hora || '',
+        totalClientes: total,
+        entregados: Number(reg.entregados) || 0,
+        pendientes: Math.max(0, total - (Number(reg.entregados) || 0) - (Number(reg.fallidos) || 0)),
+        fallidos: Number(reg.fallidos) || 0,
+        cobradoTotal: Number(reg.cobradoTotal) || 0,
+        clientes: Array.isArray(data.cl) ? data.cl : [],
+        auto: true,
+      });
+    });
+  } catch (e) {
+    console.warn('⚠️ No se pudieron leer los backups v1 (permisos o vacío):', (e as Error).message);
+  }
+  backups.sort((a, b) => (b.creadoAt || '').localeCompare(a.creadoAt || ''));
+  return backups.slice(0, max);
 }
 
-/** Elimina un backup de la nube */
-export async function eliminarBackupNube(backupId: string): Promise<void> {
+/** Elimina un backup de la nube — ⚡ F3.48: prueba en las DOS rutas
+ *  (backups_v2 y usuarios/{uid}/backups) porque el backup puede vivir
+ *  en cualquiera de las dos. */
+export async function eliminarBackupNube(backupId: string, userId?: string): Promise<void> {
   if (!db) return;
   try {
     await deleteDoc(doc(db, 'backups_v2', backupId));
+    // Si también existe la copia v1 del mismo cierre, borrarla
+    if (userId) {
+      try { await deleteDoc(doc(db, 'usuarios', userId, 'backups', backupId)); } catch { /* no existe o sin permiso → ok */ }
+    }
     console.log('🗑️ Backup eliminado');
   } catch (e) {
     console.error('❌ Error eliminando backup:', e);
