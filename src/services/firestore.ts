@@ -28,7 +28,7 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import * as XLSX from 'xlsx';
-import { hoyISO } from '../utils/stats'; // ⚡ F3.48: fecha de Lima (fix día comido)
+import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
 
 // ═══════════════════════════════════════════════════════════
 // 📋 TIPOS DE CLIENTE
@@ -314,12 +314,6 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
   try {
     // 1. Calcular resumen del día
     const total = clientes.length;
-    const entregados = clientes.filter(c =>
-      ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st)
-    ).length;
-    const fallidos = clientes.filter(c =>
-      ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
-    ).length;
 
     // 2. Guardar registro en historial_rutas
     // (Fase 2.5: ID único por cierre con timestamp — antes era
@@ -329,39 +323,22 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     //  para la empresa — y yape-efectivo descuenta el vuelto. El
     //  snapshot de clientes ahora guarda mEf/mYp/mEmp/mVt para el
     //  Excel y el detalle.)
+    // ⚡ F3.50: el desglose tuyo/empresa sale de desglosarCobros
+    //  (stats.ts) — ÚNICA fuente de verdad, las mismas reglas que
+    //  las estadísticas en vivo y la caja. ANTES aquí había una
+    //  lista propia ST_EMPRESA sin 'yape-plin' → al cerrar la ruta,
+    //  el Yape/Plin de la EMPRESA se sumaba como efectivo del
+    //  RIDER y descuadraba la caja al cuadrar (bug real reportado:
+    //  José Smith sí se descontaba, Yape Plin no).
     const fechaHoy = hoyISO(); // ⚡ F3.48: HORA DE LIMA — antes usaba toISOString() (UTC) y después de las 7pm la ruta se guardaba como MAÑANA
 
-    // Desglose por método de pago (reglas del cierre de la v1)
-    const porMetodo: Record<string, number> = {};
-    const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
-    const ST_EMPRESA = ['empresa', 'pos', 'transferencia', 'pago-link', 'jose-smith'];
-    let totalEmpresa = 0;
-    let totalRider = 0;
-    for (const c of clientes) {
-      if (!ST_ENTREGADOS.includes(c.st)) continue;
-      const cobrar = parseFloat(String(c.cobrar || 0));
-      if (c.st === 'mixto') {
-        // Como la v1: la parte en efectivo es tuya, la parte
-        // digital la paga la empresa (tE += mEmp)
-        const mEf = parseFloat(String(c.mEf || 0));
-        const mEmp = parseFloat(String(c.mEmp || 0));
-        porMetodo['mixto'] = (porMetodo['mixto'] || 0) + mEf;
-        totalRider += mEf;
-        totalEmpresa += mEmp;
-      } else if (c.st === 'yape-efectivo') {
-        // Como la v1: efectivo + yape − vuelto entregado
-        const m = Math.max(0, parseFloat(String(c.mEf || 0)) + parseFloat(String(c.mYp || 0)) - parseFloat(String(c.mVt || 0)));
-        porMetodo['yape-efectivo'] = (porMetodo['yape-efectivo'] || 0) + m;
-        totalRider += m;
-      } else if (ST_EMPRESA.includes(c.st)) {
-        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
-        totalEmpresa += cobrar;
-      } else {
-        porMetodo[c.st] = (porMetodo[c.st] || 0) + cobrar;
-        totalRider += cobrar;
-      }
-    }
-    const cobrado = totalRider + totalEmpresa;
+    const desglose = desglosarCobros(clientes);
+    const entregados = desglose.entregados;
+    const fallidos = desglose.fallidos;
+    const porMetodo = desglose.porMetodo;
+    const totalEmpresa = desglose.totalEmpresa;
+    const totalRider = desglose.totalRider;
+    const cobrado = desglose.cobradoTotal;
 
     // Snapshot de clientes (mismo formato que viaja al historial,
     // al backup de la nube y a clientes_registrados)
@@ -1575,7 +1552,13 @@ export async function leerHistorial(userId: string, max = 300): Promise<Registro
       const data = d.data() as any;
       // Solo docs de este usuario (ID empieza con su uid o campo uid igual)
       if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
-      registros.push({
+      // ⚡ F3.50 — REPARACIÓN EN LECTURA: las rutas cerradas antes de
+      // la F3.50 guardaron totalRider/totalEmpresa/porMetodo con el
+      // bug del yape-plin (contado como efectivo del rider). El
+      // snapshot de clientes SIEMPRE estuvo completo → se recalcula
+      // la plata desde ahí con las reglas corregidas y la ruta se ve
+      // bien en Historial/Estadísticas SIN tocar la base de datos.
+      registros.push(conTotalesCorregidos<RegistroHistorial>({
         id: d.id,
         uid: data.uid || userId,
         fecha: data.fecha || d.id.replace(`${userId}_`, '').slice(0, 10),
@@ -1594,7 +1577,7 @@ export async function leerHistorial(userId: string, max = 300): Promise<Registro
         v1Id: data.v1Id,
         km: data.km,
         tiempoRuta: data.tiempoRuta,
-      });
+      }));
     });
     registros.sort((a, b) => {
       const ka = a.finalizadaAt || a.iniciadaAt || a.fecha || '';
