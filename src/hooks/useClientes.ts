@@ -18,6 +18,7 @@ import {
   subirFotoEntrega,
   encolarAccionBot,
   _botCel,
+  guardarAutoBackupVivo,
 } from '../services/firestore';
 import {
   batchGeocodificar,
@@ -394,6 +395,37 @@ export function useClientes() {
   const guardarYCerrarRutaActual = useCallback(async () => {
     return finalizarRutaActual();
   }, [finalizarRutaActual]);
+
+  // ⚡ F3.53 — RESPALDO VIVO EN LA NUBE (cada 15 min):
+  // mientras haya ruta activa, guarda un ÚNICO doc por día con el
+  // estado más reciente (backups_v2/{uid}_{fecha}_auto, merge — no
+  // acumula docs). Solo escribe si algo CAMBIÓ desde el último
+  // respaldo (hash de estados/montos) → 0 writes extra si no hay
+  // movimiento. Si el celu se pierde a media ruta, ese doc es el que
+  // te salva en ☁️ Backups (chip “auto · vivo”).
+  // Silencioso por diseño: los fallos (permisos/red) solo van a
+  // consola — el aviso real de permisos está en el toast del cierre.
+  useEffect(() => {
+    if (!user) return;
+    let hashUltimo = '';
+    const INTERVALO_MIN = 15;
+    const tic = async () => {
+      try {
+        const lista = clientesRutaRef.current;
+        if (!lista || lista.length === 0) return;
+        const hash = lista
+          .map((c) => `${c.id}:${c.st}:${c.cobrar}`)
+          .join('|');
+        if (hash === hashUltimo) return; // sin cambios → no escribir
+        const ok = await guardarAutoBackupVivo(user.uid, lista);
+        if (ok) hashUltimo = hash;
+      } catch {
+        /* nunca romper la app por un respaldo */
+      }
+    };
+    const t = setInterval(tic, INTERVALO_MIN * 60 * 1000);
+    return () => clearInterval(t);
+  }, [user]);
 
   // 🗑️ LIMPIAR SIN GUARDAR: vacía ruta_activa y estado local
   const limpiarRuta = useCallback(async () => {
