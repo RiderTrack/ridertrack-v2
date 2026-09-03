@@ -2559,9 +2559,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 '¿Continuar?'
               )) return;
               try {
-                await finalizarRutaActual();
-                // F3.41: aviso del resumen diario — la última milla del día
-                onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Jornada hablada)', 'success');
+                // ⚡ F3.48: el toast ahora avisa si el backup de la nube
+                // se guardó — antes fallaba en silencio y nunca te enterabas
+                const res = await finalizarRutaActual();
+                if (res?.backupNube) {
+                  onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial + ☁️ backup automático en la nube — manda tu resumen (☰ → Resumen WhatsApp)', 'success');
+                } else {
+                  onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial — ⚠️ el backup de la nube NO se pudo guardar, avísame para revisarlo', 'warning');
+                }
               } catch (e: any) {
                 onShowToast?.('❌ Error', e.message || 'No se pudo finalizar', 'error');
               }

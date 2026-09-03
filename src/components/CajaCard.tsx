@@ -34,6 +34,7 @@ import {
   EstadoCaja,
 } from '../services/caja';
 import { Cliente, leerHistorial, subscribeToRutaActiva } from '../services/firestore';
+import { hoyISO } from '../utils/stats'; // ⚡ F3.48: hoy en hora de Lima
 import { enviarAGrupoMate } from '../utils/chatBaileys';
 import {
   CATEGORIAS_GASTO,
@@ -71,7 +72,7 @@ async function asegurarCerrados(uid: string): Promise<Cliente[]> {
   if (_cargandoCerrados) return _cargandoCerrados;
   _cargandoCerrados = (async () => {
     try {
-      const hoy = new Date().toISOString().split('T')[0];
+      const hoy = hoyISO(); // ⚡ F3.48: hoy en Lima (antes UTC: la caja de "hoy" cambiaba de día después de 7pm)
       const registros = await leerHistorial(uid, 40);
       const deHoy: Cliente[] = [];
       for (const r of registros) {

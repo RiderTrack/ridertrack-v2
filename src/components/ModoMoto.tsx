@@ -304,10 +304,14 @@ export const ModoMotoOverlay: React.FC<ModoMotoOverlayProps> = ({
     if (!confirm('¿Finalizar la ruta de hoy?\n\nSe guarda en el historial y la lista queda limpia para mañana.')) return;
     setFinalizando(true);
     try {
-      await finalizarRutaActual();
+      // ⚡ F3.48: aviso del backup de la nube (antes fallaba en silencio)
+      const res = await finalizarRutaActual();
       setRecienFinalizada(true);
-      // F3.41: aviso del resumen diario — la última milla del día
-      onShowToast?.('🏁 Ruta finalizada', 'Buen trabajo — manda tu resumen (☰ → Resumen WhatsApp) y escúchalo (☰ → Jornada hablada)', 'success');
+      if (res?.backupNube) {
+        onShowToast?.('🏁 Ruta finalizada', 'Historial + ☁️ backup automático guardado — buen trabajo', 'success');
+      } else {
+        onShowToast?.('🏁 Ruta finalizada', 'Guardada en el historial — ⚠️ el backup de la nube falló, avísame', 'warning');
+      }
     } finally {
       setFinalizando(false);
     }

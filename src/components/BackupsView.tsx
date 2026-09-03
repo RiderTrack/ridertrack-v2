@@ -88,7 +88,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
   const eliminar = async (b: BackupNube) => {
     if (!confirm(`¿Eliminar el backup del ${b.fecha} ${b.hora}?\n\n(${b.totalClientes} clientes · S/ ${b.cobradoTotal.toFixed(2)})\n\nNo se puede deshacer.`)) return;
     try {
-      await eliminarBackupNube(b.id);
+      await eliminarBackupNube(b.id, user.uid); // ⚡ F3.48: borra en las dos rutas
       setBackups((prev) => prev.filter((x) => x.id !== b.id));
       onShowToast?.('🗑️ Backup eliminado', `Backup del ${b.fecha} ${b.hora} borrado`, 'info');
     } catch (e: any) {
@@ -132,7 +132,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
             </div>
             <div>
               <h1 className="text-lg font-black text-white leading-tight">Backups en la Nube</h1>
-              <p className="text-[11px] text-slate-400">Respaldos de tu ruta guardados en Firebase — nada de archivos</p>
+              <p className="text-[11px] text-slate-400">Respaldos manuales y automáticos — cada 🏁 cierre de ruta se respalda solo (F3.48)</p>
             </div>
           </div>
           <button
@@ -212,7 +212,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
                         <span className="text-[11px] text-slate-400">{b.hora}</span>
                         {b.auto && (
                           <span className="px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[8px] font-bold">
-                            auto
+                            auto · cierre
                           </span>
                         )}
                       </div>

@@ -48,6 +48,7 @@ import {
   importarHistorialV1,
 } from '../services/firestore';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
+import { hoyISO } from '../utils/stats'; // ⚡ F3.48: hoy en hora de Lima
 import { exportarExcelRuta } from '../utils/exportarExcel';
 
 type PeriodoFiltro = 'hoy' | '7d' | '30d' | 'todo';
@@ -197,7 +198,7 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
       const t = new Date(clave).getTime();
       if (isNaN(t)) return false;
       if (periodo === 'hoy') {
-        const hoyStr = new Date().toISOString().split('T')[0];
+        const hoyStr = hoyISO(); // ⚡ F3.48: hoy en Lima (antes UTC: después de 7pm "hoy" era mañana)
         return r.fecha === hoyStr;
       }
       return ahora - t <= dias * 24 * 60 * 60 * 1000;
@@ -966,7 +967,7 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
                 <div className="min-w-0">
                   <h3 className="text-sm font-black text-white leading-tight">📅 Cambiar fecha de la ruta</h3>
                   <p className="text-[10px] text-slate-400 truncate capitalize">
-                    Hoy está: {fechaBonita(fechaModal.ruta.fecha)}
+                    Está en: {fechaBonita(fechaModal.ruta.fecha)} · hoy es: {fechaBonita(hoyISO())}
                   </p>
                 </div>
               </div>
@@ -996,7 +997,10 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
               />
             </div>
 
-            {/* Atajos */}
+            {/* Atajos — ⚡ F3.48: ahora cada botón muestra el DÍA DE LA SEMANA
+                y la fecha exacta que va a poner. (Antes solo decían
+                "Hoy/Ayer/Anteayer" y si la ruta estaba en el día equivocado
+                era fácil caer en el día de atrás sin darte cuenta.) */}
             <div className="flex gap-2">
               {[
                 { label: 'Hoy', dias: 0 },
@@ -1006,17 +1010,19 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
                 const d = new Date();
                 d.setDate(d.getDate() + atajo.dias);
                 const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const sub = d.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric', month: 'short' });
                 return (
                   <button
                     key={atajo.label}
                     onClick={() => setFechaModal((prev) => (prev ? { ...prev, valor: iso } : null))}
-                    className={`flex-1 py-2 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                    className={`flex-1 py-1.5 rounded-lg border transition-all active:scale-95 ${
                       fechaModal.valor === iso
                         ? 'bg-violet-600 border-violet-500 text-white'
                         : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    {atajo.label}
+                    <div className="text-[11px] font-bold leading-tight">{atajo.label}</div>
+                    <div className="text-[9px] opacity-70 leading-tight">{sub}</div>
                   </button>
                 );
               })}

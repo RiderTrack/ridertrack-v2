@@ -61,6 +61,7 @@ import {
   DiaAgregado,
   fechaCorta,
   fechaLarga,
+  fechaLimaISO,
   agregarPorDias,
   sumarKmYTiempo,
   compararSemanas,
@@ -148,7 +149,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
   // ── Agregado por día dentro del periodo ──
   const dias = useMemo<DiaAgregado[]>(() => {
     const limite = PERIODOS.find(p => p.id === periodo)?.dias || 0;
-    const desde = limite > 0 ? new Date(Date.now() - limite * 86400000).toISOString().split('T')[0] : '0000';
+    const desde = limite > 0 ? fechaLimaISO(new Date(Date.now() - limite * 86400000)) : '0000';
     return agregarPorDias(registrosConHoy, desde);
   }, [registrosConHoy, periodo]);
 
@@ -176,7 +177,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
   // ── Métodos de pago acumulados (pie) ──
   const datosPie = useMemo(() => {
     const limite = PERIODOS.find(p => p.id === periodo)?.dias || 0;
-    const desde = limite > 0 ? new Date(Date.now() - limite * 86400000).toISOString().split('T')[0] : '0000';
+    const desde = limite > 0 ? fechaLimaISO(new Date(Date.now() - limite * 86400000)) : '0000';
     return acumularMetodos(registrosConHoy, desde);
   }, [registrosConHoy, periodo]);
 
