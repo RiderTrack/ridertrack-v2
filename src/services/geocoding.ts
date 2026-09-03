@@ -34,7 +34,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { getGoogleApiKey } from './googleMaps';
-import { extraerCoordenadas } from '../utils/direcciones';
+import { extraerCoordenadas, detectarCoordenadas } from '../utils/direcciones';
 
 // Re-exports para compatibilidad (SettingsView y otros los usan)
 export { getGoogleApiKey, setGoogleApiKey, motorActivo } from './googleMaps';
@@ -993,6 +993,98 @@ export async function detalleLugarGoogle(
   }
 }
 
+export interface ResultadoInversa {
+  lat: number;
+  lng: number;
+  /** Dirección legible real ("Av. Las Palmeras 567, Los Olivos…") */
+  direccion: string;
+  distrito?: string;
+}
+
+/**
+ * 🧭 F3.49 — GEOCODIFICACIÓN INVERSA: de coordenadas exactas a
+ * dirección legible. La usan los puntos donde entran coordenadas
+ * pegadas (buscarDirecciones, geocodificarTextoCompleto y el banner
+ * "ya mandó su ubicación" del UbicarClienteModal) para ponerle una
+ * ETIQUETA REAL al pin en vez de "-11.988690,-77.078981" crudo.
+ *
+ * Motor: el MISMO Geocoding API que ya usa la app, pero con el
+ * parámetro `latlng` en vez de `address` → ⚠️ NO hay que habilitar
+ * absolutamente nada nuevo en Google Cloud. Si Google falla o no
+ * hay key → Nominatim reverse (gratis, con su rate limit).
+ */
+export async function geocodificarInversa(
+  lat: number,
+  lng: number
+): Promise<ResultadoInversa | null> {
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+
+  // 1) Google Geocoding API (endpoint latlng — mismo API de siempre)
+  const key = getGoogleApiKey();
+  if (key) {
+    try {
+      const url =
+        `https://maps.googleapis.com/maps/api/geocode/json` +
+        `?latlng=${lat},${lng}&language=es&region=pe&key=${encodeURIComponent(key)}`;
+      const res = await fetchConTimeout(url, 8000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
+          const r = data.results[0];
+          let distrito: string | undefined;
+          for (const comp of r.address_components || []) {
+            const tipos: string[] = comp.types || [];
+            if (tipos.includes('locality') || tipos.includes('administrative_area_level_3')) {
+              distrito = String(comp.long_name || comp.short_name || '');
+              break;
+            }
+          }
+          return {
+            lat,
+            lng,
+            direccion: String(r.formatted_address || ''),
+            distrito,
+          };
+        }
+      }
+    } catch {
+      /* cae a Nominatim */
+    }
+  }
+
+  // 2) Nominatim reverse (respaldo gratis)
+  try {
+    const url =
+      `https://nominatim.openstreetmap.org/reverse` +
+      `?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=es`;
+    const res = await conRateLimitNominatim(() => fetchConTimeout(url, 8000));
+    if (res.ok) {
+      const data = await res.json();
+      if (data && !data.error && (data.display_name || data.address)) {
+        const a = data.address || {};
+        const distrito =
+          a.suburb || a.city_district || a.city || a.town || undefined;
+        return {
+          lat,
+          lng,
+          direccion: String(data.display_name || ''),
+          distrito: distrito ? String(distrito) : undefined,
+        };
+      }
+    }
+  } catch {
+    /* sin etiqueta */
+  }
+
+  // 3) Honestidad: la coordenada pura como etiqueta (el pin sigue EXACTO)
+  return {
+    lat,
+    lng,
+    direccion: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+    distrito: undefined,
+  };
+}
+
 export interface TextoGeocodificado {
   lat: number;
   lng: number;
@@ -1017,6 +1109,26 @@ export async function geocodificarTextoCompleto(
 ): Promise<TextoGeocodificado | null> {
   const t = (texto || '').trim();
   if (!t) return null;
+
+  // ⚡ F3.49 — ¿el texto trae COORDENADAS pegadas (par puro, link de
+  // Google Maps, formato !3d!4d…)? → posición EXACTA tal cual +
+  // etiqueta real por geocodificación inversa. NUNCA mandar
+  // "-11.988690,-77.078981" a una BÚSQUEDA de dirección: Google lo
+  // interpreta como texto suelto y devuelve basura a kilómetros de
+  // distancia (otro distrito). Es exactamente lo que hacía Circuit
+  // bien y la app mal.
+  const coords = detectarCoordenadas(t);
+  if (coords) {
+    const inv = await geocodificarInversa(coords.lat, coords.lng);
+    return {
+      lat: coords.lat,
+      lng: coords.lng,
+      direccion: inv?.direccion || `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`,
+      distrito: inv?.distrito || dist,
+      parcial: false, // coordenada exacta: no hay nada difuso
+    };
+  }
+
   const key = getGoogleApiKey();
   if (!key) return null;
 
@@ -1160,6 +1272,30 @@ export async function buscarDirecciones(
 ): Promise<DireccionSugerida[]> {
   const t = (texto || '').trim();
   if (t.length < 3) return [];
+
+  // ⚡ F3.49 — ¿el texto trae COORDENADAS pegadas? (par puro
+  // "-11.988690,-77.078981", link de Google Maps, %2C, formato
+  // @, !3d!4d…). → Resultado ÚNICO y EXACTO: la coordenada tal
+  // cual (el pin cae donde ES) + etiqueta real por geocodificación
+  // inversa. Antes este texto caía al buscador libre de
+  // Places/Nominatim, que lo interpretaba como texto suelto y
+  // devolvía basura difusa a kilómetros (Carabayllo, Villa El
+  // Salvador…). Así es como lo resuelve Circuit: coordenada
+  // adentro = coordenada exacta, punto.
+  const coords = detectarCoordenadas(t);
+  if (coords) {
+    const inv = await geocodificarInversa(coords.lat, coords.lng);
+    return [
+      {
+        etiqueta: inv?.direccion || `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`,
+        detalle: inv?.distrito ? `${inv.distrito}, Lima` : 'Coordenada exacta',
+        distrito: inv?.distrito,
+        lat: coords.lat,
+        lng: coords.lng,
+        origen: getGoogleApiKey() ? 'google' : 'nominatim',
+      },
+    ];
+  }
 
   // ── Motor 1: Google Places Autocomplete (Fase 2.0) ──────
   // El mismo motor que usa Circuit — precisión total en Lima.
