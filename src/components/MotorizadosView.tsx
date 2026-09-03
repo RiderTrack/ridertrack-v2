@@ -39,7 +39,8 @@ import {
   Route as RouteIcon,
 } from 'lucide-react';
 import { Order } from '../types';
-import { Coordenadas, vigilarPosicion } from '../services/geocoding';
+import { Coordenadas } from '../services/geocoding';
+import { useVelocimetro } from '../hooks/useVelocimetro';
 import { getEstiloMapa, tilesDeEstilo, setEstiloMapa, EstiloMapa } from '../services/mapStyle';
 import { urlNavegacion } from '../services/navegacion';
 import { AvatarSvg } from '../data/avatars';
@@ -177,14 +178,20 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
   const [mapaListo, setMapaListo] = useState(false);
   const apiKey = getGoogleApiKey();
 
-  // ── Estado GPS ────────────────────────────────────────────
-  const [gpsEstado, setGpsEstado] = useState<'buscando' | 'ok' | 'no'>('buscando');
-  const [miPosicion, setMiPosicion] = useState<Coordenadas | null>(null);
-  const [reintentosGPS, setReintentosGPS] = useState(0);
-  const [velocidad, setVelocidad] = useState(0);
-  const [rumbo, setRumbo] = useState<number | null>(null);
+  // ⚡ Fase 3.36: el velocímetro vive en useVelocimetro — doppler
+  // del chip GPS (o Pitágoras CORRECTO entre fixes) + odómetro del
+  // día. El cálculo manual de antes (√(a³+b³) + Δt por Date.now())
+  // marcaba 5-10 km/h yendo a 40-50 — eliminado.
+  const velo = useVelocimetro(true);
+  const gpsEstado: 'buscando' | 'ok' | 'no' =
+    velo.estado === 'ok' ? 'ok' : velo.estado === 'no' ? 'no' : 'buscando';
+  const miPosicion = velo.posicion;
+  const velocidad = velo.kmh;
+  const rumbo = velo.rumbo;
   const [ultimaVez, setUltimaVez] = useState<Date | null>(null);
-  const prevPosRef = useRef<{ c: Coordenadas; t: number } | null>(null);
+  useEffect(() => {
+    if (velo.posicion) setUltimaVez(new Date());
+  }, [velo.posicion]);
 
   // ── Modo seguir ───────────────────────────────────────────
   const [seguir, setSeguir] = useState(true);
@@ -355,40 +362,12 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
     }
   }, [estilo, motor, mapaListo]);
 
-  // ── Efecto 4: GPS en vivo + cálculo de velocidad/rumbo ────
-  useEffect(() => {
-    setGpsEstado('buscando');
-    const detener = vigilarPosicion(
-      (c) => {
-        const ahora = Date.now();
-        const prev = prevPosRef.current;
-        if (prev) {
-          const dt = (ahora - prev.t) / 1000;
-          if (dt > 0.5) {
-            const dLat = ((c.lat - prev.c.lat) * Math.PI) / 180;
-            const dLng = ((c.lng - prev.c.lng) * Math.PI) / 180;
-            const mLat = dLat * 111320;
-            const mLng = dLng * 111320 * Math.cos((c.lat * Math.PI) / 180);
-            const distM = Math.sqrt(mLat * m2(mLat) + mLng * m2(mLng));
-            const kmh = (distM / dt) * 3.6;
-            if (distM > 4) {
-              setVelocidad(Math.max(0, Math.min(120, kmh)));
-              const grados = (Math.atan2(mLng, mLat) * 180) / Math.PI;
-              setRumbo((r) => suavizarRumbo(r, grados));
-            } else {
-              setVelocidad(0);
-            }
-          }
-        }
-        prevPosRef.current = { c, t: ahora };
-        setMiPosicion(c);
-        setUltimaVez(new Date());
-        setGpsEstado('ok');
-      },
-      () => setGpsEstado((p) => (p === 'ok' ? 'ok' : 'no'))
-    );
-    return detener;
-  }, [reintentosGPS]);
+  // ── Efecto 4: GPS en vivo ── REEMPLAZADO por useVelocimetro ──
+  // (F3.36) El efecto original calculaba la velocidad con
+  // √(a·a² + b·b²) — NO es Pitágoras — y medía el Δt con el reloj
+  // de RECEPCIÓN, no el timestamp del fix. Además ignoraba la
+  // velocidad doppler que da el chip. Todo eso ahora vive en
+  // src/utils/velocidad.ts + hooks/useVelocimetro.ts.
 
   // ── Efecto 5 (GOOGLE): paradas + banderas + vista inicial ──
   useEffect(() => {
@@ -784,15 +763,22 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
                   {gpsEstado === 'buscando' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {gpsEstado === 'ok' && <Crosshair className="w-3.5 h-3.5" />}
                   {gpsEstado === 'no' && (
-                    <button onClick={() => setReintentosGPS((n) => n + 1)} className="flex items-center gap-1.5">
+                    <button onClick={velo.reintentar} className="flex items-center gap-1.5">
                       <RefreshCw className="w-3.5 h-3.5" /> Sin GPS · Reintentar
                     </button>
                   )}
                   {gpsEstado !== 'no' && (gpsEstado === 'ok' ? 'GPS activo' : 'Buscando GPS…')}
                 </span>
 
-                {/* Velocidad en vivo */}
-                <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-bold tabular-nums">
+                {/* Velocidad en vivo (F3.36: doppler del chip GPS) */}
+                <span
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-bold tabular-nums"
+                  title={
+                    velo.usaDoppler
+                      ? '⚡ Medida directa del chip GPS (doppler) — la misma tecnología que usa Waze'
+                      : '📐 Calculada entre puntos GPS (Pitágoras) con suavizado'
+                  }
+                >
                   <Gauge className="w-3.5 h-3.5" /> {Math.round(velocidad)} km/h
                 </span>
 
@@ -915,12 +901,20 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
               </div>
             </div>
 
-            {/* Mini stats */}
-            <div className="grid grid-cols-3 gap-2 mt-3">
+            {/* Mini stats (F3.36: + odómetro del día — km RECORRIDOS, no de la ruta) */}
+            <div className="grid grid-cols-4 gap-2 mt-3">
               <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/60 text-center">
                 <p className="text-[9px] uppercase font-bold text-slate-500">Velocidad</p>
                 <p className="text-sm font-black text-indigo-400 tabular-nums">{Math.round(velocidad)}</p>
                 <p className="text-[8px] text-slate-500">km/h</p>
+              </div>
+              <div
+                className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/60 text-center"
+                title="Kilómetros que llevas recorridos HOY con el GPS encendido — se guarda aunque cierres la app"
+              >
+                <p className="text-[9px] uppercase font-bold text-slate-500">Hoy</p>
+                <p className="text-sm font-black text-sky-400 tabular-nums">{velo.kmHoy.toFixed(1)}</p>
+                <p className="text-[8px] text-slate-500">km hechos</p>
               </div>
               <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/60 text-center">
                 <p className="text-[9px] uppercase font-bold text-slate-500">Paradas</p>
@@ -955,16 +949,5 @@ export const MotorizadosView: React.FC<MotorizadosViewProps> = ({ orders, onShow
   );
 };
 
-// ── helpers de velocidad/rumbo ──
-function m2(x: number): number {
-  return x * x;
-}
-
-/** Suaviza el rumbo para que la flecha no salte (interp. angular) */
-function suavizarRumbo(prev: number | null, nuevo: number): number {
-  if (prev == null) return nuevo;
-  let diff = nuevo - prev;
-  while (diff > 180) diff -= 360;
-  while (diff < -180) diff += 360;
-  return (prev + diff * 0.6 + 360) % 360;
-}
+// ── (F3.36: los helpers de velocidad/rumbo viven ahora en
+//    src/utils/velocidad.ts — matemática pura y testeada) ──

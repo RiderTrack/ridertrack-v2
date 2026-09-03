@@ -12,8 +12,6 @@
 //     el tiempo se descuenta automáticamente de tu hora final.
 //   · Lista completa: dirección, distrito, precio, método y
 //     estado de cada cliente, en orden de entrega.
-//   · (F3.38) Los CLIENTES van primero: el odómetro quedó como
-//     tira compacta y el mantenimiento vive en el menú ☰.
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -33,11 +31,9 @@ import {
   Square,
   Settings2,
   AlertCircle,
+  Gauge,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-// F3.38: 🛣️ odómetro GPS en tira compacta (toca para calibrar) —
-// los clientes van PRIMERO; el mantenimiento vive en el menú ☰
-import { OdometroMini } from './OdometroCard';
 import {
   construirLinkSeguimiento,
   mensajeSeguimiento,
@@ -45,15 +41,6 @@ import {
 } from '../utils/seguimientoLink';
 import { useClientes } from '../hooks/useClientes';
 import type { Cliente } from '../services/firestore';
-// 🙏 F3.44: botoncito por cliente para el "gracias por tu compra"
-import { encolarAccionBot, _botCel } from '../services/firestore';
-import {
-  ModoAvisoEntrega,
-  ETIQUETA_MODO,
-  modoAvisoDe,
-  claveAviso,
-  registrarAvisoEnviado,
-} from '../utils/avisoEntrega';
 import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
 // ⏱️ ETA estilo Circuit (Fase 2.9): viaje entre paradas + ritmo real
 import {
@@ -65,11 +52,10 @@ import {
   VELOCIDAD_OPCIONES,
   VELOCIDAD_ETIQUETAS,
 } from '../utils/etaRuta';
+import { useVelocimetro } from '../hooks/useVelocimetro';
 
 interface SeguimientoViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
-  /** F3.40: activa el 🏍️ Modo Moto (botones gigantes) */
-  onActivarModoMoto?: () => void;
 }
 
 const ST_ENTREGADOS = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'];
@@ -110,9 +96,9 @@ function celNormalizado(cel: string | number | undefined | null): string {
 
 type Filtro = 'todos' | 'pendientes' | 'entregados' | 'fallidos';
 
-export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, onActivarModoMoto }) => {
-  const { user, profile } = useAuth();
-  const { clientes, loading, stats, actualizarCliente } = useClientes();
+export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast }) => {
+  const { user } = useAuth();
+  const { clientes, loading, stats } = useClientes();
   const { crono, rutaMs } = useCronoRuta(user?.uid);
   const refri = useRefrigerio(user?.uid);
   // 🚀 Hora de inicio de jornada (Fase 2.8): "empiezo a las 10" →
@@ -131,6 +117,29 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
   // 🚦 Velocidad según tráfico (Fase 2.9) — para el viaje entre paradas
   const [velocidadKmh, setVelocidadKmh] = useState<number>(() => leerVelocidadKmh());
 
+  // ⚡ VELOCÍMETRO REAL (Fase 3.36): km/h medida por el chip GPS
+  // (doppler — como Waze) + odómetro del día. Se enciende/apaga
+  // con el chip del hero y queda FLOTANDO abajo a la derecha
+  // para verlo mientras conduces sin hacer scroll.
+  const VELO_ON_KEY = 'rt_velocimetro_on';
+  const [veloOn, setVeloOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rt_velocimetro_on') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const velo = useVelocimetro(veloOn);
+  const toggleVelo = () =>
+    setVeloOn((v) => {
+      try {
+        localStorage.setItem(VELO_ON_KEY, v ? '0' : '1');
+      } catch {}
+      return !v;
+    });
+  const colorVel =
+    velo.kmh > 60 ? 'text-red-400' : velo.kmh > 35 ? 'text-amber-300' : velo.kmh > 1 ? 'text-emerald-300' : 'text-slate-300';
+
   const [ajusteRitmoAbierto, setAjusteRitmoAbierto] = useState(false);
   const [refriPanelAbierto, setRefriPanelAbierto] = useState(false);
   const [filtro, setFiltro] = useState<Filtro>('todos');
@@ -138,10 +147,6 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
   const [duracionProg, setDuracionProg] = useState<number>(30);
   const [inicioPanelAbierto, setInicioPanelAbierto] = useState(false);
   const [horaInicioEdit, setHoraInicioEdit] = useState<string>('');
-
-  // 🙏 F3.44: modal del botoncito de aviso por cliente
-  const [avisoModalId, setAvisoModalId] = useState<string | number | null>(null);
-  const avisoCliente = avisoModalId != null ? clientes.find((c) => c.id === avisoModalId) || null : null;
 
   // Cargar valores programados al panel
   useEffect(() => {
@@ -282,70 +287,6 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
       return;
     }
     window.open(`https://wa.me/${tel}`, '_blank');
-  };
-
-  // ═══ 🙏 F3.44: acciones del bot desde el Seguimiento (como el
-  // Control de la v1 — "gracias por tu compra", voy en camino) ═══
-  const enviarAccionAviso = async (
-    c: Cliente,
-    tipo: string,
-    extra?: Record<string, unknown>
-  ) => {
-    if (!user) {
-      onShowToast?.('Error', 'No hay sesión activa', 'error');
-      return;
-    }
-    const telefono = _botCel(c.cel || '');
-    if (!telefono) {
-      onShowToast?.('Sin celular', `${c.nombre || 'El cliente'} no tiene celular válido`, 'warning');
-      return;
-    }
-    try {
-      await encolarAccionBot(user.uid, {
-        tipo,
-        clienteId: c.id,
-        telefono,
-        nombre: c.nombre || 'Cliente',
-        prod: c.prod || '',
-        cobrar: parseFloat(String(c.cobrar || 0)),
-        dir: c.dir || '',
-        dist: c.dist || '',
-        st: c.st || 'pendiente',
-        rider: {
-          nombre: profile?.nombre || 'Rudy',
-          telefono: profile?.email || '',
-          empresa: 'MATE',
-        },
-        ...extra,
-      });
-      if (tipo === 'avisar_entrega') {
-        // Guard anti-doble: si luego marcas entregado, no se repite
-        registrarAvisoEnviado(claveAviso(c.cel));
-        // 🙏 F3.46 — ficha marcada "ya le llegó su gracias" (persistente)
-        actualizarCliente(c.id, { graciasEnviado: true });
-      }
-      onShowToast?.(
-        tipo === 'avisar_entrega' ? '🙏 Gracias enviado' : '🤖 Bot',
-        tipo === 'avisar_entrega'
-          ? `El bot le manda el mensajito a ${c.nombre || 'el cliente'}`
-          : `Acción enviada: ${tipo}`,
-        'success'
-      );
-    } catch (e: any) {
-      onShowToast?.('Error', e?.message || 'No se pudo enviar', 'error');
-    }
-  };
-
-  // 🙏 F3.44: fijar el modo de aviso de ESTE cliente (se guarda
-  // en su ficha — sobrevive al cierre de la ruta de hoy)
-  const fijarModoAviso = (c: Cliente, modo: ModoAvisoEntrega) => {
-    actualizarCliente(c.id, { aviso: modo });
-    setAvisoModalId(null);
-    onShowToast?.(
-      '🙏 Aviso de entrega',
-      `${c.nombre || 'Cliente'}: ${ETIQUETA_MODO[modo].largo}`,
-      'success'
-    );
   };
 
   // ── 🔗 Compartir link de seguimiento en vivo (Fase 2.15) ──
@@ -595,20 +536,24 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                   : `Sin refrigerio programado · no suma ${refri.refri.duracionMin} min`}
               </button>
             )}
+            {/* ⚡ F3.36: velocímetro en vivo — tócalo para encender/apagar */}
+            <button
+              onClick={toggleVelo}
+              className={`flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] font-bold transition-colors active:scale-95 ${
+                veloOn
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                  : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-300'
+              }`}
+              title={
+                veloOn
+                  ? '⚡ Velocímetro encendido (GPS) — tócalo para apagar. El número flota abajo a la derecha mientras conduces'
+                  : '⚡ Encender el velocímetro: km/h en vivo con tu GPS + kilometraje del día'
+              }
+            >
+              <Gauge className="w-3 h-3" />
+              {veloOn ? `${Math.round(velo.kmh)} km/h` : 'Velocímetro'}
+            </button>
             <div className="ml-auto flex items-center gap-1.5">
-              {/* 🏍️ F3.40: Modo Moto — botones gigantes para conducir.
-                  Lo natural: terminas de armar tu ruta aquí y SALES
-                  a repartir → un toque y la app se vuelve manejable
-                  con guantes / en el manubrio. */}
-              {onActivarModoMoto && calculo.pendientes.length > 0 && (
-                <button
-                  onClick={onActivarModoMoto}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black bg-amber-500 hover:bg-amber-400 border-amber-400 text-black transition-all active:scale-95 shadow-md shadow-amber-500/20"
-                  title="Pantalla de conducción: botones gigantes (navegar, cobrar, llamar)"
-                >
-                  🏍️ Modo moto
-                </button>
-              )}
               <button
                 onClick={() => {
                   setInicioPanelAbierto(!inicioPanelAbierto);
@@ -739,6 +684,146 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
             <p className="text-[10px] text-slate-500 leading-snug">
               Cuando inicies el cronómetro o registres tu primera entrega, el cálculo pasa
               automáticamente a tu ritmo real.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ══════ 🍽️ REFRIGERIO ══════ */}
+      <div id="refri-card" className={`rounded-2xl border p-3.5 transition-colors ${
+        refri.activo
+          ? 'border-orange-500/50 bg-orange-500/10'
+          : 'border-slate-700/60 bg-slate-900/60'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+            refri.activo
+              ? 'bg-orange-500/20 border-orange-500/40 animate-pulse'
+              : 'bg-slate-800 border-slate-700'
+          }`}>
+            <UtensilsCrossed className={`w-5 h-5 ${refri.activo ? 'text-orange-400' : 'text-slate-400'}`} />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            {refri.activo ? (
+              <>
+                <p className="text-xs font-bold text-orange-300">Refrigerio en curso 🍽️</p>
+                <p className="text-2xl font-black text-white tabular-nums leading-tight">
+                  {formatearDuracion(refri.segundosRestantes)}
+                  <span className="text-xs font-medium text-slate-400 ml-1.5">restantes</span>
+                </p>
+                <p className="text-[10px] text-slate-500">Reloj de ruta pausado — reanuda solo al terminar</p>
+              </>
+            ) : refri.refri.estado === 'terminado' ? (
+              <>
+                <p className="text-xs font-bold text-white">Refrigerio tomado ✓</p>
+                <p className="text-sm text-slate-400">
+                  {formatearDuracion(refri.totalTomadoSeg)} en total
+                  {refri.refri.sesiones.length > 1 ? ` · ${refri.refri.sesiones.length} pausas` : ''}
+                </p>
+              </>
+            ) : refri.refri.programadoHora ? (
+              <>
+                <p className="text-xs font-bold text-white">Refrigerio programado</p>
+                <p className="text-sm text-slate-400">
+                  🕐 {refri.refri.programadoHora} · {refri.refri.duracionMin} min
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-white">Horario de refrigerio</p>
+                <p className="text-sm text-slate-400">Programa tu pausa y se descuenta de tu hora de fin</p>
+              </>
+            )}
+          </div>
+
+          {/* Botones de acción */}
+          <div className="flex flex-col gap-1.5 flex-shrink-0">
+            {refri.activo ? (
+              <button
+                onClick={terminarRefrigerio}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-all active:scale-95"
+              >
+                <Square className="w-3.5 h-3.5" /> Terminar
+              </button>
+            ) : (
+              <>
+                {calculo.pendientes.length > 0 && (
+                  <button
+                    onClick={iniciarRefrigerio}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-bold transition-all active:scale-95"
+                  >
+                    <Play className="w-3.5 h-3.5" /> Iniciar
+                  </button>
+                )}
+                <button
+                  onClick={() => setRefriPanelAbierto(!refriPanelAbierto)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold transition-all active:scale-95"
+                >
+                  {refriPanelAbierto ? 'Cerrar' : 'Programar'}
+                  <ChevronDown className={`w-3 h-3 transition-transform ${refriPanelAbierto ? 'rotate-180' : ''}`} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Panel de programación */}
+        {refriPanelAbierto && !refri.activo && (
+          <div className="mt-3 rounded-xl bg-slate-800/80 border border-slate-700 p-3 space-y-3">
+            <div>
+              <p className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">¿A qué hora piensas tomarlo?</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={horaProg}
+                  onChange={(e) => setHoraProg(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[10px] text-slate-500">(opcional)</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">¿Cuánto tiempo?</p>
+              <div className="flex flex-wrap gap-1.5">
+                {DURACION_REFRI_OPCIONES.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDuracionProg(d)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
+                      duracionProg === d
+                        ? 'bg-orange-600 border-orange-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {d} min
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={guardarProgramacionRefri}
+                className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all active:scale-95"
+              >
+                Guardar
+              </button>
+              {refri.refri.estado === 'terminado' && (
+                <button
+                  onClick={() => {
+                    refri.reiniciar();
+                    setHoraProg('');
+                    onShowToast?.('Refrigerio reiniciado', 'Puedes programar otro horario', 'info');
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold transition-all active:scale-95"
+                >
+                  Reiniciar día
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 leading-snug">
+              Al pulsar "Iniciar", el cronómetro de ruta se pausa automáticamente y arranca la cuenta regresiva
+              del refrigerio. Al terminar, la ruta sigue corriendo donde la dejaste.
             </p>
           </div>
         )}
@@ -907,10 +992,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                     </p>
                   </div>
 
-                  {/* Botones rápidos 2×2: 📞 💬 / 🙏 🔗 (F3.44: el
-                      botoncito del aviso por cliente — reemplaza al
-                      Control de la v1; el link va con o sin celular) */}
-                  <div className="grid grid-cols-2 gap-1 flex-shrink-0">
+                  {/* Botones rápidos 📞 WA 🔗 (el link funciona con o sin celular) */}
+                  <div className="flex flex-col gap-1 flex-shrink-0">
                     {tel && (
                       <>
                         <button
@@ -930,19 +1013,6 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
                       </>
                     )}
                       <button
-                        onClick={() => setAvisoModalId(c.id)}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold border transition-all active:scale-90 ${
-                          modoAvisoDe(c.aviso) === 'auto_imagen'
-                            ? 'bg-emerald-500/15 border-emerald-500/50'
-                            : modoAvisoDe(c.aviso) === 'auto_texto'
-                            ? 'bg-amber-500/15 border-amber-500/50'
-                            : 'bg-slate-700 border-slate-600'
-                        } ${c.graciasEnviado ? 'opacity-50' : ''}`}
-                        title={`Aviso al entregar — ${ETIQUETA_MODO[modoAvisoDe(c.aviso)].largo}${c.graciasEnviado ? ' · ya recibió su gracias ✓' : ''}`}
-                      >
-                        {c.graciasEnviado ? '🙏✓' : '🙏'}
-                      </button>
-                      <button
                         onClick={() => compartirSeguimiento(c)}
                         disabled={compartiendo}
                         className="w-8 h-8 rounded-full bg-sky-600/90 hover:bg-sky-500 flex items-center justify-center text-white transition-all active:scale-90 disabled:opacity-60"
@@ -958,254 +1028,6 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
         )}
       </div>
 
-      {/* ══════ 🛣️ ODÓMETRO GPS — tira compacta (Fase 3.38):
-          toca para calibrar · el mantenimiento vive en el menú ☰ ══════ */}
-      <OdometroMini uid={user?.uid} onShowToast={onShowToast} />
-
-      {/* ══════ 🍽️ REFRIGERIO ══════ */}
-      <div id="refri-card" className={`rounded-2xl border p-3.5 transition-colors ${
-        refri.activo
-          ? 'border-orange-500/50 bg-orange-500/10'
-          : 'border-slate-700/60 bg-slate-900/60'
-      }`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${
-            refri.activo
-              ? 'bg-orange-500/20 border-orange-500/40 animate-pulse'
-              : 'bg-slate-800 border-slate-700'
-          }`}>
-            <UtensilsCrossed className={`w-5 h-5 ${refri.activo ? 'text-orange-400' : 'text-slate-400'}`} />
-          </div>
-
-          <div className="flex-1 min-w-0">
-            {refri.activo ? (
-              <>
-                <p className="text-xs font-bold text-orange-300">Refrigerio en curso 🍽️</p>
-                <p className="text-2xl font-black text-white tabular-nums leading-tight">
-                  {formatearDuracion(refri.segundosRestantes)}
-                  <span className="text-xs font-medium text-slate-400 ml-1.5">restantes</span>
-                </p>
-                <p className="text-[10px] text-slate-500">Reloj de ruta pausado — reanuda solo al terminar</p>
-              </>
-            ) : refri.refri.estado === 'terminado' ? (
-              <>
-                <p className="text-xs font-bold text-white">Refrigerio tomado ✓</p>
-                <p className="text-sm text-slate-400">
-                  {formatearDuracion(refri.totalTomadoSeg)} en total
-                  {refri.refri.sesiones.length > 1 ? ` · ${refri.refri.sesiones.length} pausas` : ''}
-                </p>
-              </>
-            ) : refri.refri.programadoHora ? (
-              <>
-                <p className="text-xs font-bold text-white">Refrigerio programado</p>
-                <p className="text-sm text-slate-400">
-                  🕐 {refri.refri.programadoHora} · {refri.refri.duracionMin} min
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-xs font-bold text-white">Horario de refrigerio</p>
-                <p className="text-sm text-slate-400">Programa tu pausa y se descuenta de tu hora de fin</p>
-              </>
-            )}
-          </div>
-
-          {/* Botones de acción */}
-          <div className="flex flex-col gap-1.5 flex-shrink-0">
-            {refri.activo ? (
-              <button
-                onClick={terminarRefrigerio}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-all active:scale-95"
-              >
-                <Square className="w-3.5 h-3.5" /> Terminar
-              </button>
-            ) : (
-              <>
-                {calculo.pendientes.length > 0 && (
-                  <button
-                    onClick={iniciarRefrigerio}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-bold transition-all active:scale-95"
-                  >
-                    <Play className="w-3.5 h-3.5" /> Iniciar
-                  </button>
-                )}
-                <button
-                  onClick={() => setRefriPanelAbierto(!refriPanelAbierto)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold transition-all active:scale-95"
-                >
-                  {refriPanelAbierto ? 'Cerrar' : 'Programar'}
-                  <ChevronDown className={`w-3 h-3 transition-transform ${refriPanelAbierto ? 'rotate-180' : ''}`} />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Panel de programación */}
-        {refriPanelAbierto && !refri.activo && (
-          <div className="mt-3 rounded-xl bg-slate-800/80 border border-slate-700 p-3 space-y-3">
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">¿A qué hora piensas tomarlo?</p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="time"
-                  value={horaProg}
-                  onChange={(e) => setHoraProg(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-[10px] text-slate-500">(opcional)</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">¿Cuánto tiempo?</p>
-              <div className="flex flex-wrap gap-1.5">
-                {DURACION_REFRI_OPCIONES.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDuracionProg(d)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all active:scale-95 ${
-                      duracionProg === d
-                        ? 'bg-orange-600 border-orange-500 text-white'
-                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {d} min
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={guardarProgramacionRefri}
-                className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all active:scale-95"
-              >
-                Guardar
-              </button>
-              {refri.refri.estado === 'terminado' && (
-                <button
-                  onClick={() => {
-                    refri.reiniciar();
-                    setHoraProg('');
-                    onShowToast?.('Refrigerio reiniciado', 'Puedes programar otro horario', 'info');
-                  }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold transition-all active:scale-95"
-                >
-                  Reiniciar día
-                </button>
-              )}
-            </div>
-            <p className="text-[10px] text-slate-500 leading-snug">
-              Al pulsar "Iniciar", el cronómetro de ruta se pausa automáticamente y arranca la cuenta regresiva
-              del refrigerio. Al terminar, la ruta sigue corriendo donde la dejaste.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* ══════ 🙏 F3.44 — MODAL DEL BOTONCITO: cómo avisarle a ESTE
-          cliente cuando su pedido pasa a entregado (restaura el
-          Control de mensajes de la v1: automático / manual…) ══════ */}
-      {avisoCliente && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setAvisoModalId(null)}
-        >
-          <div
-            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm space-y-3 max-h-[88vh] overflow-y-auto custom-scrollbar"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">🙏 Aviso al entregar</h3>
-              <button onClick={() => setAvisoModalId(null)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="text-xs text-slate-400">
-              Cliente: <span className="text-white font-bold">{avisoCliente.nombre}</span>
-              {avisoCliente.cel ? <span className="text-slate-500"> · 📱 {avisoCliente.cel}</span> : <span className="text-red-400"> · sin celular</span>}
-            </div>
-
-            {/* Modo: automático / manual */}
-            <div className="text-[10px] uppercase font-bold text-slate-500 pt-1">
-              Cuando lo marques ENTREGADO (cualquier método)
-            </div>
-            <div className="space-y-2">
-              {(['auto_imagen', 'auto_texto', 'manual'] as ModoAvisoEntrega[]).map((m) => {
-                const activo = modoAvisoDe(avisoCliente.aviso) === m;
-                return (
-                  <button
-                    key={m}
-                    onClick={() => fijarModoAviso(avisoCliente, m)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-all border ${
-                      activo
-                        ? m === 'auto_imagen'
-                          ? 'bg-emerald-500/15 border-emerald-500 text-emerald-400'
-                          : m === 'auto_texto'
-                          ? 'bg-amber-500/15 border-amber-500 text-amber-400'
-                          : 'bg-slate-700/50 border-slate-500 text-slate-200'
-                        : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    <span className="text-lg">{ETIQUETA_MODO[m].icono}</span>
-                    <div className="text-left flex-1">
-                      <div>{ETIQUETA_MODO[m].largo}</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        {m === 'auto_imagen'
-                          ? 'El bot le manda la tarjeta "gracias por tu compra" con imagen'
-                          : m === 'auto_texto'
-                          ? 'El mensajito de gracias, sin imagen'
-                          : 'La app no manda nada — tú decides cuándo'}
-                      </div>
-                    </div>
-                    {activo && <Check className="w-4 h-4 flex-shrink-0" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Mandar ahora */}
-            <div className="text-[10px] uppercase font-bold text-slate-500 pt-2">Mandar ahora</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => {
-                  void enviarAccionAviso(avisoCliente, 'avisar_entrega', { enviar_imagen: true, modo_entrega: 'auto_imagen' });
-                  setAvisoModalId(null);
-                }}
-                className="py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95"
-              >
-                📷 Con imagen
-              </button>
-              <button
-                onClick={() => {
-                  void enviarAccionAviso(avisoCliente, 'avisar_entrega', { enviar_imagen: false, modo_entrega: 'auto_texto' });
-                  setAvisoModalId(null);
-                }}
-                className="py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold transition-all active:scale-95"
-              >
-                📝 Solo texto
-              </button>
-            </div>
-
-            {/* Voy en camino */}
-            <div className="text-[10px] uppercase font-bold text-slate-500 pt-2">Avisar que voy en camino</div>
-            <div className="grid grid-cols-3 gap-2">
-              {['5', '10', '15', '20', '30', '45'].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => {
-                    void enviarAccionAviso(avisoCliente, 'avisar_siguiente', { minutos: parseInt(m) });
-                    setAvisoModalId(null);
-                  }}
-                  className="py-2.5 rounded-xl border-2 border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-sm hover:bg-blue-500/20 transition-all active:scale-95"
-                >
-                  {m} <span className="text-[10px]">min</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Nota al pie */}
       {!rutaVacia && !rutaTerminada && (
         <p className="text-[10px] text-slate-500 text-center px-4 leading-snug">
@@ -1213,6 +1035,40 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast, o
           tu ritmo real: si vas más rápido, la hora de fin va bajando solita (como en Circuit) — y si
           programas tu refrigerio 🍽️ (abajo), sus minutos se suman automáticamente cada día.
         </p>
+      )}
+
+      {/* ⚡ CHIP FLOTANTE de velocidad (F3.36) — siempre visible,
+          chiquito, arriba del menú inferior. Solo cuando está
+          encendido. Tócalo para apagarlo. */}
+      {veloOn && (
+        <button
+          onClick={toggleVelo}
+          className="fixed bottom-20 sm:bottom-6 right-3 z-40 select-none active:scale-95 transition-transform"
+          title="Velocímetro en vivo — tócalo para apagarlo"
+        >
+          <div
+            className={`px-3.5 py-2.5 rounded-2xl border shadow-2xl backdrop-blur-md bg-slate-900/90 ${
+              velo.kmh > 1 ? 'border-indigo-500/50' : 'border-slate-700'
+            }`}
+          >
+            <div className="flex items-baseline gap-1.5">
+              <span className={`text-2xl font-black tabular-nums leading-none ${colorVel}`}>
+                {Math.round(velo.kmh)}
+              </span>
+              <span className="text-[9px] font-bold text-slate-400">km/h</span>
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <span className="text-[9px] font-bold text-slate-400 tabular-nums whitespace-nowrap">
+                {velo.kmHoy.toFixed(1)} km hoy
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  velo.estado === 'ok' ? 'bg-emerald-400 animate-pulse' : velo.estado === 'buscando' ? 'bg-amber-400' : 'bg-red-500'
+                }`}
+              />
+            </div>
+          </div>
+        </button>
       )}
     </div>
   );

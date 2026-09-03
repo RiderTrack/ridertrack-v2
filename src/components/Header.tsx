@@ -32,10 +32,6 @@ interface HeaderProps {
   onAbrirAvatarPicker?: () => void;
   /** Fase 3.17: click en una notificación de chat → abre el chat */
   onNotificationClick?: (n: AppNotification) => void;
-  /** F3.40: 🏍️ Modo Moto — botón siempre visible para activarlo
-   * (conducción con botones gigantes y alto contraste) */
-  modoMotoActivo?: boolean;
-  onToggleModoMoto?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -51,8 +47,6 @@ export const Header: React.FC<HeaderProps> = ({
   riderAvatar,
   onAbrirAvatarPicker,
   onNotificationClick,
-  modoMotoActivo,
-  onToggleModoMoto,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
@@ -136,7 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Fase 3.5: el número de FASE visible en el badge — así
                   siempre sabemos qué build estás probando (F3.14 = fase 3.14) */}
               <span className="hidden sm:inline-block px-1.5 py-0.2 text-[10px] font-black rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                V2.4 · F3.46
+                V2.4 · F3.36
               </span>
             </div>
             <span className="text-[10px] text-slate-400 font-medium hidden sm:block">
@@ -184,21 +178,6 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
           <span className="text-[9px] text-slate-400 uppercase tracking-wider">{currentDate}</span>
         </div>
-
-        {/* 🏍️ F3.40: Modo Moto — pantalla de conducción con botones
-            gigantes. Visible SIEMPRE (móvil incluido): es el acceso
-            rápido para colgar el teléfono en el manubrio. */}
-        <button
-          onClick={onToggleModoMoto}
-          className={`p-2 rounded-xl border transition-all active:scale-95 ${
-            modoMotoActivo
-              ? 'bg-amber-500 border-amber-400 text-black shadow-lg shadow-amber-500/30 animate-pulse'
-              : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-amber-400'
-          }`}
-          title={modoMotoActivo ? 'Salir del Modo Moto' : 'Modo Moto: botones grandes para conducir'}
-        >
-          <span className="text-lg leading-none block w-5 h-5 flex items-center justify-center font-black">🏍️</span>
-        </button>
 
         {/* Dark/Light Theme Toggle */}
         <button
