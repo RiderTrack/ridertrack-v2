@@ -229,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.49</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.50</span>
         </div>
         <button
           onClick={onCloseMobile}
