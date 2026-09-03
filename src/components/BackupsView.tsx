@@ -33,6 +33,7 @@ import {
   listarBackupsNube,
   eliminarBackupNube,
   cargarBackupNube,
+  importarHistorialV1,
 } from '../services/firestore';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
 
@@ -51,6 +52,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
   const [guardando, setGuardando] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [cargandoId, setCargandoId] = useState<string | null>(null);
+  const [importandoV1, setImportandoV1] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!user) return;
@@ -121,6 +123,41 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
     [backups]
   );
 
+  // ⚡ F3.53 — RECUPERAR HISTORIAL DE LA V1: importa TODAS las rutas
+  // que la versión 1 guardó en la nube (usuarios/{uid}.hist + backups
+  // .hist) al Historial de la v2 (docs v1_{id}, sin repetir). No toca
+  // la ruta actual — es solo para el historial/estadísticas.
+  const recuperarV1 = async () => {
+    if (!user || importandoV1) return;
+    if (!confirm(
+      '📥 ¿Recuperar el historial de la versión 1?\n\n' +
+      'Se buscan TODAS las rutas que la v1 guardó en la nube (con la\n' +
+      'misma cuenta) y se agregan al Historial (☰ → Historial).\n\n' +
+      '· Las que ya importaste NO se repiten\n' +
+      '· Tu ruta ACTUAL no se toca\n' +
+      '· Puedes correrlo cuando quieras'
+    )) return;
+    setImportandoV1(true);
+    try {
+      const res = await importarHistorialV1(user.uid);
+      if (res.totalV1 === 0) {
+        onShowToast?.('Sin historial v1', 'No se encontraron rutas de la versión 1 en la nube', 'info');
+      } else if (res.importadas === 0) {
+        onShowToast?.('Ya está al día', `Las ${res.totalV1} rutas de la v1 ya estaban importadas`, 'info');
+      } else {
+        onShowToast?.(
+          '📥 Historial v1 recuperado',
+          `${res.importadas} de ${res.totalV1} rutas agregadas (${res.fuente}) — míralas en ☰ → Historial`,
+          'success'
+        );
+      }
+    } catch (e: any) {
+      onShowToast?.('Error', e?.message || 'No se pudo importar el historial v1', 'error');
+    } finally {
+      setImportandoV1(false);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
@@ -132,7 +169,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
             </div>
             <div>
               <h1 className="text-lg font-black text-white leading-tight">Backups en la Nube</h1>
-              <p className="text-[11px] text-slate-400">Respaldos manuales y automáticos — cada 🏁 cierre de ruta se respalda solo (F3.48)</p>
+              <p className="text-[11px] text-slate-400">Respaldos automáticos y manuales — 🏁 cada cierre + 💾 vivo cada 15 min (F3.53)</p>
             </div>
           </div>
           <button
@@ -178,6 +215,16 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
           {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
           {guardando ? 'Guardando…' : '💾 GUARDAR BACKUP AHORA'}
         </button>
+
+        {/* ⚡ F3.53 — Recuperar historial de la v1 */}
+        <button
+          onClick={recuperarV1}
+          disabled={importandoV1}
+          className="w-full mt-2 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 transition-all active:scale-95 disabled:opacity-50"
+        >
+          {importandoV1 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
+          {importandoV1 ? 'Recuperando…' : '📥 RECUPERAR HISTORIAL DE LA VERSIÓN 1'}
+        </button>
       </div>
 
       {/* Lista de backups */}
@@ -210,9 +257,20 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-white">🗓️ {b.fecha}</span>
                         <span className="text-[11px] text-slate-400">{b.hora}</span>
+                        {b.origen === 'v1' && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[8px] font-bold">
+                            v1
+                          </span>
+                        )}
                         {b.auto && (
-                          <span className="px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[8px] font-bold">
-                            auto · cierre
+                          <span
+                            className={`px-1.5 py-0.5 rounded border text-[8px] font-bold ${
+                              b.tipo === 'auto-guardado'
+                                ? 'bg-teal-500/15 border-teal-500/30 text-teal-400'
+                                : 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+                            }`}
+                          >
+                            {b.tipo === 'auto-guardado' ? 'auto · vivo' : 'auto · cierre'}
                           </span>
                         )}
                       </div>
@@ -290,6 +348,15 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
       {/* Ayuda */}
       <div className="rounded-xl bg-slate-800/60 border border-slate-700/60 p-3 space-y-2">
         <div className="flex items-start gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            <strong className="text-slate-200">Auto-guardado vivo (F3.53):</strong> cada 15 min, mientras
+            tu ruta tiene movimiento, se sube un respaldo con lo último (chip «auto · vivo»). El 🏁 cierre
+            de ruta también respalda solo (chip «auto · cierre»), y los de la <strong className="text-amber-400">v1</strong> se
+            recuperan con el botón ámbar de arriba.
+          </p>
+        </div>
+        <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <p className="text-[10px] text-slate-400 leading-relaxed">
             <strong className="text-slate-200">⬆️ Cargar</strong> reemplaza tu ruta actual por la del backup.
@@ -297,7 +364,7 @@ export const BackupsView: React.FC<BackupsViewProps> = ({ onShowToast }) => {
           </p>
         </div>
         <div className="flex items-start gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+          <Cloud className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
           <p className="text-[10px] text-slate-400 leading-relaxed">
             Los backups guardan TODO: clientes, estados de pago, coordenadas GPS y observaciones.
             En total tienes {totalRespaldo} clientes respaldados en {backups.length} backups.
