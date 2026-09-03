@@ -353,8 +353,10 @@ export function useClientes() {
   // historial + backup nube + lista LIMPIA para mañana.
   // (Fase 2.6 fix: antes dejaba la lista sucia "para consulta" y el
   //  usuario arrastraba los pedidos del día anterior.)
-  const finalizarRutaActual = useCallback(async () => {
-    if (!user || clientes.length === 0) return;
+  // ⚡ F3.48: devuelve si el backup de la nube se pudo guardar —
+  // para avisarle al usuario en vez de fallar en silencio.
+  const finalizarRutaActual = useCallback(async (): Promise<{ ok: boolean; backupNube: boolean }> => {
+    if (!user || clientes.length === 0) return { ok: false, backupNube: false };
     setSincronizando(true);
     try {
       // ⏱ Duración de la ruta según el cronómetro (como la v1:
@@ -370,7 +372,7 @@ export function useClientes() {
         }
       } catch {}
 
-      await finalizarRuta(user.uid, clientes, tiempoRutaMs || undefined);
+      const res = await finalizarRuta(user.uid, clientes, tiempoRutaMs || undefined);
 
       // 🧹 Lista limpia YA (el listener lo confirmará con el doc vacío)
       setClientes([]);
@@ -380,7 +382,7 @@ export function useClientes() {
       try { localStorage.removeItem(`rt_crono_${user.uid}`); } catch {}
       window.dispatchEvent(new CustomEvent('rt-ruta-finalizada'));
 
-      return true;
+      return { ok: true, backupNube: res.backupNube };
     } finally {
       setSincronizando(false);
     }
