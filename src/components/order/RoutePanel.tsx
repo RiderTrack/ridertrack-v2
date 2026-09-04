@@ -5,10 +5,8 @@ import {
   Share2,
   Copy,
   Check,
-  Compass,
   Clock,
   Bike,
-  ExternalLink,
   Smartphone,
 } from 'lucide-react';
 import { Order, Driver } from '../../types';
@@ -155,18 +153,36 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
         </div>
       </Card>
 
-      {/* Simulated Map Visualizer Frame */}
-      <div className="relative h-44 w-full rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950 flex flex-col items-center justify-center p-4 text-center">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px]" />
-        
-        <div className="relative z-10 space-y-2">
-          <div className="w-10 h-10 rounded-full bg-blue-600/30 border border-blue-500 flex items-center justify-center mx-auto text-blue-400 animate-pulse">
-            <Compass className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs font-bold text-white">Telemetría Geográfica Activada</p>
-            <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
-              Ruta optimizada vía algoritmo Waze/Google Maps Traffic Matrix
+      {/* ⚡ F3.59: MAPA REAL (antes era un cuadradito decorativo
+          "Simulated Map Visualizer" que no mostraba nada). Ahora
+          un embed de Google Maps: usa las COORDENADAS del pedido
+          si ya fueron geolocalizadas, y si no, busca la dirección.
+          Se puede tocar, mover y hacer zoom como en Google Maps. */}
+      <div className="relative h-44 w-full rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950">
+        {order.lat != null && order.lng != null ? (
+          <iframe
+            title={`Mapa de ${order.cliente}`}
+            src={`https://maps.google.com/maps?q=${order.lat},${order.lng}&z=16&output=embed`}
+            className="w-full h-full border-0"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        ) : (
+          <iframe
+            title={`Mapa de ${order.cliente}`}
+            src={`https://maps.google.com/maps?q=${fullAddressQuery}&z=16&output=embed`}
+            className="w-full h-full border-0"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        )}
+        {/* Etiqueta flotante con la dirección (para contexto) */}
+        <div className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none">
+          <div className="px-2.5 py-1.5 rounded-lg bg-slate-950/85 backdrop-blur-sm border border-slate-700/60 flex items-center gap-1.5">
+            <MapPin className="w-3 h-3 text-red-400 shrink-0" />
+            <p className="text-[10px] font-bold text-white truncate">
+              {order.direccion || 'sin dirección'}
+              {order.distrito ? ` · ${order.distrito}` : ''}
             </p>
           </div>
         </div>

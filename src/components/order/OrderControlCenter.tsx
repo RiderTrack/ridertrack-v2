@@ -211,23 +211,10 @@ export const OrderControlCenter: React.FC<OrderControlCenterProps> = ({
         </div>
       </Modal>
 
-      {/* Floating Action Button (FAB) for Instant Order Operations */}
-      {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50">
-          <button
-            onClick={() => {
-              setActiveCategory('categories');
-              setIsBottomSheetOpen(true);
-            }}
-            className="group relative flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 text-white font-extrabold text-sm shadow-2xl hover:shadow-blue-500/30 transition-all transform hover:scale-105 active:scale-95 border border-blue-400/40"
-          >
-            <span className="absolute -inset-1 rounded-full bg-blue-500/30 blur-md group-hover:bg-blue-400/50 transition-all pointer-events-none animate-pulse" />
-
-            <Zap className="w-5 h-5 relative z-10 fill-current text-amber-300 animate-bounce" />
-            <span className="relative z-10 tracking-tight">Acciones del Pedido</span>
-          </button>
-        </div>
-      )}
+      {/* ⚡ F3.59: se QUITÓ el botón flotante "Acciones del Pedido"
+          que aparecía duplicado (abajo a la derecha) junto al del
+          footer del modal. Queda UNO solo: "Abrir Panel de Acciones"
+          del pie del pedido. */}
 
       {/* Categorized Bottom Sheet Drawer */}
       <BottomSheet

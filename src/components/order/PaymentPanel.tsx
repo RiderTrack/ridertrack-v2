@@ -40,8 +40,29 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
   onShowToast,
 }) => {
   const esPendiente = order.estado === 'pendiente';
+  // ⚡ F3.59 — st REAL → id del botón. Antes el método inicial
+  // venía de `order.metodoPago`, que mapeaba 'yape-rudy' (y mixto,
+  // empresa…) a 'Yape/Plin' → al abrir el panel quedaban DOS
+  // botones encendidos a la vez ("Yape Rudy" por el estado real +
+  // "Yape/Plin" por el método UI). Ahora queda marcado SOLO el
+  // método con el que de verdad se cobró.
+  const METODO_POR_ST: Record<string, string> = {
+    efectivo: 'Efectivo',
+    'yape-rudy': 'Yape Rudy',
+    'yape-plin': 'Yape/Plin',
+    'yape-efectivo': 'Mixto',
+    transferencia: 'Transferencia',
+    pos: 'POS',
+    'pago-link': 'Pago Link',
+    cambio: 'Cambio',
+    mixto: 'Mixto',
+    empresa: 'Empresa',
+    'jose-smith': 'Empresa',
+  };
   const [selectedMethod, setSelectedMethod] = useState(
-    order.estado === 'entregado' ? order.metodoPago : 'Efectivo'
+    order.estado === 'entregado'
+      ? METODO_POR_ST[order.stReal || ''] || order.metodoPago
+      : 'Efectivo'
   );
   const [cashReturnAmount, setCashReturnAmount] = useState('100');
 
