@@ -5,6 +5,9 @@
 //   💬 Plantillas      → editor de plantillas de WhatsApp con
 //                        vista previa, variables, bloques y
 //                        sincronización con el bot (puente).
+//   🖼️ Imágenes bot    → FASE 3.55: subir/cambiar/restablecer la
+//                        imagen de cada mensaje con foto que manda
+//                        el bot (disparo, entrega, grupo MATE…).
 //   ⚙️ Automatizaciones → interruptor maestro del bot, IA,
 //                        horario, silenciados, palabras de enojo
 //                        y el registro de lo que hizo solo hoy.
@@ -34,7 +37,18 @@ import {
   Loader2,
   Zap,
   X,
+  ImagePlus,
+  RotateCcw,
+  CheckCircle2,
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import {
+  TIPOS_IMAGEN_BOT,
+  ImagenBot,
+  subirImagenBot,
+  escucharImagenesBot,
+  restablecerImagenBot,
+} from '../services/imagenesBot';
 import {
   CATEGORIAS_PLANTILLA,
   CATEGORIAS_SELECT,
@@ -70,7 +84,7 @@ import {
 } from '../utils/botControl';
 
 interface BotControlViewProps {
-  vistaInicial?: 'plantillas' | 'automatizaciones';
+  vistaInicial?: 'plantillas' | 'imagenes' | 'automatizaciones';
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
@@ -1017,11 +1031,196 @@ const AutomatizacionesTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }
 };
 
 // ─────────────────────────────────────────────────────────────
+// TAB · IMÁGENES DEL BOT (FASE 3.55)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Editor de la IMAGEN que acompaña cada mensaje del bot.
+ * El bot tiene 5 mensajes con imagen; acá se sube una propia
+ * (va a Storage) o se restablece la local del Termux.
+ * El TEXTO se edita aparte, en la pestaña 💬 Plantillas.
+ */
+const ImagenesBotTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
+  const { user } = useAuth();
+  const [imagenes, setImagenes] = useState<Record<string, ImagenBot>>({});
+  const [subiendo, setSubiendo] = useState<string | null>(null); // tipo en subida
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Suscripción en vivo: refleja al toque lo que suba/borre
+  // el usuario (el bot tiene su propio listener en Termux).
+  useEffect(() => {
+    const un = escucharImagenesBot(setImagenes);
+    return () => un();
+  }, []);
+
+  const handleArchivo = async (tipo: string, file: File | undefined) => {
+    if (!file) return;
+    if (!user?.uid) {
+      onShowToast('Sin sesión', 'Vuelve a entrar e intenta otra vez', 'warning');
+      return;
+    }
+    setSubiendo(tipo);
+    try {
+      await subirImagenBot(user.uid, tipo, file);
+      onShowToast('Imagen actualizada', 'El bot la usará en segundos, sin reiniciar nada', 'success');
+    } catch (e) {
+      onShowToast('No se pudo subir', (e as Error).message, 'error');
+    } finally {
+      setSubiendo(null);
+      // limpiar el input: poder re-subir la MISMA imagen luego
+      const inp = inputRefs.current[tipo];
+      if (inp) inp.value = '';
+    }
+  };
+
+  const handleRestablecer = async (tipo: string, etiqueta: string) => {
+    if (!window.confirm(`¿Volver a usar la imagen LOCAL del bot para "${etiqueta}"?`)) return;
+    try {
+      await restablecerImagenBot(tipo);
+      onShowToast('Imagen restablecida', 'El bot usará su archivo local de siempre', 'info');
+    } catch (e) {
+      onShowToast('No se pudo restablecer', (e as Error).message, 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* ── Encabezado explicativo ── */}
+      <Card>
+        <h2 className="text-sm font-black text-white flex items-center gap-2 mb-1">
+          <ImagePlus className="w-4 h-4 text-emerald-400" /> Imágenes de los mensajes del bot
+        </h2>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          El bot manda <b className="text-slate-300">5 mensajes con imagen</b>. Sube la tuya y la usará
+          al instante (la baja de la nube al momento del envío). Si restableces o falla la descarga,
+          usa <b className="text-slate-300">su imagen local de siempre</b> — nada se rompe. El{' '}
+          <b className="text-slate-300">texto</b> de cada mensaje se edita en la pestaña 💬 Plantillas.
+        </p>
+        <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+          Máx. 3 MB · JPG, PNG o WebP · WhatsApp la comprime igual
+        </div>
+      </Card>
+
+      {/* ── Una tarjeta por tipo de imagen ── */}
+      {TIPOS_IMAGEN_BOT.map((def) => {
+        const actual = imagenes[def.tipo];
+        const cargando = subiendo === def.tipo;
+        return (
+          <Card key={def.tipo}>
+            <div className="flex gap-3 sm:gap-4">
+              {/* Vista previa */}
+              <div className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 rounded-xl overflow-hidden border border-slate-700/60 bg-slate-900/60 flex items-center justify-center">
+                {actual?.url ? (
+                  <img
+                    src={actual.url}
+                    alt={def.etiqueta}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="text-center px-1">
+                    <ImagePlus className="w-5 h-5 text-slate-600 mx-auto mb-1" />
+                    <span className="text-[9px] text-slate-500 leading-tight block">
+                      imagen local
+                      <br />
+                      del bot
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Info + acciones */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-bold text-white">{def.etiqueta}</h3>
+                  {actual && (
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                      PERSONALIZADA
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 leading-snug mt-0.5">{def.desc}</p>
+                <div className="text-[10px] text-slate-600 mt-1 flex flex-wrap gap-x-3">
+                  <span>
+                    Original:{' '}
+                    <span className="text-slate-500 font-mono">{def.archivoOriginal}</span>
+                  </span>
+                  <span>
+                    Texto:{' '}
+                    <span className="text-slate-500 font-mono">
+                      {def.plantillaVinculada === '—' ? '(armado por el bot)' : def.plantillaVinculada}
+                    </span>
+                  </span>
+                </div>
+
+                {/* Acciones */}
+                <div className="flex flex-wrap gap-2 mt-2.5">
+                  <input
+                    ref={(el) => {
+                      inputRefs.current[def.tipo] = el;
+                    }}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => handleArchivo(def.tipo, e.target.files?.[0])}
+                  />
+                  <button
+                    onClick={() => inputRefs.current[def.tipo]?.click()}
+                    disabled={cargando}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {cargando ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    )}
+                    {cargando ? 'Subiendo…' : actual ? 'Cambiar imagen' : 'Subir imagen'}
+                  </button>
+                  {actual && (
+                    <button
+                      onClick={() => handleRestablecer(def.tipo, def.etiqueta)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700/70 hover:bg-slate-600 text-slate-300 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Restablecer
+                    </button>
+                  )}
+                </div>
+
+                {/* Cuándo se actualizó */}
+                {actual?.actualizadoEn && (
+                  <p className="text-[10px] text-slate-600 mt-1.5">
+                    Actualizada{' '}
+                    {(() => {
+                      try {
+                        return new Date(actual.actualizadoEn).toLocaleString('es-PE', {
+                          timeZone: 'America/Lima',
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+                      } catch {
+                        return actual.actualizadoEn;
+                      }
+                    })()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+};
+
 // VISTA PRINCIPAL (tabs)
 // ─────────────────────────────────────────────────────────────
 
 export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = 'plantillas', onShowToast }) => {
-  const [tab, setTab] = useState<'plantillas' | 'automatizaciones'>(vistaInicial);
+  const [tab, setTab] = useState<'plantillas' | 'imagenes' | 'automatizaciones'>(vistaInicial);
   const toast: ToastFn =
     onShowToast ||
     ((title: string, desc?: string) => {
@@ -1061,6 +1260,17 @@ export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = '
           Plantillas
         </button>
         <button
+          onClick={() => setTab('imagenes')}
+          className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+            tab === 'imagenes'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <ImagePlus className="w-4 h-4" />
+          Imágenes bot
+        </button>
+        <button
           onClick={() => setTab('automatizaciones')}
           className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${
             tab === 'automatizaciones'
@@ -1074,7 +1284,13 @@ export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = '
       </div>
 
       {/* Contenido */}
-      {tab === 'plantillas' ? <PlantillasTab onShowToast={toast} /> : <AutomatizacionesTab onShowToast={toast} />}
+      {tab === 'plantillas' ? (
+        <PlantillasTab onShowToast={toast} />
+      ) : tab === 'imagenes' ? (
+        <ImagenesBotTab onShowToast={toast} />
+      ) : (
+        <AutomatizacionesTab onShowToast={toast} />
+      )}
     </div>
   );
 };

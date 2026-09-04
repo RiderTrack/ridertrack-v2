@@ -31,20 +31,6 @@ import {
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
 import { AvatarPicker } from './AvatarPicker';
-// Fase 3.35/3.40: 🛣️ kilometraje en el menú — BOTÓN como las
-// demás opciones (F3.40); el modal trae las stats + calibración
-import { OdometroMenuBoton, OdometroMenuStats, OdometroCard } from './OdometroCard';
-// F3.36/3.40: 🔧 mantenimiento de la moto — BOTÓN de menú (badge
-// rojo si algo venció); el gestor completo vive en su modal
-import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
-// F3.39/3.40: 💰 caja del día — BOTÓN de menú (badge con el
-// esperado); el gestor completo vive en su modal
-import { CajaMenuBoton, CajaCard } from './CajaCard';
-// F3.41: 📊 resumen diario → WhatsApp (paso 5 del plan)
-import { ResumenMenuBoton, ResumenDiarioCard } from './ResumenDiarioCard';
-// F3.42: 🎙️ el podcast de la jornada (paso 6, el final del plan)
-import { PodcastMenuBoton, PodcastCard } from './PodcastCard';
-import { Modal } from './ui';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -65,8 +51,6 @@ interface SidebarProps {
   riderAvatar?: string;
   onSeleccionarAvatar?: (avatarId: string) => Promise<void>;
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
-  /** Fase 3.35: uid del rider — para las stats del odómetro en el menú */
-  uid?: string | null;
 }
 
 interface MenuItem {
@@ -97,31 +81,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   riderAvatar,
   onSeleccionarAvatar,
   onShowToast,
-  uid,
 }) => {
   const [pickerAbierto, setPickerAbierto] = useState(false);
-  // F3.38: 🔧 modal del gestor de mantenimiento (menú hamburguesa)
-  const [mantGestionAbierto, setMantGestionAbierto] = useState(false);
-  // F3.39: 💰 modal del gestor de caja (menú hamburguesa)
-  const [cajaGestionAbierto, setCajaGestionAbierto] = useState(false);
-  // F3.40: 🛣️ modal de kilometraje (stats + calibración) — antes
-  // era un bloque grande abajo; ahora es un botón como los demás
-  const [odoGestionAbierto, setOdoGestionAbierto] = useState(false);
-  // F3.41: 📊 modal del resumen diario → WhatsApp
-  const [resGestionAbierto, setResGestionAbierto] = useState(false);
-  // F3.42: 🎙️ modal del podcast de la jornada
-  const [podGestionAbierto, setPodGestionAbierto] = useState(false);
-
-  // F3.40: abre un gestor cerrando el drawer móvil primero (el
-  // drawer va en z-[1200], tapa los modales z-50)
-  const abrirGestion = (cual: 'odo' | 'mant' | 'caja' | 'res' | 'pod') => {
-    if (isMobileOpen) onCloseMobile();
-    if (cual === 'odo') setOdoGestionAbierto(true);
-    else if (cual === 'mant') setMantGestionAbierto(true);
-    else if (cual === 'caja') setCajaGestionAbierto(true);
-    else if (cual === 'res') setResGestionAbierto(true);
-    else setPodGestionAbierto(true);
-  };
 
   // Secciones del menú
   const secciones: MenuSection[] = [
@@ -147,13 +108,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
       ],
-    },
-    // F3.40: 🛣️🔧💰 LA JORNADA — antes eran 3 bloques grandes que
-    // saturaban el final del menú; ahora son BOTONES como los
-    // demás (icono + nombre + badge) y cada uno abre su gestor.
-    {
-      titulo: 'Jornada',
-      items: [],
     },
     {
       titulo: 'Operación',
@@ -229,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.54</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.55</span>
         </div>
         <button
           onClick={onCloseMobile}
@@ -251,21 +205,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {seccion.titulo && isCollapsed && (
               <div className="border-t border-slate-800 my-2 mx-2"></div>
             )}
-            {/* F3.40: 🛣️🔧💰 JORNADA — botones IGUAL a las demás
-                opciones del menú. Cada uno abre su gestor (modal);
-                el badge muestra el dato clave al pasar la vista. */}
-            {seccion.titulo === 'Jornada' ? (
-              <>
-                <OdometroMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('odo')} />
-                <MantenimientoMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('mant')} />
-                <CajaMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('caja')} />
-                {/* F3.41: 📊 resumen del día → grupo MATE de un toque */}
-                <ResumenMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('res')} />
-                {/* F3.42: 🎙️ el podcast — tu día contado en voz alta */}
-                <PodcastMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('pod')} />
-              </>
-            ) : (
-              seccion.items.map((item) => {
+            {seccion.items.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -305,16 +245,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </button>
               );
-              })
-            )}
+            })}
           </div>
         ))}
       </nav>
-
-      {/* (F3.40) El kilometraje, mantenimiento y caja ya viven como
-          BOTONES en la sección "Jornada" del menú — mismo look que
-          las demás opciones, cero saturación. Sus gestores completos
-          abren en modales (abajo, una sola renderización). */}
 
       {/* Bottom Profile Section — avatar ilustrado + picker (Fase 1.5) */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80">
@@ -389,78 +323,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       )}
-
-      {/* 🔧 F3.38: GESTOR COMPLETO de mantenimiento — modal que abre
-          desde el menú hamburguesa. Se renderiza UNA sola vez (fuera
-          de sidebarContent, que existe doble: desktop + drawer) para
-          no duplicar el backdrop. En móvil el drawer se cierra antes. */}
-      <Modal
-        isOpen={mantGestionAbierto}
-        onClose={() => setMantGestionAbierto(false)}
-        title="🔧 Mantenimiento de la moto"
-        subtitle="Recordatorios con los km del odómetro GPS"
-        maxWidth="lg"
-      >
-        <MantenimientoCard uid={uid} onShowToast={onShowToast} />
-      </Modal>
-
-      {/* 💰 F3.39: GESTOR de la caja del día — modal que abre desde
-          el menú hamburguesa. Mismo patrón del de mantenimiento:
-          UNA sola renderización fuera de sidebarContent. */}
-      <Modal
-        isOpen={cajaGestionAbierto}
-        onClose={() => setCajaGestionAbierto(false)}
-        title="💰 Caja del día"
-        subtitle="Gastos + cierre con conteo físico"
-        maxWidth="lg"
-      >
-        <CajaCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
-      </Modal>
-
-      {/* 🛣️ F3.40: KILOMETRAJE — stats (Hoy/Ayer/7d/Total) + la
-          tarjeta completa del odómetro (calibración por viaje,
-          pantalla viva, reiniciar) en un solo modal. Antes el bloque
-          de stats vivía fijo abajo del menú y lo saturaba. */}
-      <Modal
-        isOpen={odoGestionAbierto}
-        onClose={() => setOdoGestionAbierto(false)}
-        title="🛣️ Kilometraje (odómetro GPS)"
-        subtitle="Stats del odómetro · calibración · pantalla viva"
-        maxWidth="lg"
-      >
-        <div className="space-y-3">
-          <OdometroMenuStats uid={uid} />
-          <OdometroCard uid={uid} onShowToast={onShowToast} />
-        </div>
-      </Modal>
-
-      {/* 📊 F3.41: RESUMEN DEL DÍA → WHATSAPP — vista previa del
-          día completo (ruta + plata + caja + km + tiempo) y el
-          mensaje EXACTO que llega al grupo MATE, con ENVIAR (el
-          bot lo manda) y COPIAR de respaldo. */}
-      <Modal
-        isOpen={resGestionAbierto}
-        onClose={() => setResGestionAbierto(false)}
-        title="📊 Resumen del día → WhatsApp"
-        subtitle="Vista previa + enviar al grupo MATE"
-        maxWidth="md"
-      >
-        <ResumenDiarioCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
-      </Modal>
-
-      {/* 🎙️ F3.42: EL PODCAST DE TU JORNADA — reproductor de radio
-          con el episodio de hoy y el de la semana: capítulos,
-          progreso, velocidad, pausa que retoma por la frase. La
-          voz es la del teléfono (la misma de la navegación). */}
-      <Modal
-        isOpen={podGestionAbierto}
-        onClose={() => setPodGestionAbierto(false)}
-        title="🗣️ Jornada hablada"
-        subtitle="Tu día y tu semana, contados en voz alta (radio F3.42)"
-        maxWidth="md"
-      >
-        <PodcastCard uid={uid} riderName={riderName} />
-      </Modal>
     </>
   );
 };
