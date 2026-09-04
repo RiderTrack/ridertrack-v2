@@ -94,15 +94,33 @@ export function estadoClienteAOrden(st: string): OrderStatus {
 
 /** st real → método de pago legible en la UI */
 function metodoPagoUI(st: string): Order['metodoPago'] {
+  // ⚡ F3.59: mapa COMPLETO. Antes todo lo que no era
+  // efectivo/pos/transferencia caía al default 'Yape/Plin' — por
+  // eso un pago con Yape Rudy encendía "Yape Rudy" Y "Yape/Plin"
+  // en el panel de pago a la vez (y mixto/empresa también salían
+  // como Yape/Plin).
   switch (st) {
     case 'efectivo':
-    case 'cambio':
-    case 'yape-efectivo':
       return 'Efectivo';
-    case 'pos':
-      return 'Tarjeta';
+    case 'yape-efectivo':
+      return 'Yape + Efectivo';
+    case 'yape-rudy':
+      return 'Yape Rudy';
+    case 'yape-plin':
+      return 'Yape/Plin';
     case 'transferencia':
       return 'Transferencia';
+    case 'pos':
+      return 'POS Tarjeta';
+    case 'pago-link':
+      return 'Pago Link';
+    case 'cambio':
+      return 'Cambio';
+    case 'mixto':
+      return 'Mixto';
+    case 'empresa':
+    case 'jose-smith':
+      return 'Cuenta Empresa';
     default:
       return 'Yape/Plin';
   }
