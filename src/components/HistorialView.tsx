@@ -33,6 +33,7 @@ import {
   BarChart3,
   CalendarClock,
   CloudDownload,
+  CloudUpload,
   Loader2,
   X,
   MessageCircle,
@@ -40,12 +41,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
+import { useClientes } from '../hooks/useClientes';
 import {
   RegistroHistorial,
   leerHistorial,
   eliminarRutaHistorial,
   cambiarFechaHistorial,
   importarHistorialV1,
+  guardarBackupNube,
 } from '../services/firestore';
 import { ETIQUETAS_ESTADO } from '../utils/realData';
 import { hoyISO } from '../utils/stats'; // ⚡ F3.48: hoy en hora de Lima
@@ -145,6 +148,9 @@ function totalEmpresaR(r: RegistroHistorial): number {
 export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => {
   const { user } = useAuth();
   const { config } = useConfig();
+  // ⚡ F3.59: para el botón "guardar en la nube" — la ruta ACTUAL
+  // (la misma fuente que usa la pantalla ☁️ Backups).
+  const { clientes } = useClientes();
 
   const [registros, setRegistros] = useState<RegistroHistorial[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,6 +173,32 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
 
   // ── Ver todas (cuando no hay fecha seleccionada) ──
   const [verTodas, setVerTodas] = useState(false);
+
+  // ── ⚡ F3.59: guardar la ruta actual en la nube desde acá ──
+  // (por si el guardado automático no corrió — mismo mecanismo
+  // y misma colección backups_v2 que la pantalla ☁️ Backups)
+  const [guardandoNube, setGuardandoNube] = useState(false);
+
+  const respaldarRutaNube = async () => {
+    if (!user || guardandoNube) return;
+    if (clientes.length === 0) {
+      onShowToast?.('Ruta vacía', 'No hay clientes en la ruta de hoy para respaldar', 'warning');
+      return;
+    }
+    setGuardandoNube(true);
+    try {
+      await guardarBackupNube(user.uid, clientes);
+      onShowToast?.(
+        '☁️ Guardado en la nube',
+        `${clientes.length} clientes de la ruta de hoy respaldados — lo ves en ☁️ Backups`,
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('Error al guardar', e?.message || 'Revisa tu conexión e inténtalo de nuevo', 'error');
+    } finally {
+      setGuardandoNube(false);
+    }
+  };
 
   // ── Modal de cambiar fecha (Fase 2.7: calendario nativo
   //    en vez del cuadro de texto) ──
@@ -458,14 +490,36 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
               <p className="text-[11px] text-slate-400">Tu calendario de rutas, con su plata y sus entregas</p>
             </div>
           </div>
-          <button
-            onClick={cargar}
-            disabled={loading}
-            className="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-300 transition-colors disabled:opacity-50"
-            title="Refrescar"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+          {/* ⚡ F3.59: guardar la ruta de HOY en la nube desde acá
+              (respaldo manual — por si el automático no corrió) */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={respaldarRutaNube}
+              disabled={guardandoNube || loading}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border text-[11px] font-bold transition-colors disabled:opacity-50 ${
+                guardandoNube
+                  ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300'
+                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 border-emerald-500/40 text-emerald-300'
+              }`}
+              title="Guardar la ruta de hoy en la nube (por si no se guardó automáticamente)"
+            >
+              {guardandoNube ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CloudUpload className="w-4 h-4" />
+              )}
+              <span className="hidden xs:inline sm:inline">Guardar en nube</span>
+              <span className="sm:hidden">Nube</span>
+            </button>
+            <button
+              onClick={cargar}
+              disabled={loading}
+              className="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-300 transition-colors disabled:opacity-50"
+              title="Refrescar"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {/* Totales del periodo */}

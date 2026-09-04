@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Package,
   Plus,
@@ -57,6 +57,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [controlCenterOpen, setControlCenterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // ⚡ F3.59 — PEDIDO EN VIVO: selectedOrder era una FOTO VIEJA del
+  // pedido (se congelaba al abrir el modal). Si sacabas la foto de
+  // evidencia o guardabas la nota, el panel seguía mostrando "sin
+  // foto" / la nota vieja — parecía que el botón no funcionaba.
+  // Ahora se re-deriva del array `orders` (que App actualiza desde
+  // Firestore) → foto, nota, estado y monto se ven AL INSTANTE.
+  const selectedOrderLive = useMemo(
+    () => (selectedOrder ? orders.find((o) => o.id === selectedOrder.id) || selectedOrder : null),
+    [selectedOrder, orders]
+  );
   const itemsPerPage = 8;
 
   // Filter & Sorting logic
@@ -518,7 +529,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
       {/* Order Control Center Modal & Bottom Sheet */}
       <OrderControlCenter
-        order={selectedOrder}
+        order={selectedOrderLive}
         isOpen={controlCenterOpen}
         onClose={() => setControlCenterOpen(false)}
         drivers={drivers}

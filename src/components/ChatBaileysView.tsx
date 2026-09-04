@@ -1359,11 +1359,13 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
 
   const enviarReporteGrupo = async (texto: string, etiqueta: string) => {
     try {
+      // ⚡ F3.59: los REPORTES a la empresa van CON imagen (como
+      // siempre) — solo los mensajes normales del chat van limpios.
       await enviarAGrupoMate(texto, {
         nombre: profile?.nombre || 'Rudy',
         telefono: profile?.email || '',
         empresa: 'MATE',
-      });
+      }, { conImagen: true });
       setMenuRapidos(false);
       toast(
         '👥 Reporte al grupo',

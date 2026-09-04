@@ -1246,40 +1246,47 @@ export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = '
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1.5 p-1 bg-slate-800/70 rounded-xl border border-slate-700/60">
+      {/* Tabs — ⚡ F3.59: arregladas para pantallas angostas.
+          Antes "Automatizaciones" no cabía y la pestaña traspasaba
+          el borde del panel. Ahora: etiqueta corta en móvil (Auto.),
+          completa en pantallas grandes, y scroll horizontal de
+          seguridad por si aun así no cabe. */}
+      <div className="flex gap-1 sm:gap-1.5 p-1 bg-slate-800/70 rounded-xl border border-slate-700/60 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => setTab('plantillas')}
-          className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+          className={`flex-1 min-w-0 sm:flex-none sm:px-4 px-2 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-colors flex items-center justify-center gap-1.5 ${
             tab === 'plantillas'
               ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <MessageSquareText className="w-4 h-4" />
-          Plantillas
+          <MessageSquareText className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">Plantillas</span>
+          <span className="sm:hidden">Plantillas</span>
         </button>
         <button
           onClick={() => setTab('imagenes')}
-          className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+          className={`flex-1 min-w-0 sm:flex-none sm:px-4 px-2 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-colors flex items-center justify-center gap-1.5 ${
             tab === 'imagenes'
               ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <ImagePlus className="w-4 h-4" />
-          Imágenes bot
+          <ImagePlus className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">Imágenes bot</span>
+          <span className="sm:hidden">Imágenes</span>
         </button>
         <button
           onClick={() => setTab('automatizaciones')}
-          className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+          className={`flex-1 min-w-0 sm:flex-none sm:px-4 px-2 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-colors flex items-center justify-center gap-1.5 ${
             tab === 'automatizaciones'
               ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <SlidersHorizontal className="w-4 h-4" />
-          Automatizaciones
+          <SlidersHorizontal className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">Automatizaciones</span>
+          <span className="sm:hidden">Auto.</span>
         </button>
       </div>
 
