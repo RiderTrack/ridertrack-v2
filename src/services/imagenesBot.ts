@@ -1,12 +1,14 @@
 // ═══════════════════════════════════════════════════════════
 // 🖼️ IMÁGENES DEL BOT — RiderTrack V2 (FASE 3.55)
 //
-// El bot (rudy-bot en Termux) manda 5 tipos de mensaje CON IMAGEN:
+// El bot (rudy-bot en Termux) manda 6 tipos de mensaje CON IMAGEN:
 //   · inicio_ruta        → el DISPARO/broadcast de inicio de ruta
 //   · ridertrack         → reporte de entrega completada
 //   · mate               → mensajes al grupo MATE · Trabajo
 //   · solicitar_ubicacion→ pedir la ubicación al cliente
 //   · llegando_pronto    → aviso "ya estoy llegando"
+//   · mi_posicion        → ⚡ F3.59: "mi posición en la ruta"
+//                           (antes iba en texto pelado)
 //
 // HASTA HOY esas imágenes eran archivos LOCALES del Termux
 // (~/bot-whatsapp/imagenes_bot/inicio_ruta.jpg …) — imposibles de
@@ -90,8 +92,8 @@ export const TIPOS_IMAGEN_BOT: DefTipoImagenBot[] = [
   },
   {
     tipo: 'mate',
-    etiqueta: '👷 Grupo MATE · Trabajo',
-    desc: 'La imagen que acompaña los mensajes al grupo de trabajo.',
+    etiqueta: '👷 Grupo MATE · Reportes',
+    desc: 'La imagen que acompaña los REPORTES al grupo de trabajo (los mensajes normales del chat van sin imagen desde F3.59).',
     archivoOriginal: 'mate_gracias.png',
     plantillaVinculada: '—',
   },
@@ -108,6 +110,17 @@ export const TIPOS_IMAGEN_BOT: DefTipoImagenBot[] = [
     desc: 'El aviso de "ya estoy llegando" con imagen.',
     archivoOriginal: 'llegando_pronto.jpg',
     plantillaVinculada: 'avisarLlegada',
+  },
+  {
+    // ⚡ FASE 3.59 — pedido del usuario: la plantilla de "mi
+    // posición en la ruta" iba en texto pelado. Ahora puede llevar
+    // imagen: sube una acá y el robot la manda con el texto de la
+    // plantilla "a qué hora llegas" (horaLlegada).
+    tipo: 'mi_posicion',
+    etiqueta: '🧭 Mi posición en la ruta',
+    desc: 'El mensaje que le dice al cliente en qué punto de tu ruta está hoy ("voy en el 3 de 8"). Sube una imagen y el bot la manda con el texto de la plantilla de la hora de llegada.',
+    archivoOriginal: 'mi_posicion.jpg',
+    plantillaVinculada: 'horaLlegada',
   },
 ];
 
