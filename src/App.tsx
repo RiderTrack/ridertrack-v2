@@ -602,7 +602,12 @@ export default function App() {
   // Registrar pago: método del panel → st real + hora
   const handleRegistrarPago = (orderId: string, metodoPanel: string) => {
     const cliente = clientePorOrdenId(orderId);
-    if (!cliente) return;
+    // ⚡ F3.59: antes fallaba EN SILENCIO (return mudo) y parecía
+    // que el botón no hacía nada. Ahora avisa qué pasó.
+    if (!cliente) {
+      showToast('No se pudo registrar', 'Este pedido ya no está en la ruta actual — refresca la vista', 'warning');
+      return;
+    }
     const st = METODO_PANEL_A_ST[metodoPanel] || 'efectivo';
     cambiarEstado(cliente.id, st);
 
@@ -624,7 +629,10 @@ export default function App() {
   // Cambiar estado (resoluciones: fallida, rechazado, ausente, reabrir...)
   const handleCambiarEstado = (orderId: string, st: string) => {
     const cliente = clientePorOrdenId(orderId);
-    if (!cliente) return;
+    if (!cliente) {
+      showToast('No se pudo actualizar', 'Este pedido ya no está en la ruta actual — refresca la vista', 'warning');
+      return;
+    }
     cambiarEstado(cliente.id, st);
 
     const esReapertura = st === 'pendiente';
@@ -660,14 +668,20 @@ export default function App() {
 
   const handleDeleteOrder = (orderId: string) => {
     const cliente = clientePorOrdenId(orderId);
-    if (!cliente) return;
+    if (!cliente) {
+      showToast('No se pudo eliminar', 'Este pedido ya no está en la ruta actual', 'warning');
+      return;
+    }
     eliminarCliente(cliente.id);
     showToast('Pedido Eliminado', `${cliente.nombre} removido de la ruta`, 'warning');
   };
 
   const handleDuplicateOrder = (orderToDuplicate: Order) => {
     const cliente = clientePorOrdenId(orderToDuplicate.id);
-    if (!cliente) return;
+    if (!cliente) {
+      showToast('No se pudo duplicar', 'Este pedido ya no está en la ruta actual', 'warning');
+      return;
+    }
     const num = clientes.length > 0 ? Math.max(...clientes.map((c) => c.num || 0)) + 1 : 1;
     agregarCliente({
       ...cliente,
@@ -684,7 +698,12 @@ export default function App() {
   // 📷 Foto de evidencia (real: Storage con fallback base64)
   const handleGuardarFoto = async (orderId: string, blob: Blob, dataUrl: string) => {
     const cliente = clientePorOrdenId(orderId);
-    if (!cliente) return;
+    if (!cliente) {
+      // ⚡ F3.59: antes esto retornaba EN SILENCIO — sacabas la foto
+      // y no pasaba NADA (ni error ni confirmación). Ahora avisa.
+      showToast('No se pudo guardar la foto', 'Este pedido ya no está en la ruta actual — refresca la vista de Pedidos', 'warning');
+      return;
+    }
     try {
       await guardarFotoEntrega(cliente.id, blob, dataUrl);
       registrarActividad(
@@ -703,7 +722,10 @@ export default function App() {
   // 📝 Nota del pedido (real: se guarda en el cliente)
   const handleGuardarNota = (orderId: string, nota: string) => {
     const cliente = clientePorOrdenId(orderId);
-    if (!cliente) return;
+    if (!cliente) {
+      showToast('No se pudo guardar la nota', 'Este pedido ya no está en la ruta actual', 'warning');
+      return;
+    }
     actualizarCliente(cliente.id, { nota });
     showToast('Nota Guardada', `Nota de ${cliente.nombre} actualizada`, 'success');
   };

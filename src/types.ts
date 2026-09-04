@@ -41,7 +41,20 @@ export interface Order {
   repartidorFoto?: string;
   hora: string;          // Hora de entrega (cuando st != pendiente)
   monto: number;
-  metodoPago: 'Efectivo' | 'Yape/Plin' | 'Tarjeta' | 'Transferencia';
+  // ⚡ F3.59: ampliado para que cada método real tenga su etiqueta
+  // (antes solo 4 valores y todo lo demás caía a 'Yape/Plin').
+  metodoPago:
+    | 'Efectivo'
+    | 'Yape/Plin'
+    | 'Tarjeta'
+    | 'Transferencia'
+    | 'Yape + Efectivo'
+    | 'Yape Rudy'
+    | 'POS Tarjeta'
+    | 'Pago Link'
+    | 'Cambio'
+    | 'Mixto'
+    | 'Cuenta Empresa';
   productos: string[];
   fotoUrl?: string;      // Foto de evidencia de entrega (Storage o base64)
   nota?: string;         // Nota del pedido (visible en Evidencias)
