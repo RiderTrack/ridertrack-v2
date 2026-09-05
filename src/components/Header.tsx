@@ -12,7 +12,6 @@ import {
   Camera,
   MessageCircle,
   ArrowRight,
-  Palette,
 } from 'lucide-react';
 import { ThemeMode, AppNotification } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -20,8 +19,6 @@ import { AvatarSvg } from '../data/avatars';
 interface HeaderProps {
   theme: ThemeMode;
   onToggleTheme: () => void;
-  /** 🎨 F3.51: abre el Estudio de Temas (presets, acento, fuente…) */
-  onAbrirEstudio?: () => void;
   onToggleMobileMenu: () => void;
   notifications: AppNotification[];
   onMarkNotificationsRead: () => void;
@@ -40,7 +37,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   theme,
   onToggleTheme,
-  onAbrirEstudio,
   onToggleMobileMenu,
   notifications,
   onMarkNotificationsRead,
@@ -134,7 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Fase 3.5: el número de FASE visible en el badge — así
                   siempre sabemos qué build estás probando (F3.14 = fase 3.14) */}
               <span className="hidden sm:inline-block px-1.5 py-0.2 text-[10px] font-black rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                V2.6 · F3.59
+                V2.4 · F3.61
               </span>
             </div>
             <span className="text-[10px] text-slate-400 font-medium hidden sm:block">
@@ -182,18 +178,6 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
           <span className="text-[9px] text-slate-400 uppercase tracking-wider">{currentDate}</span>
         </div>
-
-        {/* 🎨 F3.51 — Estudio de Temas: presets, modo, acento,
-            tipografía, tamaño de letra, fondo y redondeo */}
-        {onAbrirEstudio && (
-          <button
-            onClick={onAbrirEstudio}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-blue-400 transition-colors"
-            title="Estudio de Temas — personaliza el look de la app (F3.51)"
-          >
-            <Palette className="w-4 h-4" />
-          </button>
-        )}
 
         {/* Dark/Light Theme Toggle */}
         <button

@@ -86,8 +86,6 @@ import {
   Package,
   Wallet,
   Navigation,
-  Camera,
-  PhoneCall,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -117,7 +115,6 @@ import {
   leerDocumento,
   descargarBase64,
   telCompleto,
-  telKey,
   TEL_GRUPO_MATE,
   enviarAGrupoMate,
   enviarGraciasBot,
@@ -148,8 +145,6 @@ import {
   stColorRuta,
 } from '../utils/chatBaileys';
 import { sonarMensaje } from '../services/notificaciones';
-// 🙏 F3.44: guard anti-doble-envío del "gracias por tu compra"
-import { claveAviso, registrarAvisoEnviado } from '../utils/avisoEntrega';
 import {
   escucharPlantillas,
   PlantillaMensaje,
@@ -786,8 +781,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const [enviando, setEnviando] = useState(false);
   const [emojiAbierto, setEmojiAbierto] = useState(false);
   const [menuAdjuntos, setMenuAdjuntos] = useState(false);
-  // 🆕 F3.56 — menú de llamada (📞 en la cabecera del chat)
-  const [menuLlamada, setMenuLlamada] = useState(false);
   const [reveladas, setReveladas] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<{ base64?: string; mimetype?: string; nombre: string; url?: string } | null>(null);
 
@@ -829,14 +822,9 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputImgRef = useRef<HTMLInputElement>(null);
   const inputDocRef = useRef<HTMLInputElement>(null);
-  // 🆕 F3.56 — cámara directa: input oculto con capture="environment"
-  // (abre la cámara del celu SIN pasar por la galería)
-  const inputFotoRef = useRef<HTMLInputElement>(null);
   const inputFondoRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuRapidosRef = useRef<HTMLDivElement>(null);
-  // 🆕 F3.56 — contenedor del popover de llamada (para cerrar al tocar afuera)
-  const menuLlamadaRef = useRef<HTMLDivElement>(null);
 
   // ── Suscripciones en tiempo real ──
   useEffect(() => {
@@ -943,20 +931,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
       document.removeEventListener('touchstart', cerrar);
     };
   }, [menuRapidos]);
-
-  // 🆕 F3.56 — cerrar el menú de llamada al hacer clic fuera
-  useEffect(() => {
-    if (!menuLlamada) return;
-    const cerrar = (ev: MouseEvent) => {
-      if (menuLlamadaRef.current && !menuLlamadaRef.current.contains(ev.target as Node)) setMenuLlamada(false);
-    };
-    document.addEventListener('mousedown', cerrar);
-    document.addEventListener('touchstart', cerrar);
-    return () => {
-      document.removeEventListener('mousedown', cerrar);
-      document.removeEventListener('touchstart', cerrar);
-    };
-  }, [menuLlamada]);
 
   const convActiva = useMemo(
     () => conversaciones.find((c) => c.tel === telActivo) || null,
@@ -1129,32 +1103,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
     }
   };
 
-  // ── 🆕 F3.56 — LLAMADAS ──
-  // a) Llamada telefónica directa: abre el marcador del celu con el
-  //    número del cliente ya marcado (1 toque, como WhatsApp).
-  // b) Abrir su chat en WhatsApp: de ahí se toca el botón de llamada /
-  //    videollamada del propio WhatsApp. (Una llamada "de WhatsApp"
-  //    desde la app NO es posible técnicamente: solo la app oficial
-  //    de WhatsApp puede marcar llamadas — la librería Baileys del
-  //    bot no tiene esa puerta. Estas dos vías son lo más cerca.)
-  const llamarTelefono = () => {
-    if (!convActiva || esGrupo) return;
-    const t9 = telKey(convActiva.tel);
-    if (!t9) { toast('Sin número', 'Esta conversación no tiene un teléfono válido', 'warning'); return; }
-    setMenuLlamada(false);
-    toast('📞 Abriendo el marcador…', 'Llamando a +' + telCompleto(t9) + ' desde tu teléfono', 'info');
-    window.location.href = 'tel:+' + telCompleto(t9);
-  };
-
-  const abrirWhatsAppParaLlamar = () => {
-    if (!convActiva || esGrupo) return;
-    const t9 = telKey(convActiva.tel);
-    if (!t9) { toast('Sin número', 'Esta conversación no tiene un teléfono válido', 'warning'); return; }
-    setMenuLlamada(false);
-    toast('🟢 Abriendo WhatsApp…', 'Ahí toca el botón de llamada o videollamada de WhatsApp', 'info');
-    window.open('https://wa.me/' + telCompleto(t9), '_blank');
-  };
-
   const pedirUbicacion = async () => {
     if (!convActiva || esGrupo) return;
     try {
@@ -1285,9 +1233,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
         telefono: profile?.email || '',
         empresa: 'MATE',
       });
-      // 🙏 F3.44: si justo después marcas entregado, el disparo
-      // automático se calla 5 min (no le llega dos veces)
-      registrarAvisoEnviado(claveAviso(convActiva.tel));
       toast(
         '🙏 Gracias enviada',
         conImagen
@@ -1359,13 +1304,14 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
 
   const enviarReporteGrupo = async (texto: string, etiqueta: string) => {
     try {
-      // ⚡ F3.59: los REPORTES a la empresa van CON imagen (como
-      // siempre) — solo los mensajes normales del chat van limpios.
+      // 🖼️ F3.61 — true: los REPORTES rápidos van con la imagen del
+      // mate (la que el bot v1.6 ya tiene lista). Los mensajes escritos
+      // a mano en el chat siguen yendo como texto limpio.
       await enviarAGrupoMate(texto, {
         nombre: profile?.nombre || 'Rudy',
         telefono: profile?.email || '',
         empresa: 'MATE',
-      }, { conImagen: true });
+      }, true);
       setMenuRapidos(false);
       toast(
         '👥 Reporte al grupo',
@@ -1790,54 +1736,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   </div>
                 )}
 
-                {/* 🆕 F3.56 — LLAMAR (siempre visible, móvil incluido).
-                    Popover con 2 vías: llamada telefónica directa o abrir
-                    su chat en WhatsApp (para llamada/videollamada de WhatsApp,
-                    que solo la app oficial puede marcar). */}
-                {!esGrupo && (
-                  <div className="relative flex-shrink-0" ref={menuLlamadaRef}>
-                    <button
-                      type="button"
-                      onClick={() => { setMenuLlamada((v) => !v); setMenuChat(false); }}
-                      className={`p-2 rounded-xl border transition-colors ${menuLlamada ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'}`}
-                      title="📞 Llamar a este cliente (fase 3.56)"
-                    >
-                      <PhoneCall className="w-4 h-4" />
-                    </button>
-                    {menuLlamada && (
-                      <div className="absolute right-0 top-11 z-50 w-64 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden py-1">
-                        <div className="px-3.5 pt-1.5 pb-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                          📞 Llamar a {convActiva.nombre}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={llamarTelefono}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
-                        >
-                          <span className="w-7 h-7 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
-                            <PhoneCall className="w-4 h-4 text-emerald-300" />
-                          </span>
-                          <span className="flex flex-col min-w-0 flex-1">
-                            <span className="text-sm font-bold text-slate-200">Llamada telefónica</span>
-                            <span className="text-[10px] text-slate-500 truncate">Abre el marcador — 1 toque</span>
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={abrirWhatsAppParaLlamar}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800 transition-colors"
-                        >
-                          <span className="w-7 h-7 rounded-xl bg-green-500/15 border border-green-500/30 flex items-center justify-center flex-shrink-0 text-sm">🟢</span>
-                          <span className="flex flex-col min-w-0 flex-1">
-                            <span className="text-sm font-bold text-slate-200">Llamada de WhatsApp</span>
-                            <span className="text-[10px] text-slate-500 truncate">Abre su chat — de allá toca llamar</span>
-                          </span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Menú ⋮ (siempre visible — móvil incluido) */}
                 <div className="relative flex-shrink-0" ref={menuRef}>
                   <button
@@ -1945,32 +1843,22 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                 </div>
               )}
 
-              {/* Menú de adjuntos (🆕 F3.56: con cámara directa) */}
+              {/* Menú de adjuntos */}
               {menuAdjuntos && (
-                <div className="p-2 border-t border-slate-700/70 bg-slate-900/80 grid grid-cols-3 gap-2 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => { setMenuAdjuntos(false); inputFotoRef.current?.click(); }}
-                    className="flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl bg-slate-800 border border-slate-600 hover:border-emerald-500/50 text-xs font-bold text-slate-200 transition-colors"
-                    title="📷 Abre la CÁMARA directa (fase 3.56) — la foto la envía el bot"
-                  >
-                    <Camera className="w-4 h-4 text-emerald-400" /> Tomar foto
-                  </button>
+                <div className="p-2 border-t border-slate-700/70 bg-slate-900/80 flex gap-2 flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => { setMenuAdjuntos(false); inputImgRef.current?.click(); }}
-                    className="flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl bg-slate-800 border border-slate-600 hover:border-emerald-500/50 text-xs font-bold text-slate-200 transition-colors"
-                    title="🖼️ Elegir una imagen de la galería"
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-600 hover:border-emerald-500/50 text-xs font-bold text-slate-200 transition-colors"
                   >
-                    <ImageIcon className="w-4 h-4 text-emerald-400" /> Galería
+                    <ImageIcon className="w-4 h-4 text-emerald-400" /> Imagen
                   </button>
                   <button
                     type="button"
                     onClick={() => { setMenuAdjuntos(false); inputDocRef.current?.click(); }}
-                    className="flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl bg-slate-800 border border-slate-600 hover:border-sky-500/50 text-xs font-bold text-slate-200 transition-colors"
-                    title="📄 Documento (máx 700 KB)"
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-600 hover:border-sky-500/50 text-xs font-bold text-slate-200 transition-colors"
                   >
-                    <FileText className="w-4 h-4 text-sky-400" /> Documento
+                    <FileText className="w-4 h-4 text-sky-400" /> Documento (máx 700 KB)
                   </button>
                 </div>
               )}
@@ -2184,17 +2072,6 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                     className="hidden"
                     onChange={(e) => { manejarArchivo(e.target.files?.[0], 'imagen'); e.currentTarget.value = ''; }}
                   />
-                  {/* 🆕 F3.56 — cámara DIRECTA: capture="environment" abre la
-                      cámara trasera sin pasar por la galería. En PC cae al
-                      selector normal de archivos (no rompe nada). */}
-                  <input
-                    ref={inputFotoRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => { manejarArchivo(e.target.files?.[0], 'imagen'); e.currentTarget.value = ''; }}
-                  />
                   <input
                     ref={inputDocRef}
                     type="file"
@@ -2229,22 +2106,11 @@ export const ChatBaileysView: React.FC<ChatBaileysViewProps> = ({
                   )}
                   {!esGrupo && (
                     <>
-                      {/* 🆕 F3.56 — 📷 cámara directa: 1 toque → foto → la
-                          comprime y la manda el bot (mismo canal que la
-                          galería: respuestas_manuales con imagen+base64). */}
-                      <button
-                        type="button"
-                        onClick={() => { inputFotoRef.current?.click(); setMenuAdjuntos(false); setEmojiAbierto(false); setMenuRapidos(false); }}
-                        className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition-colors flex-shrink-0"
-                        title="📷 Tomar foto y enviarla (fase 3.56 — la envía el bot)"
-                      >
-                        <Camera className="w-5 h-5" />
-                      </button>
                       <button
                         type="button"
                         onClick={() => { setMenuAdjuntos((v) => !v); setEmojiAbierto(false); setMenuRapidos(false); }}
                         className={`p-2.5 rounded-xl transition-colors ${menuAdjuntos ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
-                        title="Adjuntar (galería o documento)"
+                        title="Adjuntar"
                       >
                         <Paperclip className="w-5 h-5" />
                       </button>
