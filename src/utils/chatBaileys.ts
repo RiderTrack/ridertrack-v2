@@ -1034,11 +1034,19 @@ export const GRUPO_MATE_JID = '120363128461377751@g.us';
  * enviar nada a WhatsApp (verificado en Firestore: los "Hola" de
  * prueba quedaron processed=true pero nunca llegaron al grupo).
  * Ahora el payload es IDÉNTICO al de la v1.
+ *
+ * 🖼️ FASE 3.61 — conImagen: los REPORTES van con imagen, el chat limpio.
+ * El bot (grupo_mate.js v1.6, fase 3.60) YA está esperando este campo:
+ * conImagen: true → el reporte sale con la imagen mate_gracias.png
+ * (o la personalizada de Firestore si la subes algún día);
+ * sin conImagen → texto limpio, como siempre (fase 3.60).
+ * Antes de la 3.61 la app NUNCA mandaba conImagen → los reportes
+ * de los botoncitos rápidos salían como texto pelado.
  */
 export async function enviarAGrupoMate(
   texto: string,
   rider?: RiderInfo,
-  opts?: { conImagen?: boolean }
+  conImagen = false
 ): Promise<void> {
   const t = texto.trim();
   if (!t) throw new Error('Escribe un mensaje para el grupo');
@@ -1050,11 +1058,9 @@ export async function enviarAGrupoMate(
     texto: t,
     grupoId: GRUPO_MATE_JID,
     estado: 'otros',
-    // ⚡ F3.59 — false (default) = mensaje normal del chat del panel
-    // → el robot lo manda como TEXTO plano. true = reporte a la
-    // empresa (menú de reportes) → CON imagen del grupo MATE.
-    conImagen: opts?.conImagen === true,
     ...(rider ? { rider } : {}),
+    // 🖼️ f3.61 — la señal que el bot v1.6 estaba esperando
+    ...(conImagen ? { conImagen: true } : {}),
     createdAt: new Date().toISOString(),
     processed: false,
   });
