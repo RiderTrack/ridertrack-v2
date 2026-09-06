@@ -23,6 +23,9 @@ import { ChatBaileysView } from './components/ChatBaileysView';
 // Fase 3.15: RiderChat (WhatsApp Oficial Meta) acoplado al panel —
 // la app RiderChat V2 completa ahora vive en la pestaña chatapi
 import { RiderChatView } from './components/riderchat/RiderChatView';
+// Fase 4.1: 📱 WhatsApp PERSONAL (celular 2 · bot-personal) — tus
+// chats privados en el panel con todo lo del Chat Baileys
+import { WhatsAppPersonalView } from './components/WhatsAppPersonalView';
 import { CatalogoView } from './components/CatalogoView';
 import { BotControlView } from './components/BotControlView';
 import { ResumenView } from './components/ResumenView';
@@ -104,6 +107,7 @@ const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
   motorizados: 'GPS del Motorizado',
   whatsapp: 'Chat Baileys',
   chatapi: 'Rider Chat Oficial',
+  whatsappPersonal: 'WhatsApp Personal',
   catalogo: 'Catálogo',
   plantillas: 'Centro del Bot',
   broadcast: 'Broadcast',
@@ -241,6 +245,19 @@ export default function App() {
 
   // Fase 3.15: no leídos del Rider Chat (WhatsApp Oficial) → badge del menú
   const [riderChatNoLeidos, setRiderChatNoLeidos] = useState(0);
+
+  // Fase 4.1: no leídos del WhatsApp PERSONAL → badge del menú
+  const [whatsappPersonalNoLeidos, setWhatsappPersonalNoLeidos] = useState(0);
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, 'mensajes_personal'), where('leido', '==', false), where('origen', '==', 'personal'), fsLimit(200));
+    const unsub = onSnapshot(
+      q,
+      (snap) => setWhatsappPersonalNoLeidos(snap.size),
+      (err) => console.warn('[WhatsAppPersonal] badge no leídos:', err.message)
+    );
+    return () => unsub();
+  }, []);
 
   // ═════════════════════════════════════════
   // 🔔 Fase 3.17: AVISOS GLOBALES DE CHAT — aunque estés en Mi Ruta,
@@ -869,6 +886,7 @@ export default function App() {
           activeDriversCount={1}
           chatNoLeidos={chatNoLeidos}
           riderChatNoLeidos={riderChatNoLeidos}
+          whatsappPersonalNoLeidos={whatsappPersonalNoLeidos}
           riderName={riderName}
           riderAvatar={avatarEfectivo}
           onSeleccionarAvatar={handleSeleccionarAvatar}
@@ -995,6 +1013,15 @@ export default function App() {
                 setChatActivoPorCanal((prev) => ({ ...prev, meta: tel }))
               }
             />
+          )}
+
+          {/* Fase 4.1: 📱 WhatsApp PERSONAL — el celular 2 (bot-personal)
+              en el panel: chats, grupos, llamadas, archivos, etiquetas
+              (familia/amigos/pareja), archivados, restringidos, QR de
+              re-vinculación y respuestas rápidas (motor AUTO apagado).
+              Respuestas 100% manuales con tu número personal. */}
+          {activeTab === 'whatsappPersonal' && (
+            <WhatsAppPersonalView onShowToast={showToast} />
           )}
 
           {/* Fase 3.3: 🛍️ Catálogo (mudanza de ClienteTrack) — productos con

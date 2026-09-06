@@ -10,6 +10,7 @@ export type NavigationTab =
   | 'motorizados'
   | 'whatsapp'
   | 'chatapi'
+  | 'whatsappPersonal'
   | 'catalogo'
   | 'plantillas'
   | 'broadcast'
