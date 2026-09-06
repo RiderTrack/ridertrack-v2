@@ -37,6 +37,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-is": "^19.2.8",
+    "react-qr-code": "^2.2.0",
     "recharts": "^3.10.1",
     "vite": "^6.2.3",
     "xlsx": "^0.18.5"
