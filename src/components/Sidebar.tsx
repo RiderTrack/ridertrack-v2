@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   MessageSquare,
   Store,
+  Smartphone,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -59,6 +60,8 @@ interface SidebarProps {
   chatNoLeidos?: number;
   /** Fase 3.15: chats sin leer del Rider Chat Oficial (badge del menú) */
   riderChatNoLeidos?: number;
+  /** Fase 4.1: chats sin leer del WhatsApp PERSONAL (badge del menú) */
+  whatsappPersonalNoLeidos?: number;
   /** Nombre real del rider (perfil) */
   riderName?: string;
   /** Avatar ilustrado elegido (Fase 1.5) */
@@ -93,6 +96,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeDriversCount,
   chatNoLeidos = 0,
   riderChatNoLeidos = 0,
+  whatsappPersonalNoLeidos = 0,
   riderName = 'Rider',
   riderAvatar,
   onSeleccionarAvatar,
@@ -176,6 +180,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: riderChatNoLeidos > 0 ? `${riderChatNoLeidos}` : undefined,
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
+        {
+          id: 'whatsappPersonal',
+          label: 'WhatsApp Personal',
+          icon: Smartphone,
+          badge: whatsappPersonalNoLeidos > 0 ? `${whatsappPersonalNoLeidos}` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        },
         { id: 'catalogo', label: 'Catálogo', icon: Store },
         { id: 'plantillas', label: 'Centro del Bot', icon: SlidersHorizontal },
       ],
@@ -229,7 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex lg:hidden items-center justify-between p-4 border-b border-slate-800">
         <div className="flex flex-col">
           <span className="font-bold text-white text-base">RiderTrack V2</span>
-          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 3.62</span>
+          <span className="text-[10px] text-blue-400 font-bold font-mono tracking-wider">FASE 4.1</span>
         </div>
         <button
           onClick={onCloseMobile}
