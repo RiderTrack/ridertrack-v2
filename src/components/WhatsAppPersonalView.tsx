@@ -13,7 +13,7 @@ import {
   PhoneIncoming, PhoneMissed, PhoneCall, PhoneOff, FileText, Image as ImageIcon,
   X, ChevronLeft, MoreVertical, Pin, Archive, Tag, Ban, Eraser, Smile,
   Zap, Plus, Pencil, QrCode, Clock, Check, AlertTriangle, Lock, Bot,
-  Smartphone, MessageCircle, Video as VideoIcon, User, File, RefreshCw,
+  Smartphone, MessageCircle, Video as VideoIcon, User, File, RefreshCw, Music,
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import {
@@ -30,6 +30,9 @@ import {
   leerMediaPersonal, reencolarPendientePersonal,
 } from '../utils/chatPersonal';
 import { horaCorta, etiquetaDia } from '../utils/chatBaileys';
+// F5.1: 🎵 apartado de configuración de medios por chat
+import { PanelMediosChat } from './medios/PanelMediosChat';
+import { esComandoMedios, ejecutarComandoMedios } from '../utils/mediosChat';
 
 // ── Emojis del composer (familia/amor/trabajo — mundo personal) ──
 const EMOJIS = [
@@ -42,7 +45,7 @@ const EMOJIS = [
 const MAX_SEG_AUDIO = 120;
 const CLAVE_FIJADOS = 'rt_personal_fijados_v1';
 
-type Pestana = 'chats' | 'grupos' | 'llamadas' | 'archivos' | 'rapidas';
+type Pestana = 'chats' | 'grupos' | 'llamadas' | 'archivos' | 'rapidas' | 'medios';
 
 interface WhatsAppPersonalViewProps {
   onShowToast?: (titulo: string, desc?: string, tipo?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -474,6 +477,22 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
   // ── Envío de texto ─────────────────────────────────────
   const enviar = useCallback(async () => {
     if (!convActiva || !texto.trim() || enviando) return;
+    // F5.1: si es un comando de medios (!radio, pon musica…) se
+    // ejecuta AHORA en la app y NO se manda como mensaje de WhatsApp.
+    if (esComandoMedios(texto)) {
+      const antes = texto;
+      setTexto('');
+      setEmojiAbierto(false);
+      setMenuRapidos(false);
+      try {
+        const res = await ejecutarComandoMedios(antes);
+        if (res) toast('🎵 Medios por chat', res.split('\n')[0].slice(0, 70), 'success');
+        else toast('🎵 No entendí ese comando', 'Probá con !ayuda para ver la lista', 'warning');
+      } catch {
+        toast('🎵 Falló el comando', 'Probá de nuevo o usá !ayuda', 'error');
+      }
+      return;
+    }
     setEnviando(true);
     try {
       await enviarMensajePersonal(convActiva, texto);
@@ -793,13 +812,14 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
   };
 
   const Pestanas = () => (
-    <div className="grid grid-cols-5 border-b border-slate-700/60">
+    <div className="grid grid-cols-6 border-b border-slate-700/60">
       {([
         { id: 'chats', icono: <MessageCircle size={15} />, texto: 'Chats' },
         { id: 'grupos', icono: <Users size={15} />, texto: 'Grupos' },
         { id: 'llamadas', icono: <PhoneIncoming size={15} />, texto: 'Llamadas' },
         { id: 'archivos', icono: <File size={15} />, texto: 'Archivos' },
         { id: 'rapidas', icono: <Zap size={15} />, texto: 'Rápidas' },
+        { id: 'medios', icono: <Music size={15} />, texto: 'Medios' },
       ] as { id: Pestana; icono: ReactNode; texto: string }[]).map((p) => (
         <button
           key={p.id}
@@ -1130,6 +1150,9 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
                 </div>
               ))}
             </div>
+          )}
+          {pestana === 'medios' && (
+            <PanelMediosChat onShowToast={toast} />
           )}
         </div>
 

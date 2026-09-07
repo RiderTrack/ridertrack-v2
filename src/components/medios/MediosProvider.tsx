@@ -27,7 +27,7 @@ import {
 } from '../../services/spotify';
 import {
   YouTubeEstado, subscribeYouTube, tocarYouTube, ytTogglePlay, ytDetener,
-  extraerVideoId, getEstadoYouTube,
+  extraerVideoId, getEstadoYouTube, YT_CONTAINER_ID,
 } from '../../services/mediosYouTube';
 // F3.43: 🎧 podcasts RSS — mismo player de la app, pausa cortés
 import {
@@ -45,9 +45,11 @@ import {
 } from '../../services/podcastRSS';
 // F3.42/F3.43: la jornada hablada (TTS) se corta cuando suena un episodio
 import { detenerPodcast as detenerJornadaHablada } from '../../services/podcast';
+// F5.1: 🎵 medios por chat personal (escucha comandos en mensajes_personal)
+import { arrancarMediosChat } from '../../utils/mediosChat';
 
-/** ID del contenedor persistente del iframe de YouTube */
-export const YT_CONTAINER_ID = 'rt-yt-player-container';
+/** ID del contenedor persistente del iframe de YouTube (vive en mediosYouTube.ts desde F5.1) */
+export { YT_CONTAINER_ID };
 
 export type FuenteMedia = 'radio' | 'spotify' | 'youtube' | 'podcast';
 
@@ -136,6 +138,14 @@ export const MediosProvider: React.FC<{
     const off = arrancarPodcastsRSS(uid);
     return off;
   }, [uid]);
+
+  // ── F5.1: 🎵 medios por chat — escucha comandos del WhatsApp personal
+  // (montado aquí, no en la vista: los comandos andan en TODA la app) ──
+  useEffect(() => {
+    const apagar = arrancarMediosChat({ engine, onShowToast });
+    return apagar;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine]);
 
   // ── Restaurar sesión de Spotify (token fresco o refresh) ──
   // F3.28: si el deep link YA intercambió el código (App.tsx lo

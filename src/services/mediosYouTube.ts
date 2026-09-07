@@ -26,6 +26,10 @@ export interface YouTubeEstado {
 
 const KEY_FAVS = 'rt_yt_favoritos';
 
+/** F5.1: id del contenedor persistente del iframe (lo renderiza
+ *  MediosProvider; lo comparten el mini-reproductor y el chat) */
+export const YT_CONTAINER_ID = 'rt-yt-player-container';
+
 export function leerFavoritosYT(): VideoFavorito[] {
   try {
     const v = JSON.parse(localStorage.getItem(KEY_FAVS) || '[]');
