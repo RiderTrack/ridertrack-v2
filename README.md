@@ -55,7 +55,7 @@ src/
 
 ```bash
 # 1. Instalar dependencias
-npm install --legacy-peer-deps
+npm install
 
 # 2. Servidor de desarrollo (http://localhost:3000)
 npm run dev
@@ -67,8 +67,9 @@ npm run lint
 npm run build
 ```
 
-> ⚠️ El flag `--legacy-peer-deps` es necesario temporalmente: hay un
-> conflicto de versiones entre Capacitor 6 y `@capacitor-community/text-to-speech`.
+> ℹ️ El archivo `.npmrc` (incluido) ya activa `legacy-peer-deps` automáticamente:
+> hay un conflicto temporal de peer dependencies entre Capacitor 6 y
+> `@capacitor-community/text-to-speech` que npm resuelve así sin problemas.
 
 ## 📦 Build del APK (automático)
 

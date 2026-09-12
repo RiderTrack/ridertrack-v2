@@ -140,9 +140,12 @@ jobs:
       - name: Set Gradle permissions
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      # F-AUD1: build RELEASE (antes assembleDebug) — APK optimizado y sin
+      # modo debugging. El template de Capacitor trae minifyEnabled false,
+      # así que no hay riesgo de ProGuard rompiendo plugins.
+      - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Restore or generate keystore
         run: |
@@ -167,7 +170,7 @@ jobs:
       - name: Zipalign APK
         run: |
           ZIPALIGN=$(find $ANDROID_SDK_ROOT -name "zipalign" | head -1)
-          $ZIPALIGN -v -p 4 android/app/build/outputs/apk/debug/app-debug.apk RiderTrackV2-aligned.apk
+          $ZIPALIGN -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk RiderTrackV2-aligned.apk
 
       - name: Sign APK
         run: |
