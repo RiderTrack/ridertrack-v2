@@ -26,8 +26,11 @@ import {
   LogOut,
   User,
   Mail,
+  CarTaxiFront,
   Image as ImageIcon,
 } from 'lucide-react';
+// FASE C: ⚙️ ajustes de inDrive — el panel completo vive acá dentro
+import PanelAjustesDT from '../drivertrack/panels/PanelAjustesDT';
 import { Capacitor } from '@capacitor/core';
 import { ConfigCuentasModal } from './ConfigCuentasModal';
 import { WhatsAppApiModal } from './WhatsAppApiModal';
@@ -109,6 +112,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
 
   // ── Seguridad (Fase 3.14 — sesión) ──
   const [segAbierto, setSegAbierto] = useState(false);
+  // FASE C: 🏍️ ajustes de inDrive (viajes libres) — viven ACÁ, en la
+  // Configuración del panel general, no más como pestaña propia
+  const [dtAbierto, setDtAbierto] = useState(false);
 
   // ── Icono de la App (Fase 3.21 — logo que representa a RiderTrack V2) ──
   const [iconoAbierto, setIconoAbierto] = useState(false);
@@ -418,6 +424,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
               <div className="text-[11px] text-slate-400">Avisos GPS: giros, llegada y recálculo</div>
             </div>
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-all ${reglasAbierto ? 'rotate-90' : ''}`} />
+          </div>
+        </button>
+
+        {/* FASE C: 🏍️ inDrive (libre) — la configuración de tus
+            viajes libres vive acá, junto a la del trabajo */}
+        <button
+          onClick={() => setDtAbierto((v) => !v)}
+          className="text-left p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all active:scale-95 group sm:col-span-2"
+          data-testid="ajustes-dt-toggle"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+              <CarTaxiFront className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">inDrive (libre) 🏍️</div>
+              <div className="text-[11px] text-slate-400">
+                Robot, mensajes editables, imágenes, escáner, meta, comisiones y backup de tus viajes libres
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-all ${dtAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
 
@@ -910,6 +937,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
               editable aquí mismo sin recompilar. Se guarda comprimida (máx 512 px) en tu cuenta.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* FASE C: ⚙️ Ajustes de INDRIVE — el panel completo de
+          DriverTrack (robot, plantillas, imágenes, meta, comisiones,
+          backup y sync) vive acá dentro, con su estilo propio */}
+      {dtAbierto && (
+        <div className="sm:col-span-2 p-4 sm:p-5 rounded-2xl bg-slate-800/60 border border-emerald-500/30 space-y-3">
+          <div>
+            <h3 className="font-bold text-white text-sm">🏍️ inDrive (libre)</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              La configuración de tus viajes libres — todo lo que guardés acá queda en tu cuenta y se ve en
+              cualquier cel (☁️ sync solo).
+            </p>
+          </div>
+          <PanelAjustesDT
+            onToast={(msg) => onShowToast?.(msg, undefined, 'info')}
+            onIrAYape={() => onNavigateTab?.('yape')}
+          />
         </div>
       )}
 

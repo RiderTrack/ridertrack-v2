@@ -19,13 +19,18 @@ export interface Viaje {
   cliente: string;
   zona: string;
   direccion: string;   // F-ID2.5: dirección de ENTREGA propia (antes vivía perdida en notas)
+                         // FASE C: es la dirección B (entrega); la A (recojo) va en dirA
+  dirA?: string;       // FASE C: dirección de RECOJO (A) — de dónde salís a buscar el pedido
   celular: string;     // F-ID2.5: WhatsApp del cliente → botón de cobro
+  celularEnvia?: string;  // FASE C: teléfono de QUIEN ENVÍA el paquete (si es delivery)
+  celularRecibe?: string; // FASE C: teléfono de QUIEN RECIBE el paquete en destino
   yapeNombre: string;  // F-ID2.6: nombre de la cuenta yape del pedido (ej: "Mk" en "Mk yape 980811297")
   yapeNumero: string;  // F-ID2.6: número yape/plin del pedido — para saber QUIÉN pagó
   kmGPS: number;       // F-ID3: km REALES grabados con GPS mientras manejabas (0 = sin grabar)
   duracionSeg: number; // F-ID3: cuánto duró el trayecto grabado (segundos de movimiento)
   ruta?: PuntoRuta[];  // F-ID3: el trazado para el mapa (se guarda comprimido, máx ~1500 puntos)
   coordenadas?: { lat: number; lng: number }; // F-ID3.2: dónde es la ENTREGA (pin en el mapa, se pone a mano o por GPS)
+  coordenadasA?: { lat: number; lng: number }; // FASE C: pin del RECOJO (dirección A)
   tarifa: number;      // lo que cobra la app / el cliente
   comisionPct: number; // % que se queda la plataforma
   comision: number;    // monto de la comisión
@@ -81,6 +86,10 @@ export interface ConfigDT {
   robotActivo: boolean;                     // F-ID5: el botón Cobrar manda el cobro por el robot (automático, con tu QR)
   robotUrl: string;                         // F-ID5: dónde escucha el puente del robot (mismo teléfono → localhost)
   robotToken: string;                       // F-ID5: secreto compartido con el puente (tiene que ser IGUAL en el bot)
+  /** FASE C: textos editables de los avisos del robot (si un tipo no
+   * está, se usa el original). Se editan en Ajustes → 💬 Mensajes
+   * del robot y viajan en el backup y la sincronización en la nube. */
+  plantillas?: Record<string, string>;
 }
 
 export interface ResumenDia {

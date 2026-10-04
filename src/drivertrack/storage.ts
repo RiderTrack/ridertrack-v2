@@ -4,6 +4,9 @@
 // ═══════════════════════════════════════════════════════════
 
 import { ConfigDT, Gasto, ResumenDia, TIPOS_GASTO, TipoGasto, Viaje } from './types';
+// FASE C: ☁️ cada cambio en el storage avisa al sync de la nube
+// (si hay sesión abierta, sube con debounce; si no, no hace nada)
+import { avisarCambioDT } from './services/syncDT';
 
 const K_VIAJES = 'dt_viajes_v1';
 const K_CONFIG = 'dt_config_v1';
@@ -55,7 +58,10 @@ export function cargarViajes(): Viaje[] {
     return lista.map(v => ({
       ...v,
       direccion: v.direccion ?? '',
+      dirA: v.dirA ?? '',               // FASE C: dirección de recojo (A)
       celular: v.celular ?? '',
+      celularEnvia: v.celularEnvia ?? '',   // FASE C: quién envía
+      celularRecibe: v.celularRecibe ?? '', // FASE C: quién recibe
       yapeNombre: v.yapeNombre ?? '',
       yapeNumero: v.yapeNumero ?? '',
       kmGPS: v.kmGPS ?? 0,
@@ -86,6 +92,7 @@ export function guardarViajes(v: Viaje[]): void {
       }
     }
   }
+  avisarCambioDT(); // ☁️ FASE C
 }
 
 /** F-ID2.5: completa defaults y MIGRA la key de Claude si quedó pegada en el campo de Gemini. */
@@ -137,6 +144,7 @@ export function cargarConfig(): ConfigDT {
 
 export function guardarConfig(c: ConfigDT): void {
   localStorage.setItem(K_CONFIG, JSON.stringify(c));
+  avisarCambioDT(); // ☁️ FASE C
 }
 
 // ── F-ID6: 💸 Gastos (recargas, gasolina, comida…) ──
@@ -170,6 +178,7 @@ export function guardarGastos(g: Gasto[]): void {
   } catch {
     /* si no hay espacio, se pierde el guardado pero no crashea la app */
   }
+  avisarCambioDT(); // ☁️ FASE C
 }
 
 /** F-ID6: cuánto salió del bolsillo en un día (para descontarlo del neto) */

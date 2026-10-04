@@ -9,11 +9,13 @@ import {
   ArrowRight,
   Bot,
   Check,
+  ChevronDown,
   Compass,
   Database,
   ExternalLink,
   ImagePlus,
   Loader2,
+  MessageSquareText,
   Trash2,
   Upload,
   User,
@@ -25,7 +27,7 @@ import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
 // manda un mensaje REAL a tu WhatsApp
-import { encolarAccionDT, uidDisponible } from '../services/robotBot';
+import { encolarAccionDT, uidDisponible, PLANTILLAS_DEF, ETIQUETAS_PLANTILLA, TipoPlantilla, resolverPlantilla } from '../services/robotBot';
 // FASE B2: imágenes del robot — una por cada aviso, como en el trabajo
 import {
   TIPOS_IMAGEN_DT,
@@ -102,6 +104,18 @@ export default function AjustesView({
   const [robotActivo, setRobotActivo] = useState(config.robotActivo);
   const [robotEstado, setRobotEstado] = useState<'sin-probar' | 'probando' | 'online' | 'offline'>('sin-probar');
   const sesionActiva = uidDisponible() !== null;
+  // FASE C: 💬 textos EDITABLES de los avisos del robot — arrancan
+  // de lo que ya guardaste (o del original de fábrica) y se guardan
+  // solos al editar, igual que todo en esta pantalla
+  const [plantillas, setPlantillas] = useState<Record<string, string>>(() => ({
+    camino: config.plantillas?.camino ?? PLANTILLAS_DEF.camino,
+    llegando: config.plantillas?.llegando ?? PLANTILLAS_DEF.llegando,
+    llegada: config.plantillas?.llegada ?? PLANTILLAS_DEF.llegada,
+    entregado: config.plantillas?.entregado ?? PLANTILLAS_DEF.entregado,
+    ubicacion: config.plantillas?.ubicacion ?? PLANTILLAS_DEF.ubicacion,
+  }));
+  // qué plantilla está abierta para editar (una a la vez, colapsables)
+  const [plantillaAbierta, setPlantillaAbierta] = useState<string | null>(null);
 
   // 🧪 FASE B: probás el robot de verdad — te manda un mensaje a TU
   // WhatsApp (miCelular). Si llega, todo el circuito funciona.
@@ -207,6 +221,13 @@ export default function AjustesView({
       geminiKey: geminiKey.trim(),
       claudeKey: claudeKey.trim(),
       robotActivo,
+      // FASE C: los textos editados de los avisos — solo se guardan
+      // los que CAMBIARON respecto al original (backup limpio)
+      plantillas: Object.fromEntries(
+        (Object.keys(PLANTILLAS_DEF) as TipoPlantilla[])
+          .filter(t => (plantillas[t] ?? '').trim() !== PLANTILLAS_DEF[t].trim())
+          .map(t => [t, (plantillas[t] ?? '').trim()]),
+      ),
       // FASE B: la URL y el token del viejo puente localhost quedan
       // jubilados — se conservan los defaults en la config para que
       // los backups viejos sigan importando sin romper nada.
@@ -228,7 +249,7 @@ export default function AjustesView({
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo]);
+  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas]);
 
   async function probarKey() {
     setProbando(true);
@@ -572,6 +593,88 @@ export default function AjustesView({
       </section>
 
 
+      {/* ═══ FASE C: 💬 Mensajes del robot — textos EDITABLES ═══ */}
+      <section className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4" data-testid="seccion-plantillas">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-indigo-300">
+          <MessageSquareText size={14} /> Mensajes del robot (editables)
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          Cambiale la redacción a cada aviso — <b className="text-indigo-300">se guarda solo</b> al escribir y el
+          próximo mensaje ya sale con tu texto. Usá las etiquetas{' '}
+          <code className="rounded bg-slate-900 px-1 text-[10px] text-indigo-300">{'{cliente}'}</code>{' '}
+          <code className="rounded bg-slate-900 px-1 text-[10px] text-indigo-300">{'{direccion}'}</code>{' '}
+          <code className="rounded bg-slate-900 px-1 text-[10px] text-indigo-300">{'{minutos}'}</code>{' '}
+          <code className="rounded bg-slate-900 px-1 text-[10px] text-indigo-300">{'{miNombre}'}</code> y la app las
+          reemplaza con los datos de cada viaje.
+        </p>
+
+        <div className="mt-3 space-y-2">
+          {(Object.keys(PLANTILLAS_DEF) as TipoPlantilla[]).map(tipo => {
+            const abierta = plantillaAbierta === tipo;
+            const editada = (plantillas[tipo] ?? '').trim() !== PLANTILLAS_DEF[tipo].trim();
+            return (
+              <div
+                key={tipo}
+                className="rounded-xl border border-slate-700 bg-slate-950/60 p-2.5"
+                data-testid={`plantilla-${tipo}`}
+              >
+                <button
+                  onClick={() => setPlantillaAbierta(abierta ? null : tipo)}
+                  className="flex w-full items-center justify-between gap-2 text-left"
+                >
+                  <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-200">
+                    {ETIQUETAS_PLANTILLA[tipo]}
+                    {editada && (
+                      <span className="rounded border border-indigo-500/40 bg-indigo-500/15 px-1.5 py-px text-[8px] font-black text-indigo-300">
+                        EDITADO
+                      </span>
+                    )}
+                  </span>
+                  <ChevronDown size={14} className={`shrink-0 text-slate-500 transition-transform ${abierta ? 'rotate-180' : ''}`} />
+                </button>
+
+                {abierta && (
+                  <div className="mt-2">
+                    <textarea
+                      value={plantillas[tipo] ?? ''}
+                      onChange={e => setPlantillas(prev => ({ ...prev, [tipo]: e.target.value }))}
+                      rows={7}
+                      className="w-full resize-none rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-xs leading-relaxed text-slate-200 outline-none focus:border-indigo-400"
+                      data-testid={`plantilla-input-${tipo}`}
+                    />
+                    <div className="mt-1.5 rounded-xl bg-slate-900/80 px-3 py-2">
+                      <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                        👀 Vista previa (con datos de ejemplo)
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-300">
+                        {resolverPlantilla(plantillas[tipo] ?? '', {
+                          cliente: 'Carlos',
+                          direccion: 'Av. Prueba 123',
+                          minutos: 10,
+                          miNombre: miNombre,
+                        })}
+                      </p>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-slate-500">Los cambios se guardan solos ☁️ (y van a la nube)</p>
+                      {editada && (
+                        <button
+                          onClick={() => setPlantillas(prev => ({ ...prev, [tipo]: PLANTILLAS_DEF[tipo] }))}
+                          className="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition-colors hover:bg-slate-700"
+                          data-testid={`plantilla-reset-${tipo}`}
+                        >
+                          ↩️ Volver al original
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
       {/* FASE B2: 🖼️ Imágenes del robot — como las del TRABAJO, pero
           para tus avisos de inDrive. Subís una imagen por aviso y el
           robot la manda CON el mensaje; si no hay imagen, va texto
@@ -731,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.8.1 (Fase B2 — avisos con imagen + fix encolado) · Lima, PE
+        DriverTrack v0.9.0 (FASE C — plantillas editables + sync nube + panel unificado) · Lima, PE
       </p>
     </div>
   );

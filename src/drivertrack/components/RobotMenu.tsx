@@ -26,8 +26,8 @@ interface Props {
   viaje: Viaje;
   robotActivo: boolean;
   onCerrar: () => void;
-  onAviso: (viaje: Viaje, tipo: TipoAviso, minutos?: number) => Promise<void> | void;
-  onPedirUbicacion: (viaje: Viaje) => Promise<void> | void;
+  onAviso: (viaje: Viaje, tipo: TipoAviso, minutos?: number, telefono?: string) => Promise<void> | void;
+  onPedirUbicacion: (viaje: Viaje, telefono?: string) => Promise<void> | void;
   onCobrar: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   /** FASE B2: qué tipos tienen imagen subida (para el badge 🖼️) */
   tiposConImagen?: string[];
@@ -86,18 +86,29 @@ export default function RobotMenu({
   const quien = viaje.cliente.trim() || 'el cliente';
   const conImagen = (t: string) => tiposConImagen?.includes(t) ?? false;
 
+  // ── FASE C: ¿a quién le mandamos el aviso? Si el viaje tiene los
+  // teléfonos de quien ENVÍA / quien RECIBE, aparecen como opciones;
+  // si no, se comporta como siempre (el cliente del viaje).
+  const telefonos = [
+    { label: 'Cliente', num: viaje.celular.trim() },
+    { label: 'Envía 📤', num: (viaje.celularEnvia ?? '').trim() },
+    { label: 'Recibe 📥', num: (viaje.celularRecibe ?? '').trim() },
+  ].filter(t => t.num.length > 0);
+  const [telIdx, setTelIdx] = useState(0);
+  const telElegido = telefonos[telIdx]?.num ?? viaje.celular.trim();
+
   function elegir(tipo: TipoAviso) {
     if (tipo === 'llegando') {
       // ⏱️ FASE B2: primero elegís los minutos, después se manda
       setPidiendoMinutos(true);
       return;
     }
-    onAviso(viaje, tipo);
+    onAviso(viaje, tipo, undefined, telElegido);
     onCerrar();
   }
 
   function mandarLlegando(min: number) {
-    onAviso(viaje, 'llegando', min);
+    onAviso(viaje, 'llegando', min, telElegido);
     onCerrar();
   }
 
@@ -131,6 +142,30 @@ export default function RobotMenu({
           </button>
         </div>
 
+        {/* FASE C: ¿a quién? — solo si el viaje tiene más de un teléfono
+            (cliente · quien envía · quien recibe) */}
+        {telefonos.length > 1 && (
+          <div className="mt-2.5" data-testid="robot-destinatarios">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">¿A quién le aviso?</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {telefonos.map((t, i) => (
+                <button
+                  key={t.label}
+                  onClick={() => setTelIdx(i)}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-black transition-all active:scale-[0.97] ${
+                    i === telIdx
+                      ? 'bg-violet-500 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                  data-testid={`robot-dest-${t.label}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!pidiendoMinutos ? (
           <>
             {/* 🛣️⏱️🏁✅ los 4 avisos (grilla 2x2) */}
@@ -159,7 +194,7 @@ export default function RobotMenu({
             <div className="mt-2 space-y-2">
               <button
                 onClick={() => {
-                  onPedirUbicacion(viaje);
+                  onPedirUbicacion(viaje, telElegido);
                   onCerrar();
                 }}
                 className="flex w-full items-center gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-3 text-left text-cyan-300 transition-all active:scale-[0.99] hover:bg-cyan-500/20"

@@ -39,6 +39,13 @@ import { NewOrderModal } from './components/NewOrderModal';
 // FASE A: 🏍️ DriverTrack (trabajo libre inDrive) integrado como
 // sección — mismo código del APK standalone, datos propios (dt_*)
 import DriverTrackView from './drivertrack/DriverTrackView';
+// FASE C: paneles de inDrive que viven en las secciones del trabajo
+import PanelMapaDT from './drivertrack/panels/PanelMapaDT';
+import PanelStatsDT from './drivertrack/panels/PanelStatsDT';
+// FASE C: ☁️ sync de los datos de inDrive con la cuenta (multi-cel)
+import { iniciarSyncDT } from './drivertrack/services/syncDT';
+// FASE C: 🏍️ lo que ganás en libre — tarjeta para Dashboard/Resumen
+import ResumenLibreCard from './components/ResumenLibreCard';
 import { ToastContainer, ToastMessage } from './components/Toast';
 // Fase 3.17: avisos globales de chat (campanita + toast flotante)
 import { AvisoChatToast } from './components/AvisoChatToast';
@@ -104,7 +111,7 @@ const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
   seguimiento: 'Seguimiento',
   yape: 'Mi QR Yape',
   pedidos: 'Pedidos',
-  drivertrack: 'inDrive (Libre)',
+  drivertrack: 'Viajes inDrive',
   clientes: 'Clientes',
   repartidores: 'Mi Perfil Rider',
   mapa: 'Mapa de Entregas',
@@ -206,9 +213,20 @@ export default function App() {
   // alterna entre '' (visible) y 'hidden' (display:none) — sin key
   // que lo remonte, como sí pasa con el VistaBoundary de las demás.
   const [dtMontada, setDtMontada] = useState(false);
+  // FASE C: el mapa general tiene dos modos — el del TRABAJO (entregas
+  // del día) y el de tus viajes LIBRES (trazados GPS inDrive)
+  const [mapaModo, setMapaModo] = useState<'trabajo' | 'libre'>('trabajo');
   useEffect(() => {
     if (activeTab === 'drivertrack') setDtMontada(true);
   }, [activeTab]);
+
+  // ☁️ FASE C: sync de los datos de inDrive (viajes, gastos, ajustes)
+  // con la CUENTA — arranca/para solo según la sesión. Con sesión:
+  // todo lo que guardás sube a la nube y baja en cualquier otro cel
+  // con la misma cuenta. Sin sesión: queda todo local como siempre.
+  useEffect(() => {
+    iniciarSyncDT(user?.uid ?? null);
+  }, [user?.uid]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -917,16 +935,23 @@ export default function App() {
               la app ni deja la pantalla en blanco */}
           <VistaBoundary key={activeTab} nombre={NOMBRES_TAB[activeTab] || String(activeTab)}>
           {activeTab === 'dashboard' && (
-            <DashboardView
-              orders={orders}
-              activities={activities}
-              whatsAppMessages={whatsAppMessages}
-              stats={stats}
-              loading={clientesLoading}
-              onOpenWhatsAppModal={handleOpenWhatsAppModal}
-              onOpenNewOrderModal={() => setNewOrderModalOpen(true)}
-              onNavigateTab={setActiveTab}
-            />
+            <>
+              <DashboardView
+                orders={orders}
+                activities={activities}
+                whatsAppMessages={whatsAppMessages}
+                stats={stats}
+                loading={clientesLoading}
+                onOpenWhatsAppModal={handleOpenWhatsAppModal}
+                onOpenNewOrderModal={() => setNewOrderModalOpen(true)}
+                onNavigateTab={setActiveTab}
+              />
+              {/* FASE C: 🏍️ lo que vas ganando en LIBRE — junto a las
+                  stats del trabajo, bien separado y con acceso directo */}
+              <div className="mt-4">
+                <ResumenLibreCard compacta onIrAViajes={() => setActiveTab('drivertrack')} />
+              </div>
+            </>
           )}
 
           {activeTab === 'ruta' && (
@@ -977,14 +1002,42 @@ export default function App() {
             <div className="space-y-4 pb-12">
               <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700 shadow-xl">
                 <h1 className="text-xl sm:text-2xl font-black text-white">Mapa Interactivo</h1>
-                <p className="text-xs text-slate-400">Vista de tus entregas del día</p>
+                <p className="text-xs text-slate-400">
+                  {mapaModo === 'trabajo' ? 'Vista de tus entregas del día' : 'Tus viajes libres de inDrive (trazados GPS y entregas)'}
+                </p>
+                {/* FASE C: toggle Trabajo / 🏍️ Libre — el mapa de inDrive
+                    vive acá adentro, no más como pestaña propia */}
+                <div className="mt-3 inline-flex rounded-xl border border-slate-700 bg-slate-900/70 p-1">
+                  <button
+                    onClick={() => setMapaModo('trabajo')}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-black transition-colors ${
+                      mapaModo === 'trabajo' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    data-testid="mapa-modo-trabajo"
+                  >
+                    📦 Trabajo
+                  </button>
+                  <button
+                    onClick={() => setMapaModo('libre')}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-black transition-colors ${
+                      mapaModo === 'libre' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    data-testid="mapa-modo-libre"
+                  >
+                    🏍️ inDrive (libre)
+                  </button>
+                </div>
               </div>
-              <LiveMap
-                orders={orders}
-                riderName={profile?.nombre || user?.displayName || 'Rider'}
-                onOpenWhatsApp={(phone, name) => handleOpenWhatsAppModal(phone, name)}
-                onNavigateTab={setActiveTab}
-              />
+              {mapaModo === 'trabajo' ? (
+                <LiveMap
+                  orders={orders}
+                  riderName={profile?.nombre || user?.displayName || 'Rider'}
+                  onOpenWhatsApp={(phone, name) => handleOpenWhatsAppModal(phone, name)}
+                  onNavigateTab={setActiveTab}
+                />
+              ) : (
+                <PanelMapaDT />
+              )}
             </div>
           )}
 
@@ -1063,12 +1116,37 @@ export default function App() {
           {activeTab === 'backups' && <BackupsView onShowToast={showToast} />}
 
           {/* Fase 2.16: 📊 Estadísticas estilo Circuit (datos reales del historial) */}
-          {activeTab === 'stats' && <EstadisticasView onShowToast={showToast} />}
+          {activeTab === 'stats' && (
+            <>
+              <EstadisticasView onShowToast={showToast} />
+              {/* FASE C: las stats de tus viajes LIBRES viven acá, al
+                  final de las del trabajo — zonas, horas de oro, precio
+                  piso, todo el análisis inDrive */}
+              <div className="mt-6">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-black text-emerald-300">
+                    🏍️ inDrive (libre)
+                  </span>
+                  <span className="text-[11px] text-slate-500">— separado del trabajo</span>
+                </div>
+                <PanelStatsDT />
+              </div>
+            </>
+          )}
 
           {/* Fase 2.16: 📸 Galería de evidencias (hoy + histórico) */}
           {activeTab === 'galeria' && <GaleriaView onShowToast={showToast} />}
 
-          {activeTab === 'estadisticas' && <ResumenView />}
+          {activeTab === 'estadisticas' && (
+            <>
+              <ResumenView />
+              {/* FASE C: lo que ganaste en LIBRE hoy/semana/mes, junto al
+                  resumen del trabajo — pedido a gritos 🏍️ */}
+              <div className="mt-4">
+                <ResumenLibreCard onIrAViajes={() => setActiveTab('drivertrack')} />
+              </div>
+            </>
+          )}
 
           {activeTab === 'configuracion' && <SettingsView onShowToast={showToast} onNavigateTab={(t) => setActiveTab(t as NavigationTab)} />}
           {activeTab === 'medios' && <MediosView />}
@@ -1084,11 +1162,12 @@ export default function App() {
               React lo deja MONTADO (estados, watch GPS, wake lock
               y audio siguen vivos). */}
           {dtMontada && (
-            <VistaBoundary key="drivertrack-keepalive" nombre="inDrive (Libre)">
+            <VistaBoundary key="drivertrack-keepalive" nombre="Viajes inDrive">
               <div className={activeTab === 'drivertrack' ? '' : 'hidden'}>
                 <DriverTrackView
                   activa={activeTab === 'drivertrack'}
                   onIrAYape={() => setActiveTab('yape')}
+                  onIrAAjustes={() => setActiveTab('configuracion')}
                 />
               </div>
             </VistaBoundary>

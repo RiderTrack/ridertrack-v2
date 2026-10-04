@@ -25,7 +25,7 @@
 // gastos y config viajan solos, no se pierde NADA.
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Bike, CheckCircle2, Map as MapIcon, Receipt, Settings } from 'lucide-react';
+import { Bike, Info } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { ConfigDT, Gasto, Viaje } from './types';
@@ -40,11 +40,10 @@ import {
   guardarViajes,
   marcarMetaCelebrada,
   metaYaCelebrada,
-  normalizarConfig,
   resumenDia,
   totalGastosDia,
 } from './storage';
-import { descargarArchivo, armarMensajeCobro, linkWhatsApp, normalizarCelular, vibrar } from './utils';
+import { armarMensajeCobro, linkWhatsApp, normalizarCelular, vibrar } from './utils';
 // FASE B: 🤖 el robot ahora escucha por Firestore (acciones_dt) —
 // cola propia de inDrive, sobrevive reinicios del bot. El viejo
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
@@ -66,15 +65,21 @@ import {
 import ViajeForm from './components/ViajeForm';
 import ViajeList from './components/ViajeList';
 import MetaBar from './components/MetaBar';
-import CajaView from './components/CajaView';
-import MapView from './components/MapView';
 import GpsBar from './components/GpsBar';
-import AjustesView from './components/AjustesView';
-import EstadisticasView from './components/EstadisticasView';
-import YapePanel from './components/YapePanel';
 import Confeti from './components/Confeti';
 
-type Tab = 'viajes' | 'caja' | 'mapa' | 'stats' | 'ajustes';
+// ═══ FASE C: la sección inDrive del menú quedó SOLO en VIAJES ═══
+// La Caja, el Mapa, las Stats y los Ajustes de inDrive ahora viven
+// DENTRO de las secciones del panel general (junto a los del trabajo,
+// bien separados):
+//   💰 Caja del día (menú)  → Caja inDrive adentro
+//   🗺️ Mapa de Entregas     → toggle Trabajo / 🏍️ Libre
+//   📊 Estadísticas         → Stats inDrive al final
+//   ⚙️ Configuración        → Ajustes inDrive adentro
+// Así no hay DOS configuraciones ni DOS cajas en el menú — todo en
+// su sección de siempre. Esta vista sigue siendo la dueña del estado
+// (viajes, gastos, config y la grabación GPS) y las demás piezas
+// leen/escriben el MISMO storage + sync de la nube (syncDT.ts).
 
 interface PropsDTView {
   /** true cuando la sección inDrive está visible en RiderTrack */
@@ -82,10 +87,12 @@ interface PropsDTView {
   /** FASE A2: salta a "Mi QR Yape/Plin" del menú (ahí vive la
    *  pestaña 🏍️ inDrive con tus billeteras personales) */
   onIrAYape?: () => void;
+  /** FASE C: te manda a la Configuración del panel general (ahí
+   *  viven los Ajustes de inDrive) — p.ej. si falta la key del escáner */
+  onIrAAjustes?: () => void;
 }
 
-export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
-  const [tab, setTab] = useState<Tab>('viajes');
+export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: PropsDTView) {
   const [viajes, setViajes] = useState<Viaje[]>(() => cargarViajes());
   // F-ID6: 💸 gastos del día (recargas, gasolina…) — se descuentan del
   // neto para mostrar lo que queda EN MANO. Viven igual que los viajes:
@@ -94,7 +101,6 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   const [config, setConfig] = useState<ConfigDT>(() => cargarConfig());
   const [confeti, setConfeti] = useState(false);
   const [toast, setToast] = useState('');
-  const [cobrarAbierto, setCobrarAbierto] = useState(false);
   // F-ID3: seguimiento GPS en curso (sobrevive recargas: se lee de localStorage)
   const [estadoGPS, setEstadoGPS] = useState<EstadoGPS | null>(() => leerEstadoGPS());
   // FASE A2: TEMA FUSIONADO — inDrive ya no tiene sol/luna propio.
@@ -155,29 +161,41 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   // dispara el invalidateSize interno de Leaflet y recalibra.
   // FASE A2: además recarga la config — pudo cambiar desde la
   // pestaña 🏍️ inDrive de "Mi QR Yape/Plin" (billeteras personales).
+  // FASE C: ahora también recarga viajes y gastos — pudieron cambiar
+  // desde los paneles de inDrive dentro de las secciones del trabajo
+  // (Caja del día, Configuración…) o desde OTRO celular (sync nube).
   useEffect(() => {
     if (!activa) return;
     setConfig(cargarConfig());
+    setViajes(cargarViajes());
+    setGastos(cargarGastos());
     const t = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
     return () => window.clearTimeout(t);
   }, [activa]);
+
+  // ☁️ FASE C: cuando la nube manda datos nuevos (los cambiaste desde
+  // otro celular o desde los paneles del trabajo), se recargan acá —
+  // la grabación GPS en curso NO se toca (vive en estadoGPS aparte)
+  useEffect(() => {
+    const alSync = () => {
+      setViajes(cargarViajes());
+      setGastos(cargarGastos());
+      setConfig(cargarConfig());
+    };
+    window.addEventListener('dt:sync-remoto', alSync);
+    return () => window.removeEventListener('dt:sync-remoto', alSync);
+  }, []);
 
   function agregarViaje(v: Viaje) {
     setViajes(prev => [...prev, v]);
     vibrar(120);
   }
 
-  // ═══ F-ID6: 💸 gastos que descuentan del neto ═══
-  function agregarGasto(g: Gasto) {
-    setGastos(prev => [...prev, g]);
-    vibrar(80);
-    mostrarToast('💸 Gasto anotado — ya descuenta del neto de hoy');
-  }
-
-  function eliminarGasto(id: string) {
-    setGastos(prev => prev.filter(g => g.id !== id));
-    mostrarToast('Gasto eliminado');
-  }
+  // FASE C: agregarGasto/eliminarGasto se mudaron a PanelCajaDT (la
+  // Caja de inDrive vive ahora en el 💰 Caja del día del panel general).
+  // El estado `gastos` sigue ACÁ porque el número del header ("En mano
+  // hoy" = neto − gastos) se calcula con él, y se recarga solo desde
+  // el storage cuando cambia desde los paneles o la nube (dt:sync-remoto).
 
   // F-ID2.7: el Yape PROPIO del driver se guarda UNA vez (desde la
   // pestaña Viajes, sin ir a Ajustes) y sale en TODOS los mensajes de
@@ -256,13 +274,20 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   const [imagenesDT, setImagenesDT] = useState<Record<string, ImagenDT>>({});
   useEffect(() => escucharImagenesDT(setImagenesDT), []);
 
-  async function mandarAviso(viaje: Viaje, tipo: TipoAviso, minutos?: number): Promise<void> {
-    const cel = normalizarCelular(viaje.celular);
+  async function mandarAviso(
+    viaje: Viaje,
+    tipo: TipoAviso,
+    minutos?: number,
+    telefono?: string,
+  ): Promise<void> {
+    // FASE C: teléfono elegido en el menú 🤖 (cliente · quien envía ·
+    // quien recibe) — si no viene, el cliente del viaje como siempre
+    const cel = normalizarCelular(telefono ?? viaje.celular);
     if (!cel) {
       mostrarToast('Este viaje no tiene celular del cliente');
       return;
     }
-    const texto = armarAviso(tipo, viaje, config.miNombre, minutos);
+    const texto = armarAviso(tipo, viaje, config.miNombre, minutos, config.plantillas);
     // FASE B2: la imagen del aviso (si subiste una) viaja como URL —
     // el bot la baja de la nube y la manda junto con el texto
     const imagen = imagenesDT[tipo === 'llegando' ? 'llegando' : tipo];
@@ -301,13 +326,13 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   }
 
   // ═══ FASE B: 📍 pedirle al cliente su ubicación por el chat ═══
-  async function pedirUbicacion(viaje: Viaje): Promise<void> {
-    const cel = normalizarCelular(viaje.celular);
+  async function pedirUbicacion(viaje: Viaje, telefono?: string): Promise<void> {
+    const cel = normalizarCelular(telefono ?? viaje.celular);
     if (!cel) {
       mostrarToast('Este viaje no tiene celular del cliente');
       return;
     }
-    const texto = armarPedirUbicacion(config.miNombre);
+    const texto = armarPedirUbicacion(config.miNombre, config.plantillas?.ubicacion);
     if (!config.robotActivo || !uidDisponible()) {
       window.open(linkWhatsApp(cel, texto), '_blank');
       return;
@@ -510,39 +535,9 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function exportarBackup() {
-    descargarArchivo(
-      `drivertrack-backup-${hoy}.json`,
-      // F-ID6: los gastos viajan dentro del backup (version 2)
-      JSON.stringify({ version: 2, fechaExport: new Date().toISOString(), viajes, gastos, config }, null, 2),
-    );
-    mostrarToast('Backup exportado 💾');
-  }
-
-  function importarBackup(texto: string) {
-    try {
-      const data = JSON.parse(texto);
-      if (Array.isArray(data.viajes)) setViajes(data.viajes);
-      // F-ID6: backups NUEVOS traen gastos; los VIEJOS no → no se toca nada
-      if (Array.isArray(data.gastos)) setGastos(data.gastos);
-      if (data.config) {
-        // F-ID3.3: normaliza el config (los backups viejos no traen
-        // miNombre/miCelular → undefined.trim() reventaría el QR 📱)
-        const c = normalizarConfig(data.config);
-        guardarConfig(c);
-        setConfig(c);
-      }
-      mostrarToast('Backup restaurado ✅');
-    } catch {
-      mostrarToast('Archivo inválido ❌');
-    }
-  }
-
-  function borrarTodo() {
-    setViajes([]);
-    setGastos([]); // F-ID6: se borra todo — viajes Y gastos
-    mostrarToast('Se borraron todos los viajes y gastos');
-  }
+  // FASE C: exportarBackup / importarBackup / borrarTodo se mudaron a
+  // PanelAjustesDT (los Ajustes de inDrive viven ahora en la
+  // Configuración del panel general).
 
   return (
     <div className={`dt-app ${temaClaro ? 'light' : ''} mx-auto flex min-h-screen w-full max-w-md flex-col bg-slate-950`}>
@@ -586,94 +581,65 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
         </div>
       </header>
 
-      {/* Contenido */}
+      {/* Contenido — FASE C: esta sección es SOLO de VIAJES. La Caja,
+          el Mapa, las Stats y los Ajustes de inDrive viven ahora en
+          las secciones del panel general (junto a los del trabajo). */}
       <main className="flex-1 space-y-3 px-4 py-4 pb-24">
-        {tab === 'viajes' && (
-          <>
-            <MetaBar neto={resumenHoy.neto} meta={config.metaDiaria} />
-            <ViajeForm
-              config={config}
-              onAgregar={agregarViaje}
-              onGuardarMiYape={guardarMiYape}
-              onMandarCobro={mandarCobro}
-              cobroEnCurso={cobroEnCurso}
-              onNecesitaKey={() => {
-                setTab('ajustes');
-                mostrarToast('Pegá tu key de IA en 🤖 Escáner — Gemini gratis, 1 minuto');
-              }}
-            />
-            <ViajeList
-              viajes={delDia}
-              onEliminar={eliminarViaje}
-              titulo="de hoy"
-              config={config}
-              viajeGPSActivo={estadoGPS?.viajeId ?? null}
-              onIniciarGPS={iniciarGPSViaje}
-              onDetenerGPS={() => detenerGPS()}
-              onMandarCobro={mandarCobro}
-              cobroEnCurso={cobroEnCurso}
-              onMandarAviso={mandarAviso}
-              onPedirUbicacion={pedirUbicacion}
-              tiposConImagen={Object.keys(imagenesDT)}
-            />
-          </>
-        )}
+        <MetaBar neto={resumenHoy.neto} meta={config.metaDiaria} />
+        <ViajeForm
+          config={config}
+          onAgregar={agregarViaje}
+          onGuardarMiYape={guardarMiYape}
+          onMandarCobro={mandarCobro}
+          cobroEnCurso={cobroEnCurso}
+          onMandarAviso={mandarAviso}
+          onPedirUbicacion={pedirUbicacion}
+          tiposConImagen={Object.keys(imagenesDT)}
+          onNecesitaKey={() => {
+            // FASE C: los Ajustes de inDrive viven en la Configuración
+            // del panel general → te mando ahí
+            onIrAAjustes?.();
+            mostrarToast('Pegá tu key de IA en inDrive → 🤖 Escáner — Gemini gratis, 1 minuto');
+          }}
+        />
+        <ViajeList
+          viajes={delDia}
+          onEliminar={eliminarViaje}
+          titulo="de hoy"
+          config={config}
+          viajeGPSActivo={estadoGPS?.viajeId ?? null}
+          onIniciarGPS={iniciarGPSViaje}
+          onDetenerGPS={() => detenerGPS()}
+          onMandarCobro={mandarCobro}
+          cobroEnCurso={cobroEnCurso}
+          onMandarAviso={mandarAviso}
+          onPedirUbicacion={pedirUbicacion}
+          tiposConImagen={Object.keys(imagenesDT)}
+        />
 
-        {tab === 'caja' && (
-          <CajaView
-            viajes={viajes}
-            config={config}
-            gastos={gastos}
-            onAgregarGasto={agregarGasto}
-            onEliminarGasto={eliminarGasto}
-            onEliminar={eliminarViaje}
-            onCobrar={monto => {
-              if (monto <= 0) return mostrarToast('Hoy no hay neto que cobrar todavía');
-              setCobrarAbierto(true);
-            }}
-            onToast={mostrarToast}
-            viajeGPSActivo={estadoGPS?.viajeId ?? null}
-            onIniciarGPS={iniciarGPSViaje}
-            onDetenerGPS={() => detenerGPS()}
-            onMandarCobro={mandarCobro}
-            cobroEnCurso={cobroEnCurso}
-          />
-        )}
-
-        {tab === 'mapa' && <MapView viajes={viajes} estadoGPS={estadoGPS} />}
-
-        {tab === 'stats' && <EstadisticasView viajes={viajes} />}
-
-        {tab === 'ajustes' && (
-          <AjustesView
-            config={config}
-            onGuardar={setConfig}
-            onIrAYape={onIrAYape}
-            onExportarBackup={exportarBackup}
-            onImportarBackup={importarBackup}
-            onBorrarTodo={borrarTodo}
-            onToast={mostrarToast}
-          />
-        )}
+        {/* FASE C: cartelito para que no busqués con el viejo hábito —
+            tus Caja/Mapa/Stats/Ajustes de inDrive están en las secciones
+            del trabajo, no acá */}
+        <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 px-3 py-2.5" data-testid="hint-secciones">
+          <p className="flex items-start gap-1.5 text-[10px] leading-snug text-slate-400">
+            <Info size={12} className="mt-0.5 shrink-0 text-slate-500" />
+            <span>
+              💡 La <b className="text-slate-300">Caja</b>, el <b className="text-slate-300">Mapa</b>, las{' '}
+              <b className="text-slate-300">Stats</b> y los <b className="text-slate-300">Ajustes</b> de inDrive
+              ahora viven junto a los del trabajo, en el menú: <b className="text-slate-300">💰 Caja del día</b>,{' '}
+              <b className="text-slate-300">🗺️ Mapa de Entregas</b>, <b className="text-slate-300">📊 Estadísticas</b> y{' '}
+              <b className="text-slate-300">⚙️ Configuración</b> (adentro, sección 🏍️ inDrive).
+            </span>
+          </p>
+        </div>
       </main>
 
-      {/* F-ID3: barra de grabación GPS en vivo (encima de la nav, en cualquier pestaña) */}
+      {/* F-ID3: barra de grabación GPS en vivo (en cualquier sección) */}
       {estadoGPS && (
         <GpsBar
           estado={estadoGPS}
           cliente={viajes.find(v => v.id === estadoGPS.viajeId)?.cliente ?? ''}
           onDetener={() => detenerGPS()}
-        />
-      )}
-
-      {/* Panel de cobro Yape */}
-      {cobrarAbierto && (
-        <YapePanel
-          billetera={config.yape}
-          tipo="yape"
-          montoInicial={resumenHoy.neto}
-          onCerrar={() => setCobrarAbierto(false)}
-          onToast={mostrarToast}
         />
       )}
 
@@ -683,37 +649,6 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
           {toast}
         </div>
       )}
-
-      {/* Nav inferior */}
-      <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-md -translate-x-1/2 border-t border-slate-800 bg-slate-950/95 backdrop-blur">
-        <div className="grid grid-cols-5">
-          {(
-            [
-              { id: 'viajes' as Tab, nombre: 'Viajes', icon: Bike },
-              { id: 'caja' as Tab, nombre: 'Caja', icon: Receipt },
-              { id: 'mapa' as Tab, nombre: 'Mapa', icon: MapIcon },
-              { id: 'stats' as Tab, nombre: 'Stats', icon: BarChart3 },
-              { id: 'ajustes' as Tab, nombre: 'Ajustes', icon: Settings },
-            ]
-          ).map(t => {
-            const Icon = t.icon;
-            const activo = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`flex flex-col items-center gap-0.5 py-3 transition-colors ${
-                  activo ? 'text-emerald-400' : 'text-slate-500'
-                }`}
-              >
-                <Icon size={20} strokeWidth={activo ? 2.4 : 2} />
-                <span className="text-[10px] font-bold">{t.nombre}</span>
-                {activo && <CheckCircle2 size={0} />}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
     </div>
   );
 }

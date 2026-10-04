@@ -1,5 +1,5 @@
 ═════════════════════════════════════════════════════════
-🏍️ ROBOT DRIVERTRACK — FASE B2 (avisos con imagen)
+🏍️ ROBOT DRIVERTRACK — FASE B2 + C (imagen + sync nube)
 ═════════════════════════════════════════════════════════
 
 QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
@@ -8,6 +8,11 @@ QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
     Imágenes del robot).
   • Nuevo aviso "Llegando en X minutos" (elegís 5/10/15/20
     o los que quieras desde el menú 🤖 del viaje).
+  • FASE C: actualizar_reglas.js v3 ahora TAMBIÉN agrega la
+    colección dt_sync — es la que hace que tus viajes, gastos
+    y ajustes de inDrive se vean en CUALQUIER cel con tu
+    misma cuenta de RiderTrack. Si ya corriste la versión
+    anterior, esta solo agrega lo que falta (idempotente).
 
 ═════════════════════════════════════════════════════════
 INSTALACIÓN (5 pasos, 2 minutos)
@@ -17,7 +22,7 @@ INSTALACIÓN (5 pasos, 2 minutos)
     (~/bot-whatsapp, donde está index.js):
 
       drivertrack_bot.js      ← parche v1.1 (reemplaza el viejo)
-      actualizar_reglas.js    ← reglas v2 (agrega imagenes_dt)
+      actualizar_reglas.js    ← reglas v3 (agrega imagenes_dt + dt_sync)
       instalar_drivertrack.js ← instalador (mismo de siempre)
 
     (si descomprimís el zip adentro de ~/bot-whatsapp, fijate

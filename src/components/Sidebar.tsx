@@ -42,6 +42,9 @@ import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
 // F3.39/3.40: 💰 caja del día — BOTÓN de menú (badge con el
 // esperado); el gestor completo vive en su modal
 import { CajaMenuBoton, CajaCard } from './CajaCard';
+// FASE C: la CAJA de inDrive (gastos en mano + neto libre) vive
+// dentro del mismo modal del Caja del día, abajo de la del trabajo
+import PanelCajaDT from '../drivertrack/panels/PanelCajaDT';
 // F3.41: 📊 resumen diario → WhatsApp (paso 5 del plan)
 import { ResumenMenuBoton, ResumenDiarioCard } from './ResumenDiarioCard';
 // F3.42: 🎙️ el podcast de la jornada (paso 6, el final del plan)
@@ -151,10 +154,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
-        // FASE A: 🏍️ DriverTrack integrado — tus viajes libres de
-        // inDrive con su caja, mapa, stats y escáner. Datos propios
-        // (dt_*) separados del trabajo — nada se mezcla.
-        { id: 'drivertrack', label: 'inDrive (Libre)', icon: CarTaxiFront },
+        // FASE A + C: 🏍️ tus viajes LIBRES de inDrive — sección de
+        // VIAJES (agregar, avisar, cobrar, GPS). La Caja, el Mapa, las
+        // Stats y los Ajustes de inDrive viven DENTRO de las secciones
+        // del trabajo (Caja del día · Mapa · Estadísticas · Configuración)
+        // para no duplicar el menú. Datos propios (dt_*) separados.
+        { id: 'drivertrack', label: 'Viajes inDrive', icon: CarTaxiFront },
       ],
     },
     // F3.40: 🛣️🔧💰 LA JORNADA — antes eran 3 bloques grandes que
@@ -431,6 +436,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         maxWidth="lg"
       >
         <CajaCard uid={uid} riderName={riderName} onShowToast={onShowToast} />
+        {/* FASE C: 🏍️ la CAJA de tus viajes libres (inDrive) — misma
+            modal, bien separada: gastos en mano, neto del día y lo
+            que queda EN MANO de tus viajes libres */}
+        <div className="mt-6 border-t border-slate-700/60 pt-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-black text-emerald-300">
+              🏍️ inDrive (libre)
+            </span>
+            <span className="text-[11px] text-slate-500">— separado del trabajo</span>
+          </div>
+          <PanelCajaDT />
+        </div>
       </Modal>
 
       {/* 🛣️ F3.40: KILOMETRAJE — stats (Hoy/Ayer/7d/Total) + la

@@ -100,56 +100,82 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
 // el avisarLlegada del trabajo, pero con TU estilo inDrive)
 export type TipoAviso = 'camino' | 'llegando' | 'llegada' | 'entregado';
 
+// FASE C: los textos de los avisos son EDITABLES desde Ajustes →
+// 💬 Mensajes del robot. Estos son los ORIGINALES de fábrica; lo
+// que el usuario guarda en config.plantillas pisa el que sea.
+// Placeholders: {cliente} {direccion} {dirA} {minutos} {miNombre} {firma}
+export type TipoPlantilla = TipoAviso | 'ubicacion';
+
+export const PLANTILLAS_DEF: Record<TipoPlantilla, string> = {
+  camino:
+    '📍 ¡Voy en camino, {cliente}! 🛵\n\nSalgo hacia *{direccion}* y llego en unos minutos 🙌{firma}',
+  llegando:
+    '⏱️ ¡{cliente}, estoy llegando! 🛵\n\nEstoy a *{minutos} minutos* de {direccion} — salí ya para que no te espera el tránsito 🙌{firma}',
+  llegada:
+    '🏁 ¡Ya llegué, {cliente}! 🛵\n\nEstoy afuera en *{direccion}*. Cuando puedas salís y te veo 🙌{firma}',
+  entregado:
+    '✅ ¡Viaje entregado! 🙏\n\nGracias por tu viaje, {cliente}. Si te gustó el servicio, tu calificación me ayuda un montón ⭐⭐⭐⭐⭐\n\n¡Nos vemos en la próxima! 🛵{firma}',
+  ubicacion:
+    '📍 ¿Me ayudás con tu ubicación exacta?\n\nMandámela por este chat: tocá el clip 📎 → *Ubicación* → *Ubicación en tiempo real* 📡 — así llego directo sin vueltas 🛵\n\n— {miNombre} · tu conductor',
+};
+
+/** Etiqueta linda de cada plantilla (para el editor de Ajustes) */
+export const ETIQUETAS_PLANTILLA: Record<TipoPlantilla, string> = {
+  camino: '🛣️ Voy en camino',
+  llegando: '⏱️ Llegando en X minutos',
+  llegada: '🏁 Ya llegué',
+  entregado: '✅ Entregado · gracias',
+  ubicacion: '📍 Pedir ubicación',
+};
+
+/** Reemplaza los {placeholders} de una plantilla con los datos reales */
+export function resolverPlantilla(
+  texto: string,
+  vars: {
+    cliente?: string;
+    direccion?: string;
+    dirA?: string;
+    minutos?: number;
+    miNombre?: string;
+  },
+): string {
+  const nombre = (vars.cliente ?? '').trim() || 'estimado(a)';
+  const dir = (vars.direccion ?? '').trim() || 'tu ubicación';
+  const dirA = (vars.dirA ?? '').trim();
+  const min = vars.minutos && vars.minutos > 0 ? vars.minutos : 10;
+  const mi = (vars.miNombre ?? '').trim();
+  const firma = mi
+    ? `\n\n— ${mi} · tu conductor inDrive 🛵`
+    : '\n\n— Tu conductor inDrive 🛵';
+  return texto
+    .replaceAll('{cliente}', nombre)
+    .replaceAll('{direccion}', dir)
+    .replaceAll('{dirA}', dirA || 'el punto de recojo')
+    .replaceAll('{minutos}', String(min))
+    .replaceAll('{miNombre}', mi || 'Tu conductor')
+    .replaceAll('{firma}', firma);
+}
+
 export function armarAviso(
   tipo: TipoAviso,
-  v: { cliente: string; direccion: string },
+  v: { cliente: string; direccion: string; dirA?: string },
   miNombre: string,
   minutos?: number,
+  /** FASE C: plantillas editadas por el usuario (config.plantillas) */
+  plantillas?: Record<string, string>,
 ): string {
-  const nombre = v.cliente.trim() || 'estimado(a)';
-  const dir = v.direccion.trim();
-  const firma = miNombre.trim() ? `\n\n— ${miNombre.trim()} · tu conductor inDrive 🛵` : '\n\n— Tu conductor inDrive 🛵';
-
-  if (tipo === 'camino') {
-    return (
-      `📍 ¡Voy en camino, ${nombre}! 🛵\n\n` +
-      (dir ? `Salgo hacia *${dir}*` : 'Ya salí hacia tu ubicación') +
-      ` y llego en unos minutos 🙌` +
-      firma
-    );
-  }
-  if (tipo === 'llegando') {
-    // ⏱️ FASE B2: el aviso con minutos, como el del trabajo
-    const min = minutos && minutos > 0 ? minutos : 10;
-    return (
-      `⏱️ ¡${nombre}, estoy llegando! 🛵\n\n` +
-      (dir ? `Estoy a *${min} minutos* de ${dir}` : `Me falta *${min} minutos* para llegar a tu ubicación`) +
-      ` — salí ya para que no te espera el tránsito 🙌` +
-      firma
-    );
-  }
-  if (tipo === 'llegada') {
-    return (
-      `🏁 ¡Ya llegué, ${nombre}! 🛵\n\n` +
-      (dir ? `Estoy afuera en *${dir}*` : 'Estoy afuera esperándote') +
-      `. Cuando puedas salís y te veo 🙌` +
-      firma
-    );
-  }
-  // entregado
-  return (
-    `✅ ¡Viaje entregado! 🙏\n\n` +
-      `Gracias por tu viaje, ${nombre}. Si te gustó el servicio, tu calificación me ayuda un montón ⭐⭐⭐⭐⭐\n\n` +
-      `¡Nos vemos en la próxima! 🛵` +
-      firma
-  );
+  const texto = plantillas?.[tipo]?.trim() || PLANTILLAS_DEF[tipo];
+  return resolverPlantilla(texto, {
+    cliente: v.cliente,
+    direccion: v.direccion,
+    dirA: v.dirA,
+    minutos,
+    miNombre,
+  });
 }
 
 /** 📍 Pedirle al cliente que mande su ubicación por el chat */
-export function armarPedirUbicacion(miNombre: string): string {
-  return (
-    `📍 ¿Me ayudás con tu ubicación exacta?\n\n` +
-      `Mandámela por este chat: tocá el clip 📎 → *Ubicación* → *Ubicación en tiempo real* 📡 — así llego directo sin vueltas 🛵` +
-      (miNombre.trim() ? `\n\n— ${miNombre.trim()} · tu conductor` : '')
-  );
+export function armarPedirUbicacion(miNombre: string, plantilla?: string): string {
+  const texto = plantilla?.trim() || PLANTILLAS_DEF.ubicacion;
+  return resolverPlantilla(texto, { miNombre });
 }

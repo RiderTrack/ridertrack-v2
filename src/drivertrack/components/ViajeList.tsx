@@ -39,8 +39,9 @@ interface Props {
   onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo
   // FASE B: avisos al cliente por el robot (menú 🤖 de cada viaje)
-  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegando' | 'llegada' | 'entregado', minutos?: number) => Promise<void> | void;
-  onPedirUbicacion?: (viaje: Viaje) => Promise<void> | void;
+  // FASE C: + telefono elegido en el menú (cliente · quien envía · quien recibe)
+  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegando' | 'llegada' | 'entregado', minutos?: number, telefono?: string) => Promise<void> | void;
+  onPedirUbicacion?: (viaje: Viaje, telefono?: string) => Promise<void> | void;
   /** FASE B2: tipos de aviso con imagen subida (badge 🖼️ en el menú del robot) */
   tiposConImagen?: string[];
 }
@@ -70,6 +71,14 @@ export default function ViajeList({
     const destino = v.coordenadas ?? { direccion: v.direccion.trim() };
     if (!tieneDestino(destino)) return;
     if (!abrirNavegacion(destino)) setNavViajeId(v.id);
+  }
+
+  /** FASE C: 🧭 navegar al RECOJO (dirección A) de este viaje */
+  const [navAViajeId, setNavAViajeId] = useState<string | null>(null);
+  function navegarViajeA(v: Viaje) {
+    const destino = v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() };
+    if (!tieneDestino(destino)) return;
+    if (!abrirNavegacion(destino)) setNavAViajeId(v.id);
   }
 
   if (viajes.length === 0) {
@@ -111,9 +120,23 @@ export default function ViajeList({
                 −{fmtSoles(v.comision)} ({v.comisionPct}%)
               </span>
             </div>
-            {v.direccion && (
-              <p className="mt-1 truncate text-[10px] leading-snug text-slate-400" title={v.direccion}>
-                📍 {v.direccion}
+            {v.dirA?.trim() ? (
+              <p className="mt-1 truncate text-[10px] leading-snug text-slate-400" title={`${v.dirA} → ${v.direccion}`}>
+                🅰️ {v.dirA} <span className="text-slate-600">→</span>{' '}
+                <span className="text-slate-500">📍 {v.direccion || '—'}</span>
+              </p>
+            ) : (
+              v.direccion && (
+                <p className="mt-1 truncate text-[10px] leading-snug text-slate-400" title={v.direccion}>
+                  📍 {v.direccion}
+                </p>
+              )
+            )}
+            {(v.celularEnvia?.trim() || v.celularRecibe?.trim()) && (
+              <p className="mt-1 truncate text-[10px] leading-snug text-slate-500">
+                {v.celularEnvia?.trim() ? `📤 envía ${v.celularEnvia.trim()}` : ''}
+                {v.celularEnvia?.trim() && v.celularRecibe?.trim() ? ' · ' : ''}
+                {v.celularRecibe?.trim() ? `📥 recibe ${v.celularRecibe.trim()}` : ''}
               </p>
             )}
             {(v.yapeNombre || v.yapeNumero) && (
@@ -165,16 +188,29 @@ export default function ViajeList({
                   <Navigation size={16} />
                 </button>
               ) : null}
-              {/* F-ID3.3: 🧭 navegar a la entrega (solo si hay destino) */}
+              {/* F-ID3.3: 🧭 navegar a la entrega (solo si hay destino) —
+                  FASE C: se llama "B" porque ahora también hay una A (recojo) */}
               {(v.coordenadas || v.direccion.trim()) && (
                 <button
                   onClick={() => navegarViaje(v)}
                   className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 transition-colors hover:bg-cyan-500/25"
-                  aria-label="Navegar a la entrega con Waze o Google Maps"
-                  title="Navegar a la entrega (Waze / Google Maps)"
+                  aria-label="Navegar a la entrega (B) con Waze o Google Maps"
+                  title="Navegar a la ENTREGA (B) — Waze / Google Maps"
                   data-testid="boton-navegar-lista"
                 >
-                  <Compass size={16} />
+                  <span className="text-[11px] font-black">B</span>
+                </button>
+              )}
+              {/* FASE C: 🧭 navegar al RECOJO (dirección A) */}
+              {(v.dirA ?? '').trim() && (
+                <button
+                  onClick={() => navegarViajeA(v)}
+                  className="rounded-lg bg-amber-500/15 p-2 text-amber-300 transition-colors hover:bg-amber-500/25"
+                  aria-label="Navegar al recojo (A) con Waze o Google Maps"
+                  title="Navegar al RECOJO (A) — Waze / Google Maps"
+                  data-testid="boton-navegar-a-lista"
+                >
+                  <span className="text-[11px] font-black">A</span>
                 </button>
               )}
             </div>
@@ -274,6 +310,20 @@ export default function ViajeList({
               destino={v.coordenadas ?? { direccion: v.direccion.trim() }}
               etiqueta={v.direccion.trim()}
               onCerrar={() => setNavViajeId(null)}
+            />
+          );
+        })()}
+
+      {/* FASE C: mini-selector Waze / Google del RECOJO (A) del viaje elegido */}
+      {navAViajeId &&
+        (() => {
+          const v = ordenados.find(x => x.id === navAViajeId);
+          if (!v) return null;
+          return (
+            <NavegarMenu
+              destino={v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() }}
+              etiqueta={(v.dirA ?? '').trim()}
+              onCerrar={() => setNavAViajeId(null)}
             />
           );
         })()}

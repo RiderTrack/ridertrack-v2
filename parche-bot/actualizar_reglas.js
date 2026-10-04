@@ -68,10 +68,23 @@ const BLOQUE_IMAGENES = `    // FASE B2: imágenes de los avisos de inDrive — 
     }
 `;
 
+// ── Bloque 3: sync de datos de inDrive entre celulares (FASE C) ──
+// UN doc por rider (dt_sync/{uid}) con viajes + gastos + ajustes:
+// lo que guardás en un cel se ve en cualquiera con la misma cuenta.
+const BLOQUE_SYNC = `    // FASE C: sync de los datos de inDrive (viajes, gastos,
+    // ajustes) — UN doc por rider con todo su data para verlo en
+    // cualquier cel con la misma cuenta. Solo el dueño entra.
+    match /dt_sync/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+`;
+
 // [marca, bloque, nombre] — se insertan solo los que falten
 const BLOQUES = [
   ['acciones_dt', BLOQUE_ACCIONES, 'acciones_dt (mensajes del robot)'],
   ['imagenes_dt', BLOQUE_IMAGENES, 'imagenes_dt (imágenes de los avisos)'],
+  ['dt_sync', BLOQUE_SYNC, 'dt_sync (sync de datos entre cels)'],
 ];
 
 async function main() {
@@ -169,7 +182,8 @@ async function main() {
 
   console.log('');
   console.log('✅ ¡LISTO! Las reglas vivas ahora permiten los bloques de inDrive.');
-  console.log('   La app ya puede encolar los mensajes y subir las imágenes.');
+  console.log('   La app ya puede encolar los mensajes, subir las imágenes y');
+  console.log('   sincronizar tus viajes/gastos/ajustes entre celulares (dt_sync).');
   console.log('');
   console.log('PRUEBA (desde el teléfono): RiderTrack V2 → inDrive → Ajustes →');
   console.log('   🤖 Robot WhatsApp → "Mandarme prueba" → te llega a tu WhatsApp 📲');

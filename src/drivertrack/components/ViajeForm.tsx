@@ -32,14 +32,17 @@
 //        📞 LLAMAR — botón junto a Cobrar que abre el marcador.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
-import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Phone, Plus, X, Zap } from 'lucide-react';
+import { Bot, Camera, Check, ChevronDown, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, Plus, X, Zap } from 'lucide-react';
 import { ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
 import { armarMensajeCobro, fmtSoles, linkLlamada, linkWhatsApp, normalizarCelular, vibrar } from '../utils';
 import { escanearDireccion } from '../services/escanerIA';
-import { abrirNavegacion, tieneDestino } from '../services/navegacion';
+import { abrirNavegacion, tieneDestino, DestinoNav } from '../services/navegacion';
 import UbicarModal from './UbicarModal';
 import NavegarMenu from './NavegarMenu';
+// FASE C: el robot (avisos 🛣️⏱️🏁✅📍) también desde los recién agregados
+import RobotMenu from './RobotMenu';
+import { TipoAviso } from '../services/robotBot';
 
 // ── F-ID3.2: el BORRADOR del formulario (vive en localStorage) ──
 interface BorradorViaje {
@@ -49,7 +52,10 @@ interface BorradorViaje {
   cliente: string;
   zona: string;
   direccion: string;
+  dirA: string;          // FASE C: dirección de recojo (A)
   celular: string;
+  celularEnvia: string;  // FASE C: teléfono de quien envía
+  celularRecibe: string; // FASE C: teléfono de quien recibe
   yapeNombre: string;
   yapeNumero: string;
   notas: string;
@@ -79,7 +85,10 @@ function leerBorrador(): BorradorViaje | null {
       cliente: b.cliente ?? '',
       zona: b.zona ?? '',
       direccion: b.direccion ?? '',
+      dirA: b.dirA ?? '',
       celular: b.celular ?? '',
+      celularEnvia: b.celularEnvia ?? '',
+      celularRecibe: b.celularRecibe ?? '',
       yapeNombre: b.yapeNombre ?? '',
       yapeNumero: b.yapeNumero ?? '',
       notas: b.notas ?? '',
@@ -114,9 +123,25 @@ interface Props {
   // F-ID5: cobro compartido — robot automático si está activo, si no WhatsApp
   onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo (spinner)
+  // FASE C: avisos del robot desde los "recién agregados" (mismo menú 🤖
+  // de la lista) — opcionales para no romper los tests viejos
+  onMandarAviso?: (viaje: Viaje, tipo: TipoAviso, minutos?: number, telefono?: string) => Promise<void> | void;
+  onPedirUbicacion?: (viaje: Viaje, telefono?: string) => Promise<void> | void;
+  /** FASE B2 (pasa through): tipos de aviso con imagen subida */
+  tiposConImagen?: string[];
 }
 
-export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesitaKey, onMandarCobro, cobroEnCurso = false }: Props) {
+export default function ViajeForm({
+  config,
+  onAgregar,
+  onGuardarMiYape,
+  onNecesitaKey,
+  onMandarCobro,
+  cobroEnCurso = false,
+  onMandarAviso,
+  onPedirUbicacion,
+  tiposConImagen,
+}: Props) {
   // F-ID3.2: el formulario arranca desde el BORRADOR guardado (si
   // había algo escrito/escaneado, NO se pierde al cambiar de pestaña)
   const borradorInicial = useRef(leerBorrador()).current;
@@ -128,7 +153,10 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
   const [cliente, setCliente] = useState(borradorInicial?.cliente ?? '');
   const [zona, setZona] = useState(borradorInicial?.zona ?? '');
   const [direccion, setDireccion] = useState(borradorInicial?.direccion ?? ''); // F-ID2.5: campo propio (antes vivía en notas)
+  const [dirA, setDirA] = useState(borradorInicial?.dirA ?? ''); // FASE C: dirección de RECOJO (A)
   const [celular, setCelular] = useState(borradorInicial?.celular ?? '');   // F-ID2.5: WhatsApp del cliente
+  const [celularEnvia, setCelularEnvia] = useState(borradorInicial?.celularEnvia ?? ''); // FASE C: quién envía
+  const [celularRecibe, setCelularRecibe] = useState(borradorInicial?.celularRecibe ?? ''); // FASE C: quién recibe
   const [yapeNombre, setYapeNombre] = useState(borradorInicial?.yapeNombre ?? ''); // F-ID2.6: "Mk" en "Mk yape 980811297"
   const [yapeNumero, setYapeNumero] = useState(borradorInicial?.yapeNumero ?? ''); // F-ID2.6: 980811297 — para saber quién pagó
   const [notas, setNotas] = useState(borradorInicial?.notas ?? '');
@@ -140,6 +168,13 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
   const [ubicarAbierto, setUbicarAbierto] = useState(false);
   // F-ID3.3: mini-selector Waze/Google (cuando la preferencia es 'preguntar')
   const [navAbierto, setNavAbierto] = useState(false);
+  // FASE C: mini-selector para navegar al RECOJO (A) o a un recién agregado
+  const [navObjetivo, setNavObjetivo] = useState<{ destino: DestinoNav; etiqueta: string } | null>(null);
+  // FASE C: los viajes recién agregados quedan a la vista con botones
+  // (robot · navegar A · navegar B) — "agregar más" ya no te hace perder
+  // de vista el viaje anterior
+  const [recientes, setRecientes] = useState<Viaje[]>([]);
+  const [robotRecienteId, setRobotRecienteId] = useState<string | null>(null);
 
   // ── F-ID2.7: TU Yape para cobrar (se guarda 1 vez, vive en config) ──
   const [miYapeNum, setMiYapeNum] = useState('');
@@ -173,11 +208,11 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
   // cambiar de pestaña (o que Android mate la app) no pierde nada
   useEffect(() => {
     guardarBorrador({
-      origen, tarifa, comisionPct, cliente, zona, direccion, celular,
-      yapeNombre, yapeNumero, notas, coordenadas,
+      origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celular,
+      celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, celular, yapeNombre, yapeNumero, notas, coordenadas]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celular, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -343,6 +378,24 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
     if (!abrirNavegacion(destino)) setNavAbierto(true);
   }
 
+  // FASE C: 🧭 navegar al RECOJO (dirección A) — de dónde salís a
+  // buscar el pedido. Mismo flujo que la entrega (app preferida o
+  // mini-selector si querés elegir cada vez).
+  function navegarARecojo() {
+    const destino = { direccion: dirA.trim() };
+    if (!tieneDestino(destino)) return;
+    if (!abrirNavegacion(destino)) setNavObjetivo({ destino, etiqueta: dirA.trim() });
+  }
+
+  // FASE C: 🧭 navegar a A o B de un viaje recién agregado
+  function navegarReciente(v: Viaje, tramo: 'A' | 'B') {
+    const destino: DestinoNav =
+      tramo === 'A' ? (v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() }) : (v.coordenadas ?? { direccion: v.direccion.trim() });
+    if (!tieneDestino(destino)) return;
+    const etiqueta = tramo === 'A' ? (v.dirA ?? '').trim() : v.direccion.trim();
+    if (!abrirNavegacion(destino)) setNavObjetivo({ destino, etiqueta });
+  }
+
   function enviar() {
     if (!puedeEnviar) {
       setError('Poné la tarifa del viaje');
@@ -352,7 +405,7 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
     const t = parseFloat(tarifa);
     const p = parseFloat(comisionPct) || 0;
     const c = +(t * (p / 100)).toFixed(2);
-    onAgregar({
+    const nuevo: Viaje = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       fecha: fechaHoy(),
       hora: horaAhora(),
@@ -360,7 +413,10 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
       cliente: cliente.trim(),
       zona: zona.trim(),
       direccion: direccion.trim(),
+      ...(dirA.trim() ? { dirA: dirA.trim() } : {}), // FASE C: recojo (A)
       celular: celular.trim(),
+      ...(celularEnvia.trim() ? { celularEnvia: celularEnvia.trim() } : {}),   // FASE C
+      ...(celularRecibe.trim() ? { celularRecibe: celularRecibe.trim() } : {}), // FASE C
       yapeNombre: yapeNombre.trim(),
       yapeNumero: yapeNumero.trim(),
       kmGPS: 0,        // F-ID3: se llena al grabar el recorrido con el botón 📍
@@ -371,18 +427,26 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
       comision: c,
       neto: +(t - c).toFixed(2),
       notas: notas.trim(),
-    });
+    };
+    onAgregar(nuevo);
+    // FASE C: el viaje queda a la vista con sus botones (robot · A · B)
+    // — "agregar más" ya no te hace perder de vista el anterior
+    setRecientes(prev => [nuevo, ...prev].slice(0, 4));
     setTarifa('');
     setCliente('');
     setZona('');
     setDireccion('');
+    setDirA('');
     setCelular('');
+    setCelularEnvia('');
+    setCelularRecibe('');
     setYapeNombre('');
     setYapeNumero('');
     setNotas('');
     setCoordenadas(null);
     borrarBorrador(); // F-ID3.2: el viaje ya está guardado — el borrador se limpia
     limpiarEscaneo();
+    vibrar(60);
   }
 
   return (
@@ -391,6 +455,76 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
         <Zap size={16} className="text-amber-400" />
         <h2 className="text-sm font-bold text-slate-100">Viaje rápido</h2>
       </div>
+
+      {/* ── FASE C: ✅ recién agregados — el viaje anterior queda a la
+          vista con sus botones (🤖 avisar · 🧭 A · 🧭 B) para que
+          "agregar más viajes" no te haga perderlo de vista ── */}
+      {recientes.length > 0 && (
+        <div
+          className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2.5"
+          data-testid="recientes-agregados"
+        >
+          <p className="px-1 text-[10px] font-black uppercase tracking-wide text-emerald-400/90">
+            ✓ Recién agregados ({recientes.length})
+          </p>
+          <div className="mt-1.5 space-y-1.5">
+            {recientes.map(v => (
+              <div
+                key={v.id}
+                className="flex items-center gap-2 rounded-lg bg-slate-900/70 px-2.5 py-2"
+                data-testid="reciente-viaje"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[11px] font-bold text-slate-200">
+                    {v.hora} · {v.cliente || v.zona || 'Viaje'}{' '}
+                    <span className="font-black text-emerald-400">+S/ {v.neto.toFixed(2)}</span>
+                  </p>
+                  {(v.dirA || v.direccion) && (
+                    <p className="truncate text-[10px] text-slate-400">
+                      {v.dirA ? `A: ${v.dirA} → ` : ''}B: {v.direccion || '—'}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {(v.celular.trim() || v.celularEnvia?.trim() || v.celularRecibe?.trim()) && onMandarAviso && (
+                    <button
+                      onClick={() => setRobotRecienteId(v.id)}
+                      className="rounded-lg bg-violet-500/15 p-2 text-violet-300 transition-colors hover:bg-violet-500/25"
+                      aria-label="Avisos del robot para este viaje"
+                      title="🤖 Avisar: voy en camino · ya llegué · entregado…"
+                      data-testid="boton-robot-reciente"
+                    >
+                      <ChevronDown size={15} />
+                    </button>
+                  )}
+                  {(v.dirA ?? '').trim() && (
+                    <button
+                      onClick={() => navegarReciente(v, 'A')}
+                      className="rounded-lg bg-amber-500/15 p-2 text-amber-300 transition-colors hover:bg-amber-500/25"
+                      aria-label="Navegar al recojo (A)"
+                      title="🧭 Navegar al RECOJO (A)"
+                      data-testid="boton-nav-a-reciente"
+                    >
+                      <span className="text-[10px] font-black">A</span>
+                    </button>
+                  )}
+                  {(v.direccion.trim() || v.coordenadas) && (
+                    <button
+                      onClick={() => navegarReciente(v, 'B')}
+                      className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 transition-colors hover:bg-cyan-500/25"
+                      aria-label="Navegar a la entrega (B)"
+                      title="🧭 Navegar a la ENTREGA (B)"
+                      data-testid="boton-nav-b-reciente"
+                    >
+                      <span className="text-[10px] font-black">B</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── F-ID2: escáner de dirección (estilo Circuit) ── */}
       <div className="mb-3 rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-3">
@@ -568,14 +702,38 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
         />
       </div>
 
+      {/* FASE C: dirección A — el RECOJO (de dónde salís a buscar el
+          pedido). La dirección de ENTREGA (B) va abajo; los avisos del
+          robot mencionan la B, y podés navegar a cualquiera de las dos. */}
+      <div className="mt-2 flex gap-2">
+        <input
+          value={dirA}
+          onChange={e => setDirA(e.target.value)}
+          placeholder="🅰️ Dirección de recojo (A) — opcional"
+          className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+          data-testid="input-direccion-a"
+        />
+        {dirA.trim() && (
+          <button
+            onClick={navegarARecojo}
+            className="flex shrink-0 items-center rounded-xl bg-amber-500/15 px-3 text-amber-300 transition-all active:scale-[0.98] hover:bg-amber-500/25"
+            title="Navegar al recojo (A)"
+            data-testid="boton-navegar-a"
+          >
+            <Compass size={16} />
+          </button>
+        )}
+      </div>
+
       {/* F-ID2.5: dirección de entrega (campo propio, se llena con el escaneo)
           F-ID3.2: + botón 📍 para marcar la entrega EN EL MAPA (por
-          coordenadas — pin arrastrable / mi GPS / a mano) */}
+          coordenadas — pin arrastrable / mi GPS / a mano)
+          FASE C: es la dirección B (entrega) — la A (recojo) va arriba */}
       <div className="mt-2 flex gap-2">
         <input
           value={direccion}
           onChange={e => setDireccion(e.target.value)}
-          placeholder="📍 Dirección de entrega (se llena con el escaneo)"
+          placeholder="🅱️ Dirección de entrega (B) — se llena con el escaneo"
           className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
           data-testid="input-direccion"
         />
@@ -673,6 +831,34 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
           {config.robotActivo
             ? '🤖 El robot le manda el cobro SOLO al cliente, con tu QR de Yape adentro · si no responde, abre WhatsApp'
             : '💬 El botón Cobrar abre el WhatsApp del cliente con el mensaje de pago listo · 📞 el teléfono lo llama directo'}
+        </p>
+      )}
+
+      {/* ── FASE C: teléfonos de QUIEN ENVÍA y QUIEN RECIBE — para
+          delivery con dos personas: avisar al que espera el paquete
+          y cobrar al que lo mandó. Opcionales: si no van, todo sigue
+          como siempre (un solo cliente). ── */}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <input
+          value={celularEnvia}
+          onChange={e => setCelularEnvia(e.target.value)}
+          inputMode="tel"
+          placeholder="📤 Cel. de quien ENVÍA"
+          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+          data-testid="input-celular-envia"
+        />
+        <input
+          value={celularRecibe}
+          onChange={e => setCelularRecibe(e.target.value)}
+          inputMode="tel"
+          placeholder="📥 Cel. de quien RECIBE"
+          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+          data-testid="input-celular-recibe"
+        />
+      </div>
+      {(celularEnvia.trim() || celularRecibe.trim()) && (
+        <p className="mt-1 text-[10px] text-slate-500">
+          📤📤 En el menú 🤖 elegís a quién avisar (cliente · quien envía · quien recibe) — el cobro sigue yendo al cliente de arriba
         </p>
       )}
 
@@ -836,6 +1022,34 @@ export default function ViajeForm({ config, onAgregar, onGuardarMiYape, onNecesi
           onCerrar={() => setNavAbierto(false)}
         />
       )}
+
+      {/* FASE C: mini-selector para el RECOJO (A) o los recién agregados */}
+      {navObjetivo && (
+        <NavegarMenu
+          destino={navObjetivo.destino}
+          etiqueta={navObjetivo.etiqueta}
+          onCerrar={() => setNavObjetivo(null)}
+        />
+      )}
+
+      {/* FASE C: menú del robot 🤖 para un viaje recién agregado */}
+      {robotRecienteId &&
+        onMandarAviso &&
+        (() => {
+          const v = recientes.find(x => x.id === robotRecienteId);
+          if (!v) return null;
+          return (
+            <RobotMenu
+              viaje={v}
+              robotActivo={config.robotActivo}
+              onCerrar={() => setRobotRecienteId(null)}
+              onAviso={onMandarAviso}
+              onPedirUbicacion={onPedirUbicacion ?? (() => Promise.resolve())}
+              onCobrar={onMandarCobro}
+              tiposConImagen={tiposConImagen}
+            />
+          );
+        })()}
     </div>
   );
 }
