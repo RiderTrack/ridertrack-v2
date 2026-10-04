@@ -29,8 +29,15 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # El runner ubuntu-latest ya trae el Android SDK preinstalado
+      # (ANDROID_SDK_ROOT + build-tools + platform-tools + cmdline-tools).
+      # La action android-actions/setup-android@v3 se rompió con las
+      # imágenes nuevas del runner (sdkmanager 16: "Failed to find
+      # package 'tools'" — el paquete legacy 'tools' ya no existe).
+      # Mismo fix que ya usaba el workflow de drivertrack: aceptar
+      # licencias manualmente y usar el SDK que viene preinstalado.
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps react-is
