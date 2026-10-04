@@ -211,7 +211,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+        {/* FIX "el cuadradito se sale": antes esta fila era
+            overflow-x-auto y en celulares "Fallidos" + el botón de
+            ordenar quedaban FUERA de la pantalla (445px de contenido
+            en 390px de ancho). Ahora los chips hacen wrap — todo se
+            ve sin scroll escondido. */}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {(['all', 'pendiente', 'entregado', 'cancelado'] as const).map((st) => {
             const count = st === 'all' ? orders.length : orders.filter((o) => o.estado === st).length;
             return (

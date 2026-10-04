@@ -1086,7 +1086,10 @@ export default function App() {
           {dtMontada && (
             <VistaBoundary key="drivertrack-keepalive" nombre="inDrive (Libre)">
               <div className={activeTab === 'drivertrack' ? '' : 'hidden'}>
-                <DriverTrackView activa={activeTab === 'drivertrack'} />
+                <DriverTrackView
+                  activa={activeTab === 'drivertrack'}
+                  onIrAYape={() => setActiveTab('yape')}
+                />
               </div>
             </VistaBoundary>
           )}

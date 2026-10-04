@@ -7,23 +7,25 @@
 // los km en vivo y al terminar quedan guardados en el viaje.
 //
 // 🔗 FASE A (integración en RiderTrack): este archivo es el App.tsx
-// de DriverTrack convertido en VISTA. Cambios respecto del original:
-//   1. Tema SCOPEADO: el modo claro se aplica al contenedor .dt-app
-//      (NO al <html>) — RiderTrack tiene su propio tema y Theme
-//      Studio; cada app manda su propio fondo sin pisarse.
-//   2. Keep-alive: RiderTrack monta esta vista UNA vez y la oculta
+// de DriverTrack convertido en VISTA. FASE A2 (fusión de verdad):
+//   1. TEMA FUSIONADO: ya NO hay sol/luna propio — inDrive acompaña
+//      el modo claro/oscuro del TRABAJO (useTema → modoEfectivo).
+//      Un solo toggle en el header de RiderTrack cambia TODA la app.
+//   2. QR FUSIONADO: "Mi QR" y las billeteras personales ya no viven
+//      acá — se configuran en la vista "Mi QR Yape/Plin" del menú
+//      (pestaña 🏍️ inDrive). Al volver a esta sección la config se
+//      recarga sola (por si la editaste allá).
+//   3. Keep-alive: RiderTrack monta esta vista UNA vez y la oculta
 //      con display:none al cambiar de sección → la grabación GPS de
 //      un viaje en curso SIGUE VIVA aunque estés en otra pestaña.
-//   3. Header sticky a top-16 (debajo del header de RiderTrack).
-//   4. Al volver a la sección (prop activa) se dispara un resize
-//      para que el mapa Leaflet recalibre su tamaño tras estar
-//      oculto (display:none lo deja con tamaño 0).
+//   4. Header sticky a top-16 (debajo del header de RiderTrack) y
+//      resize del mapa Leaflet al volver (display:none lo deja en 0).
 // Los localStorage (dt_viajes_v1, dt_config_v1, dt_gastos_v1,
 // dt_tema_v1) son los MISMOS del APK standalone → tus viajes,
 // gastos y config viajan solos, no se pierde NADA.
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Bike, CheckCircle2, Map as MapIcon, Moon, QrCode, Receipt, Settings, Sun } from 'lucide-react';
+import { BarChart3, Bike, CheckCircle2, Map as MapIcon, Receipt, Settings } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { ConfigDT, Gasto, Viaje } from './types';
@@ -48,7 +50,8 @@ import { descargarArchivo, armarMensajeCobro, linkWhatsApp, normalizarCelular, v
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
 // instalarse y exigía URL + token a mano.
 import { encolarAccionDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAviso } from './services/robotBot';
-import { cargarTema, guardarTema, Tema } from './theme';
+// FASE A2: el tema viene del TRABAJO — mismo toggle para toda la app
+import { useTema } from '../theme/useTema';
 import {
   borrarEstadoGPS,
   duracionMovimientoSeg,
@@ -66,7 +69,6 @@ import GpsBar from './components/GpsBar';
 import AjustesView from './components/AjustesView';
 import EstadisticasView from './components/EstadisticasView';
 import YapePanel from './components/YapePanel';
-import MiQrModal from './components/MiQrModal';
 import Confeti from './components/Confeti';
 
 type Tab = 'viajes' | 'caja' | 'mapa' | 'stats' | 'ajustes';
@@ -74,9 +76,12 @@ type Tab = 'viajes' | 'caja' | 'mapa' | 'stats' | 'ajustes';
 interface PropsDTView {
   /** true cuando la sección inDrive está visible en RiderTrack */
   activa: boolean;
+  /** FASE A2: salta a "Mi QR Yape/Plin" del menú (ahí vive la
+   *  pestaña 🏍️ inDrive con tus billeteras personales) */
+  onIrAYape?: () => void;
 }
 
-export default function DriverTrackView({ activa }: PropsDTView) {
+export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   const [tab, setTab] = useState<Tab>('viajes');
   const [viajes, setViajes] = useState<Viaje[]>(() => cargarViajes());
   // F-ID6: 💸 gastos del día (recargas, gasolina…) — se descuentan del
@@ -87,14 +92,15 @@ export default function DriverTrackView({ activa }: PropsDTView) {
   const [confeti, setConfeti] = useState(false);
   const [toast, setToast] = useState('');
   const [cobrarAbierto, setCobrarAbierto] = useState(false);
-  // F-ID3.3: 📱 Mi QR — tu contacto para mostrarle a los clientes
-  const [qrAbierto, setQrAbierto] = useState(false);
   // F-ID3: seguimiento GPS en curso (sobrevive recargas: se lee de localStorage)
   const [estadoGPS, setEstadoGPS] = useState<EstadoGPS | null>(() => leerEstadoGPS());
-  // FASE A: el tema NO se aplica al <html> (eso le pertenece a
-  // RiderTrack). La clase 'light' va en el contenedor .dt-app —
-  // el CSS scopeado (index.css de RiderTrack) hace el resto.
-  const [tema, setTema] = useState<Tema>(() => cargarTema());
+  // FASE A2: TEMA FUSIONADO — inDrive ya no tiene sol/luna propio.
+  // Acompaña el modo claro/oscuro del TRABAJO: un solo toggle en el
+  // header de RiderTrack y TODA la app (trabajo + inDrive) cambia
+  // junta. La clase 'light' sigue scopeada al contenedor .dt-app
+  // (el Theme Studio no repinta inDrive), pero ahora la decide la app.
+  const { modoEfectivo } = useTema();
+  const temaClaro = modoEfectivo === 'light';
   const toastTimer = useRef<number | null>(null);
   // El watchPosition crea su callback UNA vez → necesita la última
   // versión del estado sin cerrar sobre una vieja: espejo en ref.
@@ -141,18 +147,14 @@ export default function DriverTrackView({ activa }: PropsDTView) {
     toastTimer.current = window.setTimeout(() => setToast(''), 2600);
   }
 
-  function alternarTema() {
-    const t: Tema = tema === 'claro' ? 'oscuro' : 'claro';
-    setTema(t);
-    guardarTema(t);
-    vibrar(40);
-  }
-
   // FASE A: al volver a la sección inDrive (venía oculta con
   // display:none) el mapa Leaflet quedó con tamaño 0 — un resize
   // dispara el invalidateSize interno de Leaflet y recalibra.
+  // FASE A2: además recarga la config — pudo cambiar desde la
+  // pestaña 🏍️ inDrive de "Mi QR Yape/Plin" (billeteras personales).
   useEffect(() => {
     if (!activa) return;
+    setConfig(cargarConfig());
     const t = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
     return () => window.clearTimeout(t);
   }, [activa]);
@@ -187,29 +189,10 @@ export default function DriverTrackView({ activa }: PropsDTView) {
     mostrarToast('💜 Tu Yape quedó guardado — ya sale en todos los cobros');
   }
 
-  // F-ID3.3 + F-ID3.4: tu nombre + celular para el QR — se guardan UN
-  // vez (igual que tu Yape). qrYape (si viene) también actualiza tu
-  // QR de Yape en la MISMA pasada (nada de estados que se pisan)
-  function guardarMiContacto(nombre: string, celular: string, qrYape?: string) {
-    const c: ConfigDT = { ...config, miNombre: nombre, miCelular: celular };
-    if (qrYape !== undefined) c.yape = { ...c.yape, qrBase64: qrYape };
-    guardarConfig(c);
-    setConfig(c);
-    mostrarToast(
-      qrYape
-        ? '💜 Tu QR de Yape quedó guardado — mostraselo al cliente y te paga'
-        : '📱 Tu QR quedó listo — mostraselo al cliente y te escanea'
-    );
-  }
-
-  // F-ID3.4: subir/cambiar/quitar tu QR de Yape directo desde Mi QR
-  // (la misma imagen que usan Ajustes → Yape y el panel de cobro)
-  function guardarQrYape(b64: string) {
-    const c: ConfigDT = { ...config, yape: { ...config.yape, qrBase64: b64 } };
-    guardarConfig(c);
-    setConfig(c);
-    mostrarToast(b64 ? '💜 Tu QR de Yape quedó guardado' : 'QR de Yape quitado');
-  }
+  // FASE A2: "Mi QR" (nombre/celular/QR personal) ya no vive acá —
+  // se configura en la vista "Mi QR Yape/Plin" del menú, pestaña
+  // 🏍️ inDrive. El nombre/celular para el robot se edita en Ajustes
+  // de inDrive (👤 Mis datos).
 
   // ═══ F-ID5: 🤖 cobro AUTOMÁTICO por el robot ═══
   // UN solo flujo compartido para el botón Cobrar del formulario y el
@@ -533,7 +516,7 @@ export default function DriverTrackView({ activa }: PropsDTView) {
   }
 
   return (
-    <div className={`dt-app ${tema === 'claro' ? 'light' : ''} mx-auto flex min-h-screen w-full max-w-md flex-col bg-slate-950`}>
+    <div className={`dt-app ${temaClaro ? 'light' : ''} mx-auto flex min-h-screen w-full max-w-md flex-col bg-slate-950`}>
       <Confeti visible={confeti} />
 
       {/* Header */}
@@ -551,25 +534,10 @@ export default function DriverTrackView({ activa }: PropsDTView) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* 📱 F-ID3.3: Mi QR — el cliente te lo escanea y te tiene */}
-            <button
-              onClick={() => setQrAbierto(true)}
-              aria-label="Mostrar mi QR"
-              title="Mi QR — mostraselo al cliente"
-              data-testid="boton-mi-qr"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-sky-700/60 bg-sky-500/10 text-sky-300 transition-transform active:scale-90"
-            >
-              <QrCode size={16} />
-            </button>
-            {/* 🌗 F-ID2.3: modo claro / oscuro */}
-            <button
-              onClick={alternarTema}
-              aria-label={tema === 'claro' ? 'Activar modo oscuro' : 'Activar modo claro'}
-              data-testid="boton-tema"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 transition-transform active:scale-90"
-            >
-              {tema === 'claro' ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
+            {/* FASE A2: el sol/luna y "Mi QR" ya no viven acá. El tema lo
+                maneja el toggle del TRABAJO (toda la app cambia junta) y
+                tus billeteras personales se configuran en "Mi QR Yape/
+                Plin" → pestaña 🏍️ inDrive del menú. */}
             {/* F-ID6: el número del header es el REAL — cuando anotaste
                 gastos pasa de "Neto hoy" a "En mano hoy" (neto − gastos) */}
             <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-right">
@@ -650,6 +618,7 @@ export default function DriverTrackView({ activa }: PropsDTView) {
           <AjustesView
             config={config}
             onGuardar={setConfig}
+            onIrAYape={onIrAYape}
             onExportarBackup={exportarBackup}
             onImportarBackup={importarBackup}
             onBorrarTodo={borrarTodo}
@@ -674,18 +643,6 @@ export default function DriverTrackView({ activa }: PropsDTView) {
           tipo="yape"
           montoInicial={resumenHoy.neto}
           onCerrar={() => setCobrarAbierto(false)}
-          onToast={mostrarToast}
-        />
-      )}
-
-      {/* F-ID3.3 + F-ID3.4: 📱 Mi QR — 💜 tu QR de Yape para que te paguen
-          (y también WhatsApp/Contacto con tu nombre) */}
-      {qrAbierto && (
-        <MiQrModal
-          config={config}
-          onGuardar={guardarMiContacto}
-          onGuardarQrYape={guardarQrYape}
-          onCerrar={() => setQrAbierto(false)}
           onToast={mostrarToast}
         />
       )}

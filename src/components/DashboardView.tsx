@@ -547,7 +547,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex p-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold">
+            {/* FIX móvil: wrap para que "Fallidos" no se salga de la pantalla */}
+            <div className="flex flex-wrap p-1 rounded-xl bg-slate-900 border border-slate-700 text-xs font-semibold">
               <button
                 onClick={() => setOrderFilter('all')}
                 className={`px-3 py-1 rounded-lg transition-all ${

@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
+// FASE A2: billeteras personales de inDrive (localStorage dt_config_v1)
+import { cargarConfig, guardarConfig, normalizarConfig } from '../drivertrack/storage';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import {
   ConfigCuentas,
@@ -704,12 +706,168 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
 };
 
 // ═══════════════════════════════════════════════════════════
-// 📱 VISTA PRINCIPAL: pestañas Yape / Plin + header
+// FASE A2: 🏍️ PANEL INDRIVE — tus billeteras PERSONALES. Las pestañas
+// 💜/🔷 de arriba son las del TRABAJO (Firestore + sync con el bot).
+// Esta guarda el Yape/Plin PERSONAL de tus viajes libres en el
+// localStorage de inDrive (dt_config_v1): la sección 🏍️ inDrive (Libre)
+// del menú lo lee para armar los cobros — TODO se configura en esta
+// vista, sin duplicar pantallas por la app.
+const IndrivePanel: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
+  // Lee la config ACTUAL de inDrive (dt_config_v1) — misma clave que
+  // usa la sección inDrive del menú → lo que guardás acá sale allá solo.
+  const [yape, setYape] = useState(() => cargarConfig().yape);
+  const [plin, setPlin] = useState(() => cargarConfig().plin);
+  const [ampliado, setAmpliado] = useState<'yape' | 'plin' | null>(null);
+  const fileYape = useRef<HTMLInputElement>(null);
+  const filePlin = useRef<HTMLInputElement>(null);
+
+  function cambiar(cual: 'yape' | 'plin', patch: Partial<{ numero: string; titular: string; qrBase64: string }>) {
+    if (cual === 'yape') setYape(prev => ({ ...prev, ...patch }));
+    else setPlin(prev => ({ ...prev, ...patch }));
+  }
+
+  async function subirQr(cual: 'yape' | 'plin', e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const b64 = await comprimirImagen(file);
+      cambiar(cual, { qrBase64: b64 });
+    } catch {
+      onShowToast?.('No se pudo leer la imagen', 'Probá con otra foto del QR', 'warning');
+    }
+  }
+
+  function guardar() {
+    const previo = cargarConfig();
+    const c = normalizarConfig({ ...previo, yape, plin });
+    guardarConfig(c);
+    onShowToast?.('Billeteras de inDrive guardadas', 'Ya salen en los cobros de tus viajes libres 🏍️', 'success');
+  }
+
+  const inputCls =
+    'w-full rounded-xl bg-slate-900 border border-slate-700 text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/60 placeholder-slate-600';
+
+  const activa = ampliado === 'yape' ? yape : plin;
+
+  return (
+    <div className="space-y-4">
+      {/* 💜 Yape personal */}
+      <div className="rounded-2xl bg-slate-800/80 border border-purple-500/30 shadow-xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-white">💜 Yape personal (inDrive)</h3>
+            <p className="text-[11px] text-slate-400">El que recibe tus cobros de viajes libres — distinto del Yape del trabajo.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input value={yape.numero} onChange={e => cambiar('yape', { numero: e.target.value })} placeholder="Número (ej. 987 654 321)" className={inputCls} />
+          <input value={yape.titular} onChange={e => cambiar('yape', { titular: e.target.value })} placeholder="Titular (tu nombre)" className={inputCls} />
+        </div>
+        <div className="flex items-center gap-2">
+          <input ref={fileYape} type="file" accept="image/*" className="hidden" onChange={e => subirQr('yape', e)} />
+          <button onClick={() => fileYape.current?.click()} className="flex-1 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2.5 transition-colors">
+            📸 {yape.qrBase64 ? 'Cambiar QR' : 'Subir QR (foto de tu app Yape)'}
+          </button>
+          {yape.qrBase64 && (
+            <>
+              <img src={yape.qrBase64} alt="QR Yape personal" onClick={() => setAmpliado('yape')} className="w-11 h-11 rounded-lg border border-purple-500/40 object-cover cursor-zoom-in" />
+              <button onClick={() => cambiar('yape', { qrBase64: '' })} className="p-2 rounded-lg text-slate-500 hover:text-red-400" title="Quitar QR">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 🔷 Plin personal */}
+      <div className="rounded-2xl bg-slate-800/80 border border-cyan-500/30 shadow-xl p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">🔷 Plin personal (inDrive)</h3>
+          <p className="text-[11px] text-slate-400">Opcional — por si algún cliente te paga por Plin.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input value={plin.numero} onChange={e => cambiar('plin', { numero: e.target.value })} placeholder="Número" className={inputCls + ' focus:ring-cyan-500/60'} />
+          <input value={plin.titular} onChange={e => cambiar('plin', { titular: e.target.value })} placeholder="Titular" className={inputCls + ' focus:ring-cyan-500/60'} />
+        </div>
+        <div className="flex items-center gap-2">
+          <input ref={filePlin} type="file" accept="image/*" className="hidden" onChange={e => subirQr('plin', e)} />
+          <button onClick={() => filePlin.current?.click()} className="flex-1 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2.5 transition-colors">
+            📸 {plin.qrBase64 ? 'Cambiar QR' : 'Subir QR (foto de tu app Plin)'}
+          </button>
+          {plin.qrBase64 && (
+            <>
+              <img src={plin.qrBase64} alt="QR Plin personal" onClick={() => setAmpliado('plin')} className="w-11 h-11 rounded-lg border border-cyan-500/40 object-cover cursor-zoom-in" />
+              <button onClick={() => cambiar('plin', { qrBase64: '' })} className="p-2 rounded-lg text-slate-500 hover:text-red-400" title="Quitar QR">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Guardar */}
+      <button
+        onClick={guardar}
+        className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white font-bold text-sm py-3 shadow-lg shadow-purple-600/30 transition-all active:scale-95"
+      >
+        Guardar billeteras de inDrive
+      </button>
+
+      <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Info className="w-4 h-4 text-emerald-400" />
+          <h3 className="text-sm font-bold text-white">¿Cuál es cuál?</h3>
+        </div>
+        <ul className="space-y-1.5 text-[11px] text-slate-400">
+          <li>· Las pestañas <b className="text-purple-300">💜 Yape</b> y <b className="text-cyan-300">🔷 Plin</b> son las del <b>TRABAJO</b> — van a Firebase y el bot las usa con los clientes del trabajo.</li>
+          <li>· Esta pestaña <b className="text-emerald-300">🏍️ inDrive</b> es tu <b>Yape/Plin PERSONAL</b> — el robot lo manda cuando apretás <b>Cobrar</b> en un viaje libre (sección inDrive del menú).</li>
+          <li>· Se guarda en el teléfono (dt_config_v1) — tus viajes y billeteras ya guardados aparecen solos.</li>
+        </ul>
+      </div>
+
+      {/* QR ampliado (para mostrar en persona) */}
+      {ampliado && activa.qrBase64 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
+          onClick={() => setAmpliado(null)}
+        >
+          <div className="relative max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setAmpliado(null)}
+              className="absolute -top-11 right-0 p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="bg-white rounded-2xl p-4">
+              <img src={activa.qrBase64} alt="QR ampliado" className="w-full block rounded-lg" />
+              <div className="text-center mt-3 pb-1">
+                <p className="text-sm font-black text-slate-900">{activa.titular || 'Tu nombre'}</p>
+                <p className={`text-xl font-black font-mono tracking-wider ${ampliado === 'yape' ? 'text-purple-700' : 'text-cyan-700'}`}>{activa.numero}</p>
+                <p className="text-[10px] text-slate-500 mt-1">Escanea con tu app de {ampliado === 'yape' ? 'Yape' : 'Plin'} para pagar</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 📱 VISTA PRINCIPAL: pestañas Yape / Plin + inDrive + header
 // ═══════════════════════════════════════════════════════════
 
 export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
-  const [wallet, setWallet] = useState<WalletId>('yape');
-  const T = TEMAS[wallet];
+  const [wallet, setWallet] = useState<WalletId | 'indrive'>('yape');
+  // FASE A2: la pestaña 🏍️ inDrive tiene su propio look esmeralda
+  const T =
+    wallet === 'indrive'
+      ? {
+          gradHeader: 'bg-gradient-to-br from-emerald-600/20 via-slate-800 to-slate-800 border border-emerald-500/30 shadow-xl',
+          iconBg: 'bg-emerald-500/20 border border-emerald-500/40',
+          iconColor: 'text-emerald-300',
+        }
+      : TEMAS[wallet];
 
   return (
     <div className="space-y-4 pb-12">
@@ -721,12 +879,12 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl font-black text-white">Mis QR de cobro</h1>
-            <p className="text-xs text-slate-400">Yape y Plin — configúralos una vez y el bot los envía por WhatsApp</p>
+            <p className="text-xs text-slate-400">Trabajo e inDrive — configúralos una vez y el bot los envía por WhatsApp</p>
           </div>
         </div>
 
-        {/* Pestañas de billetera */}
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        {/* Pestañas de billetera — FASE A2: + 🏍️ inDrive (personales) */}
+        <div className="mt-4 grid grid-cols-3 gap-2">
           <button
             onClick={() => setWallet('yape')}
             className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
@@ -747,11 +905,25 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           >
             🔷 Plin
           </button>
+          <button
+            onClick={() => setWallet('indrive')}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+              wallet === 'indrive'
+                ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+            }`}
+          >
+            🏍️ inDrive
+          </button>
         </div>
       </div>
 
-      {/* Panel de la billetera activa */}
-      <WalletPanel key={wallet} wallet={wallet} onShowToast={onShowToast} />
+      {/* Panel de la billetera activa — FASE A2: inDrive tiene panel propio */}
+      {wallet === 'indrive' ? (
+        <IndrivePanel onShowToast={onShowToast} />
+      ) : (
+        <WalletPanel key={wallet} wallet={wallet} onShowToast={onShowToast} />
+      )}
     </div>
   );
 };

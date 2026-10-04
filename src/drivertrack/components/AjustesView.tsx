@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-// ⚙️ DriverTrack — Ajustes: meta, comisiones, Yape/Plin,
-// key del escáner Gemini (F-ID2) y backup
+// ⚙️ DriverTrack — Ajustes: meta, comisiones, mis datos (robot)
+// y backup. FASE A2: las billeteras personales ya NO se editan acá
+// — viven en "Mi QR Yape/Plin" del menú (pestaña 🏍️ inDrive).
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
-import { Bot, Check, Compass, Database, ExternalLink, Loader2, Trash2, Upload, X } from 'lucide-react';
-import { Billetera, ConfigDT, ORIGENES } from '../types';
+import { ArrowRight, Bot, Check, Compass, Database, ExternalLink, Loader2, Trash2, Upload, User } from 'lucide-react';
+import { ConfigDT, ORIGENES } from '../types';
 import { CONFIG_DEFECTO, guardarConfig } from '../storage';
-import { comprimirImagen, descargarArchivo } from '../utils';
 import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
@@ -22,91 +22,52 @@ interface Props {
   onImportarBackup: (json: string) => void;
   onBorrarTodo: () => void;
   onToast: (msg: string) => void;
+  /** FASE A2: salta a la vista "Mi QR Yape/Plin" del menú (ahí vive
+   *  la pestaña 🏍️ inDrive con tus billeteras personales) */
+  onIrAYape?: () => void;
 }
 
-function PanelBilletera({
-  titulo,
+function PanelBilleteraResumen({
   emoji,
-  billetera,
-  nota,
-  onChange,
+  nombre,
+  numero,
+  tieneQr,
 }: {
-  titulo: string;
   emoji: string;
-  billetera: Billetera;
-  nota?: string;
-  onChange: (b: Billetera) => void;
+  nombre: string;
+  numero: string;
+  tieneQr: boolean;
 }) {
-  const inputQR = useRef<HTMLInputElement>(null);
-
-  async function subirQR(e: EvArchivo) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const b64 = await comprimirImagen(file);
-      onChange({ ...billetera, qrBase64: b64 });
-    } catch {
-      /* imagen inválida: se ignora */
-    }
-  }
-
   return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-800/40 p-3">
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2">
       <p className="text-xs font-bold text-slate-300">
-        {emoji} {titulo}
+        {emoji} {nombre}
       </p>
-      {nota && <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{nota}</p>}
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <input
-          value={billetera.numero}
-          onChange={e => onChange({ ...billetera, numero: e.target.value })}
-          placeholder="Número (ej. 987 654 321)"
-          className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-emerald-400"
-        />
-        <input
-          value={billetera.titular}
-          onChange={e => onChange({ ...billetera, titular: e.target.value })}
-          placeholder="Titular (tu nombre)"
-          className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-emerald-400"
-        />
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <input ref={inputQR} type="file" accept="image/*" onChange={subirQR} className="hidden" data-testid={`billetera-input-${titulo.toLowerCase()}`} />
-        <button
-          onClick={() => inputQR.current?.click()}
-          className="flex-1 rounded-xl bg-slate-700 py-2 text-xs font-bold text-slate-200"
-          data-testid={`billetera-subir-${titulo.toLowerCase()}`}
-        >
-          📸 {billetera.qrBase64 ? 'Cambiar QR' : 'Subir QR (foto de tu app)'}
-        </button>
-        {billetera.qrBase64 && (
-          <>
-            <img
-              src={billetera.qrBase64}
-              alt={`QR ${titulo}`}
-              className="h-10 w-10 rounded-lg border border-slate-600 object-cover"
-              data-testid={`billetera-thumb-${titulo.toLowerCase()}`}
-            />
-            <button
-              onClick={() => onChange({ ...billetera, qrBase64: '' })}
-              className="rounded-lg p-2 text-slate-500 hover:text-red-400"
-              aria-label="Quitar QR"
-            >
-              <X size={14} />
-            </button>
-          </>
-        )}
-      </div>
+      <p className="text-[11px] text-slate-400">
+        {numero || 'sin número'}{' '}
+        <span className={tieneQr ? 'font-bold text-emerald-400' : 'text-slate-500'}>
+          {tieneQr ? '· QR ✓' : '· sin QR'}
+        </span>
+      </p>
     </div>
   );
 }
 
-export default function AjustesView({ config, onGuardar, onExportarBackup, onImportarBackup, onBorrarTodo, onToast }: Props) {
+export default function AjustesView({
+  config,
+  onGuardar,
+  onExportarBackup,
+  onImportarBackup,
+  onBorrarTodo,
+  onToast,
+  onIrAYape,
+}: Props) {
   const [borrarConfirm, setBorrarConfirm] = useState(false);
   const [meta, setMeta] = useState(String(config.metaDiaria));
   const [comisiones, setComisiones] = useState({ ...config.comisiones });
-  const [yape, setYape] = useState({ ...config.yape });
-  const [plin, setPlin] = useState({ ...config.plin });
+  // FASE A2: tus datos para el robot (antes vivían en "Mi QR")
+  const [miNombre, setMiNombre] = useState(config.miNombre);
+  const [miCelular, setMiCelular] = useState(config.miCelular);
   const [geminiKey, setGeminiKey] = useState(config.geminiKey);
   const [claudeKey, setClaudeKey] = useState(config.claudeKey); // F-ID2.5: token de respaldo
   const [probando, setProbando] = useState(false);
@@ -130,7 +91,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
     }
     const cel = normalizarCelular(config.miCelular);
     if (!cel) {
-      onToast('Poné tu celular en 📱 Mi QR (pestaña de arriba) para probarte el robot');
+      onToast('Poné tu celular en 👤 Mis datos (acá en Ajustes) para probarte el robot');
       return;
     }
     setRobotEstado('probando');
@@ -178,8 +139,10 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
         pedidosya: parseFloat(String(comisiones.pedidosya)) || 0,
         directo: parseFloat(String(comisiones.directo)) || 0,
       },
-      yape,
-      plin,
+      // FASE A2: yape/plin viajan en ...config (se editan en la vista
+      // "Mi QR Yape/Plin" → pestaña 🏍️ inDrive) — acá no se tocan.
+      miNombre: miNombre.trim(),
+      miCelular: miCelular.trim(),
       geminiKey: geminiKey.trim(),
       claudeKey: claudeKey.trim(),
       robotActivo,
@@ -204,7 +167,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, yape, plin, geminiKey, claudeKey, robotActivo]);
+  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo]);
 
   async function probarKey() {
     setProbando(true);
@@ -226,8 +189,8 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
       if (data.config) {
         setMeta(String(data.config.metaDiaria ?? CONFIG_DEFECTO.metaDiaria));
         setComisiones({ ...CONFIG_DEFECTO.comisiones, ...data.config.comisiones });
-        setYape({ ...CONFIG_DEFECTO.yape, ...data.config.yape });
-        setPlin({ ...CONFIG_DEFECTO.plin, ...data.config.plin });
+        setMiNombre(data.config.miNombre ?? '');
+        setMiCelular(data.config.miCelular ?? '');
         setGeminiKey(data.config.geminiKey ?? '');
         setClaudeKey(data.config.claudeKey ?? '');
         setRobotActivo(data.config.robotActivo === true);
@@ -375,15 +338,67 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
         </div>
       </section>
 
-      {/* Billeteras — el Yape sale en TODOS los mensajes de cobro (F-ID2.7) */}
-      <PanelBilletera
-        titulo="Yape"
-        emoji="💜"
-        billetera={yape}
-        nota="Este QR es el MISMO que se muestra GRANDE en tu Mi QR 💜 (botón QR del header) y en el panel de cobro — subilo una vez y listo. El número sale en el mensaje de cobro de WhatsApp."
-        onChange={setYape}
-      />
-      <PanelBilletera titulo="Plin" emoji="🔷" billetera={plin} onChange={setPlin} />
+      {/* FASE A2: 👤 Mis datos — los usa el robot (nombre en los avisos)
+          y la prueba 🧪 (tu celular). Antes vivían en "Mi QR". */}
+      <section className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-sky-300">
+          <User size={14} /> Mis datos (robot)
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          Tu nombre sale en los avisos que manda el robot (🛣️ Voy en camino, 🏁 Ya llegué…). Tu celular
+          es para la prueba 🧪 — el robot te manda el mensaje de prueba ahí.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <input
+            value={miNombre}
+            onChange={e => setMiNombre(e.target.value)}
+            placeholder="Tu nombre (ej. Rudy)"
+            className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-sky-400"
+            data-testid="input-mi-nombre"
+          />
+          <input
+            value={miCelular}
+            onChange={e => setMiCelular(e.target.value)}
+            inputMode="tel"
+            placeholder="Tu celular (WhatsApp)"
+            className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-sky-400"
+            data-testid="input-mi-celular"
+          />
+        </div>
+      </section>
+
+      {/* FASE A2: 💜 Billeteras de inDrive — resumen + salto a la vista
+          del menú. La EDICIÓN vive en "Mi QR Yape/Plin" → pestaña 🏍️
+          inDrive (mismo lugar que las del trabajo, sin duplicar). */}
+      <section className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4">
+        <p className="text-xs font-bold text-purple-300">💜 Billeteras de inDrive (cobros libres)</p>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          El Yape/Plin PERSONAL que sale en los cobros de tus viajes libres. Se configura junto con
+          las del trabajo, en <b className="text-purple-300">Mi QR Yape/Plin</b> del menú — pestaña{' '}
+          <b className="text-purple-300">🏍️ inDrive</b>.
+        </p>
+        <div className="mt-2 space-y-2">
+          <PanelBilleteraResumen
+            emoji="💜"
+            nombre="Yape personal"
+            numero={config.yape.numero}
+            tieneQr={!!config.yape.qrBase64}
+          />
+          <PanelBilleteraResumen
+            emoji="🔷"
+            nombre="Plin personal"
+            numero={config.plin.numero}
+            tieneQr={!!config.plin.qrBase64}
+          />
+        </div>
+        <button
+          onClick={() => onIrAYape?.()}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500/15 py-2.5 text-xs font-bold text-purple-300 active:scale-95"
+          data-testid="boton-ir-yape"
+        >
+          Configurar en Mi QR Yape/Plin <ArrowRight size={14} />
+        </button>
+      </section>
 
       {/* F-ID3.3: 🧭 con qué app viajar a las entregas */}
       <section className="rounded-2xl border border-slate-700 bg-slate-800/40 p-4">
@@ -558,7 +573,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.6.0 (Fase A+B — robot con avisos) · Lima, PE
+        DriverTrack v0.7.0 (Fase A2 — tema y billeteras fusionados) · Lima, PE
       </p>
     </div>
   );
