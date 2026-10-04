@@ -17,12 +17,14 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useState } from 'react';
-import { Bot, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
+import { Bot, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
 import { fmtSoles, linkLlamada } from '../utils';
 import { formatearDuracion } from '../services/gps';
 import { abrirNavegacion, tieneDestino } from '../services/navegacion';
 import NavegarMenu from './NavegarMenu';
+// FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
+import RobotMenu from './RobotMenu';
 
 interface Props {
   viajes: Viaje[]; // solo los del día mostrado
@@ -36,6 +38,9 @@ interface Props {
   // WhatsApp manual si no — mismo mensaje por bloques en ambos casos)
   onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo
+  // FASE B: avisos al cliente por el robot (menú 🤖 de cada viaje)
+  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegada' | 'entregado') => Promise<void> | void;
+  onPedirUbicacion?: (viaje: Viaje) => Promise<void> | void;
 }
 
 export default function ViajeList({
@@ -48,10 +53,14 @@ export default function ViajeList({
   onDetenerGPS,
   onMandarCobro,
   cobroEnCurso = false,
+  onMandarAviso,
+  onPedirUbicacion,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // F-ID3.3: qué viaje tiene abierto el mini-selector Waze/Google
   const [navViajeId, setNavViajeId] = useState<string | null>(null);
+  // FASE B: qué viaje tiene abierto el menú del robot 🤖
+  const [robotViajeId, setRobotViajeId] = useState<string | null>(null);
 
   /** 🧭 abrir Waze/Google hacia la entrega de ESTE viaje */
   function navegarViaje(v: Viaje) {
@@ -205,6 +214,20 @@ export default function ViajeList({
                     <MessageCircle size={16} />
                   )}
                 </button>
+                {/* FASE B: 🤖 menú de avisos — voy en camino / ya llegué /
+                    entregado / pedir ubicación / cobrar. El robot se lo
+                    manda al cliente sin abrir WhatsApp. */}
+                {onMandarAviso && (
+                  <button
+                    onClick={() => setRobotViajeId(v.id)}
+                    className="rounded-lg bg-violet-500/15 p-2 text-violet-300 transition-colors hover:bg-violet-500/25"
+                    aria-label="Avisos del robot para este viaje"
+                    title="Avisos del robot: voy en camino · ya llegué · entregado · ubicación · cobrar"
+                    data-testid="boton-robot-lista"
+                  >
+                    <ChevronDown size={16} />
+                  </button>
+                )}
               </div>
             )}
             {confirmarId === v.id ? (
@@ -248,6 +271,23 @@ export default function ViajeList({
               destino={v.coordenadas ?? { direccion: v.direccion.trim() }}
               etiqueta={v.direccion.trim()}
               onCerrar={() => setNavViajeId(null)}
+            />
+          );
+        })()}
+
+      {/* FASE B: menú del robot 🤖 — avisos al cliente de ESTE viaje */}
+      {robotViajeId &&
+        (() => {
+          const v = ordenados.find(x => x.id === robotViajeId);
+          if (!v || !onMandarAviso || !onPedirUbicacion) return null;
+          return (
+            <RobotMenu
+              viaje={v}
+              robotActivo={config.robotActivo}
+              onCerrar={() => setRobotViajeId(null)}
+              onAviso={onMandarAviso}
+              onPedirUbicacion={onPedirUbicacion}
+              onCobrar={onMandarCobro}
             />
           );
         })()}

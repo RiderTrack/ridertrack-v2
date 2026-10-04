@@ -43,7 +43,11 @@ import {
   totalGastosDia,
 } from './storage';
 import { descargarArchivo, armarMensajeCobro, linkWhatsApp, normalizarCelular, vibrar } from './utils';
-import { enviarPorRobot } from './services/robot';
+// FASE B: 🤖 el robot ahora escucha por Firestore (acciones_dt) —
+// cola propia de inDrive, sobrevive reinicios del bot. El viejo
+// puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
+// instalarse y exigía URL + token a mano.
+import { encolarAccionDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAviso } from './services/robotBot';
 import { cargarTema, guardarTema, Tema } from './theme';
 import {
   borrarEstadoGPS,
@@ -233,25 +237,79 @@ export default function DriverTrackView({ activa }: PropsDTView) {
       return;
     }
 
-    // Robot activo → automático: mensaje + tu QR de Yape en la misma torta
+    // FASE B: robot activo → la acción va a la cola Firestore y el
+    // rudy-bot la manda SOLO (mensaje + tu QR de Yape en la misma
+    // torta). Si no hay sesión (no debería pasar dentro de RT),
+    // caemos al wa.me de siempre — nunca te quedás sin cobrar.
     setCobroEnCurso(true);
     mostrarToast('🤖 Mandando el cobro por el robot…');
-    const r = await enviarPorRobot({
-      url: config.robotUrl,
-      token: config.robotToken,
+    const r = await encolarAccionDT({
+      tipo: 'dt_cobro',
       telefono: cel,
       texto,
       imagenBase64: config.yape.qrBase64 || undefined,
+      nombre: datos.cliente || undefined,
     });
     setCobroEnCurso(false);
     if (r.ok) {
-      mostrarToast('✓ Cobro enviado con tu QR 💜 — el cliente ya lo tiene');
+      mostrarToast('✓ Cobro en camino — el cliente lo recibe ya 💜');
       vibrar(120);
       return;
     }
-    // Fallback prolijo: nunca te quedás sin cobrar
     mostrarToast('⚠️ ' + r.error + ' · abro WhatsApp…');
     window.open(linkWhatsApp(cel, texto), '_blank');
+  }
+
+  // ═══ FASE B: 🛣️ AVISOS AL CLIENTE por el robot ═══
+  // Voy en camino / Ya llegué / Entregado — apretás el botón y el
+  // cliente lo recibe sin que abras WhatsApp. Si el robot está
+  // apagado o no hay sesión → wa.me como respaldo.
+  async function mandarAviso(viaje: Viaje, tipo: TipoAviso): Promise<void> {
+    const cel = normalizarCelular(viaje.celular);
+    if (!cel) {
+      mostrarToast('Este viaje no tiene celular del cliente');
+      return;
+    }
+    const texto = armarAviso(tipo, viaje, config.miNombre);
+    if (!config.robotActivo || !uidDisponible()) {
+      window.open(linkWhatsApp(cel, texto), '_blank');
+      vibrar(60);
+      return;
+    }
+    mostrarToast(tipo === 'camino' ? '🛣️ Avisando que vas en camino…' : tipo === 'llegada' ? '🏁 Avisando que ya llegaste…' : '✅ Avisando entrega…');
+    const r = await encolarAccionDT({
+      tipo: 'dt_aviso',
+      telefono: cel,
+      texto,
+      nombre: viaje.cliente || undefined,
+      viajeId: viaje.id,
+    });
+    mostrarToast(r.ok ? '✓ Aviso enviado' : '⚠️ ' + r.error + ' · abro WhatsApp…');
+    if (!r.ok) window.open(linkWhatsApp(cel, texto), '_blank');
+    vibrar(r.ok ? 120 : 60);
+  }
+
+  // ═══ FASE B: 📍 pedirle al cliente su ubicación por el chat ═══
+  async function pedirUbicacion(viaje: Viaje): Promise<void> {
+    const cel = normalizarCelular(viaje.celular);
+    if (!cel) {
+      mostrarToast('Este viaje no tiene celular del cliente');
+      return;
+    }
+    const texto = armarPedirUbicacion(config.miNombre);
+    if (!config.robotActivo || !uidDisponible()) {
+      window.open(linkWhatsApp(cel, texto), '_blank');
+      return;
+    }
+    const r = await encolarAccionDT({
+      tipo: 'dt_ubicacion',
+      telefono: cel,
+      texto,
+      nombre: viaje.cliente || undefined,
+      viajeId: viaje.id,
+    });
+    mostrarToast(r.ok ? '✓ Pedido de ubicación enviado' : '⚠️ ' + r.error + ' · abro WhatsApp…');
+    if (!r.ok) window.open(linkWhatsApp(cel, texto), '_blank');
   }
 
   function eliminarViaje(id: string) {
@@ -557,6 +615,8 @@ export default function DriverTrackView({ activa }: PropsDTView) {
               onDetenerGPS={() => detenerGPS()}
               onMandarCobro={mandarCobro}
               cobroEnCurso={cobroEnCurso}
+              onMandarAviso={mandarAviso}
+              onPedirUbicacion={pedirUbicacion}
             />
           </>
         )}

@@ -10,7 +10,10 @@ import { CONFIG_DEFECTO, guardarConfig } from '../storage';
 import { comprimirImagen, descargarArchivo } from '../utils';
 import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
-import { pingRobot, URL_ROBOT_DEFECTO, TOKEN_ROBOT_DEFECTO } from '../services/robot';
+// FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
+// manda un mensaje REAL a tu WhatsApp
+import { encolarAccionDT, uidDisponible } from '../services/robotBot';
+import { normalizarCelular } from '../utils';
 
 interface Props {
   config: ConfigDT;
@@ -111,16 +114,38 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
   // F-ID3.3: con qué app navegar a las entregas (Google/Waze/preguntar)
   const [navApp, setNavApp] = useState<AppNavegacion>(() => getAppNavegacion());
   // F-ID5: 🤖 robot WhatsApp — cobro automático
+  // FASE B: el robot ahora escucha por Firestore (cola acciones_dt) —
+  // no hay URL ni token; la prueba manda un mensaje REAL a tu WhatsApp
   const [robotActivo, setRobotActivo] = useState(config.robotActivo);
-  const [robotUrl, setRobotUrl] = useState(config.robotUrl);
-  const [robotToken, setRobotToken] = useState(config.robotToken);
   const [robotEstado, setRobotEstado] = useState<'sin-probar' | 'probando' | 'online' | 'offline'>('sin-probar');
-  const [avanzado, setAvanzado] = useState(false);
+  const sesionActiva = uidDisponible() !== null;
 
+  // 🧪 FASE B: probás el robot de verdad — te manda un mensaje a TU
+  // WhatsApp (miCelular). Si llega, todo el circuito funciona.
   async function probarRobot() {
+    if (!sesionActiva) {
+      setRobotEstado('offline');
+      onToast('Abrí sesión con tu cuenta de RiderTrack para usar el robot');
+      return;
+    }
+    const cel = normalizarCelular(config.miCelular);
+    if (!cel) {
+      onToast('Poné tu celular en 📱 Mi QR (pestaña de arriba) para probarte el robot');
+      return;
+    }
     setRobotEstado('probando');
-    const r = await pingRobot(robotUrl.trim() || URL_ROBOT_DEFECTO);
-    setRobotEstado(r.enLinea ? 'online' : 'offline');
+    const r = await encolarAccionDT({
+      tipo: 'dt_prueba',
+      telefono: cel,
+      texto: '🧪 *Prueba del robot inDrive* \u{1F916}\n\nSi te llegó este mensaje, el robot de DriverTrack está andando perfecto \u{2705}\n\n(no contestes, es una prueba)',
+      nombre: 'Vos (prueba)',
+    });
+    setRobotEstado(r.ok ? 'online' : 'offline');
+    if (r.ok) {
+      onToast('🧪 Prueba encolada — mirá tu WhatsApp en 1-2 segundos');
+    } else {
+      onToast('⚠️ ' + r.error);
+    }
   }
 
   // Al entrar a Ajustes con el robot activo → probar silenciosamente
@@ -158,8 +183,9 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
       geminiKey: geminiKey.trim(),
       claudeKey: claudeKey.trim(),
       robotActivo,
-      robotUrl: robotUrl.trim() || URL_ROBOT_DEFECTO,
-      robotToken: robotToken.trim() || TOKEN_ROBOT_DEFECTO,
+      // FASE B: la URL y el token del viejo puente localhost quedan
+      // jubilados — se conservan los defaults en la config para que
+      // los backups viejos sigan importando sin romper nada.
     };
   }
 
@@ -178,7 +204,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, yape, plin, geminiKey, claudeKey, robotActivo, robotUrl, robotToken]);
+  }, [meta, comisiones, yape, plin, geminiKey, claudeKey, robotActivo]);
 
   async function probarKey() {
     setProbando(true);
@@ -205,8 +231,6 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
         setGeminiKey(data.config.geminiKey ?? '');
         setClaudeKey(data.config.claudeKey ?? '');
         setRobotActivo(data.config.robotActivo === true);
-        setRobotUrl(data.config.robotUrl ?? URL_ROBOT_DEFECTO);
-        setRobotToken(data.config.robotToken ?? TOKEN_ROBOT_DEFECTO);
       }
     } catch {
       /* App ya muestra el toast de archivo inválido */
@@ -395,18 +419,17 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
         </div>
       </section>
 
-      {/* F-ID5: 🤖 Robot WhatsApp — cobro automático con tu QR */}
+      {/* F-ID5 + FASE B: 🤖 Robot WhatsApp — cobro y avisos automáticos */}
       <section className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4" data-testid="seccion-robot">
         <div className="flex items-center justify-between gap-2">
           <p className="flex items-center gap-1.5 text-xs font-bold text-violet-300">
-            <Bot size={14} /> Robot WhatsApp (cobro automático)
+            <Bot size={14} /> Robot WhatsApp (cobro + avisos)
           </p>
           {/* Interruptor */}
           <button
             onClick={() => {
               const nuevo = !robotActivo;
               setRobotActivo(nuevo);
-              if (nuevo) probarRobot(); // al prenderlo, probás que esté vivo
             }}
             className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
               robotActivo ? 'bg-violet-500' : 'bg-slate-700'
@@ -424,10 +447,13 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
           </button>
         </div>
         <p className="mt-1 text-[11px] leading-snug text-slate-400">
-          Con el robot prendido, el botón <b className="text-violet-300">Cobrar</b> le manda al cliente el
-          mensaje de pago <b className="text-violet-300">con tu QR de Yape adentro</b> — solo, sin abrir
-          WhatsApp. Si el robot no responde, la app abre WhatsApp como siempre (nunca te quedás sin cobrar).
-          Necesita tu rudy-bot corriendo en este teléfono con el parche F-ID5.
+          Con el robot prendido, los botones le mandan al cliente <b className="text-violet-300">solo</b>:{' '}
+          <b className="text-violet-300">Cobrar</b> (con tu QR de Yape adentro 💜),{' '}
+          <b className="text-violet-300">Voy en camino</b>, <b className="text-violet-300">Ya llegué</b>,{' '}
+          <b className="text-violet-300">Entregado</b> y <b className="text-violet-300">Pedir ubicación</b> —
+          sin abrir WhatsApp. Va por la nube (cola propia de inDrive): si el bot se reinicia, el mensaje
+          sale apenas revive. Si algo falla, la app abre WhatsApp como siempre. Necesita el parche{' '}
+          <span className="font-mono text-[10px]">drivertrack_bot.js</span> en tu rudy-bot (Termux).
         </p>
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -438,7 +464,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
             data-testid="robot-probar"
           >
             {robotEstado === 'probando' ? <Loader2 size={13} className="animate-spin" /> : null}
-            {robotEstado === 'probando' ? 'Probando…' : 'Probar conexión'}
+            {robotEstado === 'probando' ? 'Mandando…' : 'Mandarme prueba'}
           </button>
           {robotEstado !== 'probando' && (
             <p
@@ -452,51 +478,22 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
               data-testid="robot-estado"
             >
               {robotEstado === 'online'
-                ? '🟢 Robot en línea — listo para cobrar'
+                ? '🟢 Prueba enviada — mirá tu WhatsApp'
                 : robotEstado === 'offline'
-                  ? '🔴 No responde — ¿está corriendo el bot?'
+                  ? '🔴 No se pudo — ¿sesión abierta y bot corriendo?'
                   : '⚪ Sin probar'}
             </p>
           )}
         </div>
 
-        <button
-          onClick={() => setAvanzado(!avanzado)}
-          className="mt-2 text-[10px] font-semibold text-slate-500 underline decoration-dotted"
-          data-testid="robot-avanzado"
-        >
-          {avanzado ? '▾ Ocultar avanzado' : '▸ Avanzado (URL y token)'}
-        </button>
-        {avanzado && (
-          <div className="mt-2 space-y-2">
-            <div>
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">URL del puente</p>
-              <input
-                value={robotUrl}
-                onChange={e => setRobotUrl(e.target.value)}
-                placeholder={URL_ROBOT_DEFECTO}
-                className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-violet-400"
-                data-testid="robot-url"
-              />
-            </div>
-            <div>
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Token (igual que en el bot)</p>
-              <input
-                value={robotToken}
-                onChange={e => setRobotToken(e.target.value)}
-                placeholder={TOKEN_ROBOT_DEFECTO}
-                className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-violet-400"
-                data-testid="robot-token"
-              />
-            </div>
-            <p className="text-[10px] leading-snug text-slate-500">
-              Defaults: <span className="font-mono">{URL_ROBOT_DEFECTO}</span> · token{' '}
-              <span className="font-mono">{TOKEN_ROBOT_DEFECTO}</span> — coinciden con el parche del bot tal
-              cual viene. Solo tocálos si los cambiaste en <span className="font-mono">puente_drivertrack.js</span>.
-            </p>
-          </div>
-        )}
+        {/* FASE B: la prueba es un mensaje REAL a tu WhatsApp — si llega,
+            todo el circuito (app → Firestore → bot → tu celular) anda */}
+        <p className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+          <span className={sesionActiva ? 'text-emerald-400' : 'text-red-400'}>{sesionActiva ? '●' : '○'}</span>
+          {sesionActiva ? 'Sesión de RiderTrack abierta ✓' : 'Sin sesión — el robot necesita tu cuenta'}
+        </p>
       </section>
+
 
       {/* Backup */}
       <section className="rounded-2xl border border-slate-700 bg-slate-800/40 p-4">
@@ -561,7 +558,7 @@ export default function AjustesView({ config, onGuardar, onExportarBackup, onImp
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.5.0 (Fase A — dentro de RiderTrack) · Lima, PE
+        DriverTrack v0.6.0 (Fase A+B — robot con avisos) · Lima, PE
       </p>
     </div>
   );

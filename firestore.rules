@@ -152,6 +152,21 @@ service cloud.firestore {
       }
     }
 
+    // FASE B: acciones del robot para DriverTrack (inDrive) — misma
+    // estructura que acciones_bot pero cola SEPARADA para que el
+    // index.js del bot (que marca processed TODO lo de acciones_bot)
+    // nunca toque las acciones de inDrive. Las lee el parche
+    // drivertrack_bot.js del rudy-bot.
+    match /acciones_dt/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+
+      match /pendientes/{pendId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+    }
+
     // ═══════════════════════════════════════════════════════
     // COLECCIONES DE BACKUP Y EXCELS
     // ═══════════════════════════════════════════════════════
