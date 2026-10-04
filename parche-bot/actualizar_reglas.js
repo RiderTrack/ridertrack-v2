@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 // ═══════════════════════════════════════════════════════════
-// 🔐 actualizar_reglas.js — publica la regla de acciones_dt (FASE B)
+// 🔐 actualizar_reglas.js — publica las reglas de inDrive
+//            (acciones_dt + imagenes_dt · FASE B y B2)
 // ═══════════════════════════════════════════════════════════
 // ¿POR QUÉ EXISTE ESTE SCRIPT? Las reglas de Firestore VIVAS (las
-// de la consola de Firebase) no incluyen la colección nueva
-// acciones_dt → la app no puede encolar los mensajes de inDrive
-// (PERMISSION_DENIED). Verificado en prueba real.
+// de la consola de Firebase) no incluyen las colecciones nuevas
+// de inDrive → la app recibe PERMISSION_DENIED:
+//   · acciones_dt  → la cola de mensajes del robot (FASE B)
+//   · imagenes_dt  → las imágenes de los avisos (FASE B2)
 //
 // Este script usa el serviceAccount.json DEL PROPIO BOT (mismo
 // proyecto ridertrack-93c8a) para:
 //   1. BAJAR las reglas vivas actuales (API de Firebase Rules)
-//   2. Insertar SOLO el bloque de acciones_dt (quirúrgico — no
+//   2. Insertar SOLO los bloques que falten (quirúrgico — no
 //      toca absolutamente nada más de tus reglas)
 //   3. Publicar la versión nueva
 //   4. Verificar que quedó
 //
-// Corrélo UNA VEZ en Termux, en la carpeta del bot:
+// Es IDEMPOTENTE: podés correrlo las veces que quieras — si un
+// bloque ya está, lo salta; si falta, lo agrega.
+//
+// Corrélo en Termux, en la carpeta del bot:
 //   cd ~/bot-whatsapp
 //   node actualizar_reglas.js
 //
@@ -36,8 +41,8 @@ if (!fs.existsSync(SA_PATH)) {
   process.exit(1);
 }
 
-// ── El bloque a insertar (idéntico al firestore.rules del repo) ──
-const BLOQUE_DT = `    // FASE B: acciones del robot para DriverTrack (inDrive) — cola
+// ── Bloque 1: cola de acciones del robot (FASE B) ──
+const BLOQUE_ACCIONES = `    // FASE B: acciones del robot para DriverTrack (inDrive) — cola
     // separada de acciones_bot; las lee el parche drivertrack_bot.js
     match /acciones_dt/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
@@ -49,6 +54,25 @@ const BLOQUE_DT = `    // FASE B: acciones del robot para DriverTrack (inDrive) 
       }
     }
 `;
+
+// ── Bloque 2: imágenes de los avisos (FASE B2) ──
+// Doc id = tipo de aviso (camino / llegando / llegada / entregado /
+// ubicacion) — cualquier rider logueado puede subir la suya; el bot
+// lee con firebase-admin (pasa por encima de las reglas).
+const BLOQUE_IMAGENES = `    // FASE B2: imágenes de los avisos de inDrive — la app sube la
+    // imagen a Storage (campanas/imagenes_dt/…) y registra la URL acá;
+    // el bot la baja con fetch al momento del envío
+    match /imagenes_dt/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+`;
+
+// [marca, bloque, nombre] — se insertan solo los que falten
+const BLOQUES = [
+  ['acciones_dt', BLOQUE_ACCIONES, 'acciones_dt (mensajes del robot)'],
+  ['imagenes_dt', BLOQUE_IMAGENES, 'imagenes_dt (imágenes de los avisos)'],
+];
 
 async function main() {
   // 1. Token OAuth del serviceAccount (firebase-admin ya está instalado)
@@ -85,24 +109,27 @@ async function main() {
   let contenido = archivo.content;
   console.log('   reglas vivas: ' + contenido.length + ' caracteres ✓');
 
-  // 3. ¿Ya está la colección? (idempotente)
-  if (contenido.includes('acciones_dt')) {
-    console.log('✅ Las reglas VIVAS ya tienen acciones_dt — nada que hacer.');
+  // 3. ¿Qué bloques faltan? (idempotente, uno por uno)
+  const faltantes = BLOQUES.filter(([marca]) => !contenido.includes(marca));
+  if (faltantes.length === 0) {
+    console.log('✅ Las reglas VIVAS ya tienen todo (acciones_dt + imagenes_dt) — nada que hacer.');
     return;
   }
+  faltantes.forEach(([, , nombre]) => console.log('🩹 Falta: ' + nombre));
 
   // 4. Inserción QUIRÚRGICA: antes del deny-all (match /{document=**}).
   //    Si no existe el deny-all, al final del archivo.
-  let nuevo;
-  const anclaDeny = contenido.search(/match\s*\/\{document=\*\*\}/);
+  let nuevo = contenido;
+  const insercion = faltantes.map(([, bloque]) => bloque).join('\n');
+  const anclaDeny = nuevo.search(/match\s*\/\{document=\*\*\}/);
   if (anclaDeny !== -1) {
     // subir hasta el inicio del comentario/línea que contiene el match
-    const inicioLinea = contenido.lastIndexOf('\n', anclaDeny) + 1;
-    nuevo = contenido.slice(0, inicioLinea) + BLOQUE_DT + '\n' + contenido.slice(inicioLinea);
+    const inicioLinea = nuevo.lastIndexOf('\n', anclaDeny) + 1;
+    nuevo = nuevo.slice(0, inicioLinea) + insercion + '\n' + nuevo.slice(inicioLinea);
   } else {
-    nuevo = contenido.trimEnd() + '\n\n' + BLOQUE_DT;
+    nuevo = nuevo.trimEnd() + '\n\n' + insercion;
   }
-  console.log('🩹 Insertando el bloque acciones_dt (antes del deny-all)…');
+  console.log('🩹 Insertando ' + faltantes.length + ' bloque(s) (antes del deny-all)…');
 
   // 5. Crear el ruleset nuevo
   const crearRes = await fetch(BASE + '/rulesets', {
@@ -131,20 +158,23 @@ async function main() {
   }
   console.log('🚀 Reglas publicadas ✓');
 
-  // 7. Verificación: bajar de nuevo y confirmar
+  // 7. Verificación: bajar de nuevo y confirmar cada bloque
   const verRes = await fetch(BASE + '/releases/cloud.firestore', { headers: HEADERS });
   const verRel = await verRes.json();
   const verRs = await fetch('https://firebaserules.googleapis.com/v1/' + verRel.rulesetName, { headers: HEADERS });
   const verRuleset = await verRs.json();
-  const verificado = (verRuleset.source.files[0].content || '').includes('acciones_dt');
-  if (!verificado) throw new Error('la verificación no encontró acciones_dt tras publicar');
+  const verContent = verRuleset.source.files[0].content || '';
+  const faltanTodavia = BLOQUES.filter(([marca]) => !verContent.includes(marca));
+  if (faltanTodavia.length) throw new Error('la verificación no encontró: ' + faltanTodavia.map(b => b[0]).join(', '));
 
   console.log('');
-  console.log('✅ ¡LISTO! Las reglas vivas ahora permiten acciones_dt.');
-  console.log('   La app ya puede encolar los mensajes de inDrive.');
+  console.log('✅ ¡LISTO! Las reglas vivas ahora permiten los bloques de inDrive.');
+  console.log('   La app ya puede encolar los mensajes y subir las imágenes.');
   console.log('');
   console.log('PRUEBA (desde el teléfono): RiderTrack V2 → inDrive → Ajustes →');
   console.log('   🤖 Robot WhatsApp → "Mandarme prueba" → te llega a tu WhatsApp 📲');
+  console.log('   🖼️ Imágenes del robot → subí una imagen y mandale un aviso a');
+  console.log('   alguien de prueba — tiene que llegar CON la imagen.');
 }
 
 main().catch((e) => {
@@ -155,9 +185,9 @@ main().catch((e) => {
   console.error('1. Abrí https://console.firebase.google.com → proyecto ' + (projectId || 'ridertrack-93c8a'));
   console.error('2. Firestore Database → Reglas');
   console.error('3. Buscá el bloque que dice:  match /acciones_bot/{userId} {');
-  console.error('4. Justo DEBAJO de su llave de cierre }, pegá este bloque:');
+  console.error('4. Justo DEBAJO de su llave de cierre }, pegá estos bloques:');
   console.error('');
-  console.error(BLOQUE_DT);
+  BLOQUES.forEach(([, bloque]) => console.error(bloque));
   console.error('5. Publicar (botón azul) — listo.');
   process.exit(1);
 });

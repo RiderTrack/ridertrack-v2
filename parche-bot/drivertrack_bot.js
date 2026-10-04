@@ -12,10 +12,21 @@
 //
 // Botones que alimentan esta cola (la app arma el texto completo):
 //   • 💜 dt_cobro     — cobro CON tu QR de Yape (imagen + monto)
-//   • 🛣️ dt_aviso     — voy en camino / ya llegué / entregado
-//   • 📍 dt_ubicacion — pedirle al cliente su ubicación
+//   • 🛣️ dt_aviso     — voy en camino / ⏱️ llegando en X min /
+//                       ya llegué / entregado — FASE B2: puede ir
+//                       CON IMAGEN (la app manda la URL de la
+//                       imagen que subiste en Ajustes → 🖼️ y acá
+//                       se baja de la nube al momento del envío)
+//   • 📍 dt_ubicacion — pedirle al cliente su ubicación (también
+//                       puede llevar imagen, FASE B2)
 //   • 💬 dt_texto     — mensaje libre (futuro)
 //   • 🧪 dt_prueba    — mensaje de prueba a vos mismo (Ajustes)
+//
+// FASE B2 (imágenes): la app pone `imagenUrl` en la acción (una
+// URL de Firebase Storage). El parche la baja con fetch y manda
+// IMAGEN + texto de caption — igual que los avisos con imagen del
+// trabajo. Si la bajada falla (sin internet a Storage, URL
+// vencida…), manda SOLO el texto — el mensaje nunca se pierde.
 //
 // ¿POR QUÉ OTRA COLECCIÓN Y NO acciones_bot? Porque index.js
 // procesa TODO lo que cae en acciones_bot y lo marca processed
@@ -51,7 +62,7 @@ let _sockRef = null;
 let _listenerIniciado = false;
 const _docsEnviados = new Set(); // anti-reenvío en reconexiones
 
-const VERSION = 'drivertrack_bot.js v1.0 (FASE B)';
+const VERSION = 'drivertrack_bot.js v1.1 (FASE B2 — avisos con imagen)';
 const UID_DEFECTO = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
 const TIPOS_DT = ['dt_cobro', 'dt_aviso', 'dt_ubicacion', 'dt_texto', 'dt_prueba'];
 
@@ -91,9 +102,32 @@ async function resolverDestino(telefono) {
   return cel + '@s.whatsapp.net';
 }
 
+/**
+ * 🖼️ FASE B2: baja la imagen de la nube (Firebase Storage) con un
+ * tiempo límite — si tarda o falla, se devuelve null y el mensaje
+ * sale en texto pelado (nunca se traba ni se pierde).
+ */
+async function bajarImagen(url) {
+  const controlador = new AbortController();
+  const timer = setTimeout(() => controlador.abort(), 10000); // máx 10s
+  try {
+    const resp = await fetch(String(url), { signal: controlador.signal });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (!buf.length) throw new Error('imagen vacía');
+    return buf;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // ⚙️ PROCESAR cada acción — la app ya arma el texto completo;
-// el parche solo envía (texto, o imagen QR + el texto de caption)
+// el parche envía (texto, o imagen + el texto de caption):
+//   • dt_cobro con imagenBase64 → tu QR de Yape pegado al mensaje
+//   • dt_aviso/dt_ubicacion con imagenUrl (FASE B2) → la imagen
+//     que subiste en Ajustes → 🖼️, bajada de la nube al vuelo
+//   • si la imagen falla → texto nomás (nunca se pierde el envío)
 // ═══════════════════════════════════════════════════════════
 async function procesarAccionDT(docRef, datos) {
   const tipo = datos.tipo;
@@ -108,14 +142,26 @@ async function procesarAccionDT(docRef, datos) {
 
     // 💜 dt_cobro puede venir con el QR de Yape (dataURL base64) —
     // se manda como IMAGEN con el texto de caption, igual que el
-    // enviar_yape del trabajo. Los demás tipos van como texto.
-    const conImagen = tipo === 'dt_cobro' && datos.imagenBase64;
-
-    if (conImagen) {
-      const buffer = Buffer.from(
+    // enviar_yape del trabajo.
+    let buffer = null;
+    if (tipo === 'dt_cobro' && datos.imagenBase64) {
+      buffer = Buffer.from(
         String(datos.imagenBase64).replace(/^data:image\/[a-z]+;base64,/, ''),
         'base64'
       );
+    } else if (datos.imagenUrl) {
+      // 🖼️ FASE B2: aviso con imagen (la que subiste en Ajustes) —
+      // se baja de la nube; si falla, texto pelado y a otra cosa
+      try {
+        buffer = await bajarImagen(datos.imagenUrl);
+        console.log('🏍️ [DT] 🖼️ Imagen del aviso bajada (' + Math.round(buffer.length / 1024) + ' KB)');
+      } catch (e) {
+        console.warn('🏍️ [DT] ⚠️ La imagen del aviso no bajó (' + e.message + ') — mando solo el texto');
+        buffer = null;
+      }
+    }
+
+    if (buffer) {
       await _sockRef.sendMessage(jid, {
         image: buffer,
         caption: texto,
@@ -125,7 +171,10 @@ async function procesarAccionDT(docRef, datos) {
       await _sockRef.sendMessage(jid, { text: texto });
     }
 
-    console.log('🏍️ [DT] ✅ ' + tipo + ' enviado a ' + (datos.nombre || datos.telefono));
+    console.log(
+      '🏍️ [DT] ✅ ' + tipo + (buffer ? ' (con imagen)' : '') + ' enviado a ' + (datos.nombre || datos.telefono) +
+      (datos.minutos ? ' — llegando en ' + datos.minutos + ' min' : '')
+    );
 
     await docRef.update({
       resultado: 'enviado',
@@ -160,7 +209,7 @@ function iniciarDrivertrackBot(sock) {
   if (_listenerIniciado) return;
   _listenerIniciado = true;
   console.log('🏍️ [DT] Parche activo (' + VERSION + ')');
-  console.log('🏍️ [DT] Escuchando acciones_dt: cobro 💜 · avisos 🛣️🏁✅ · ubicación 📍 · prueba 🧪');
+  console.log('🏍️ [DT] Escuchando acciones_dt: cobro 💜 · avisos 🛣️⏱️🏁✅ (con imagen 🖼️ si la subiste) · ubicación 📍 · prueba 🧪');
 
   try {
     const db = getFirestore();

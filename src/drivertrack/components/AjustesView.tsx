@@ -5,7 +5,20 @@
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
-import { ArrowRight, Bot, Check, Compass, Database, ExternalLink, Loader2, Trash2, Upload, User } from 'lucide-react';
+import {
+  ArrowRight,
+  Bot,
+  Check,
+  Compass,
+  Database,
+  ExternalLink,
+  ImagePlus,
+  Loader2,
+  Trash2,
+  Upload,
+  User,
+  X,
+} from 'lucide-react';
 import { ConfigDT, ORIGENES } from '../types';
 import { CONFIG_DEFECTO, guardarConfig } from '../storage';
 import { probarKeyIA } from '../services/escanerIA';
@@ -13,6 +26,15 @@ import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion }
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
 // manda un mensaje REAL a tu WhatsApp
 import { encolarAccionDT, uidDisponible } from '../services/robotBot';
+// FASE B2: imágenes del robot — una por cada aviso, como en el trabajo
+import {
+  TIPOS_IMAGEN_DT,
+  ImagenDT,
+  escucharImagenesDT,
+  subirImagenDT,
+  quitarImagenDT,
+} from '../services/imagenesDT';
+import { auth } from '../../services/firebase';
 import { normalizarCelular } from '../utils';
 
 interface Props {
@@ -115,6 +137,45 @@ export default function AjustesView({
     if (config.robotActivo) probarRobot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ═══ FASE B2: 🖼️ imágenes del robot (una por aviso) ═══
+  // Suscripción en vivo: lo que subís acá (o desde otro celular)
+  // se refleja al toque — el robot la baja de la nube al enviar
+  const [imagenesRobot, setImagenesRobot] = useState<Record<string, ImagenDT>>({});
+  const [subiendoImagen, setSubiendoImagen] = useState<string | null>(null);
+  const inputsImagen = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => escucharImagenesDT(setImagenesRobot), []);
+
+  async function cambiarImagenRobot(tipo: string, file: File | undefined) {
+    if (!file) return;
+    const uid = auth?.currentUser?.uid;
+    if (!uid) {
+      onToast('Abrí sesión con tu cuenta de RiderTrack para subir imágenes');
+      return;
+    }
+    setSubiendoImagen(tipo);
+    try {
+      await subirImagenDT(uid, tipo, file);
+      onToast('🖼️ Imagen lista — el robot la usa en el próximo aviso');
+    } catch (e) {
+      onToast('⚠️ ' + (e as Error).message);
+    } finally {
+      setSubiendoImagen(null);
+      const inp = inputsImagen.current[tipo];
+      if (inp) inp.value = '';
+    }
+  }
+
+  async function quitarImagenRobot(tipo: string, etiqueta: string) {
+    if (!window.confirm(`¿Quitar la imagen de "${etiqueta}"? El aviso volverá a salir solo con texto.`)) return;
+    try {
+      await quitarImagenDT(tipo);
+      onToast('Imagen quitada — el aviso va en texto nomás');
+    } catch (e) {
+      onToast('⚠️ ' + (e as Error).message);
+    }
+  }
 
   // Si la preferencia cambia desde el mini-selector (o desde otro
   // lado), el selector de acá se entera al toque
@@ -464,8 +525,9 @@ export default function AjustesView({
         <p className="mt-1 text-[11px] leading-snug text-slate-400">
           Con el robot prendido, los botones le mandan al cliente <b className="text-violet-300">solo</b>:{' '}
           <b className="text-violet-300">Cobrar</b> (con tu QR de Yape adentro 💜),{' '}
-          <b className="text-violet-300">Voy en camino</b>, <b className="text-violet-300">Ya llegué</b>,{' '}
-          <b className="text-violet-300">Entregado</b> y <b className="text-violet-300">Pedir ubicación</b> —
+          <b className="text-violet-300">Voy en camino</b>, <b className="text-violet-300">Llegando en X min</b>,{' '}
+          <b className="text-violet-300">Ya llegué</b>, <b className="text-violet-300">Entregado</b> y{' '}
+          <b className="text-violet-300">Pedir ubicación</b> —
           sin abrir WhatsApp. Va por la nube (cola propia de inDrive): si el bot se reinicia, el mensaje
           sale apenas revive. Si algo falla, la app abre WhatsApp como siempre. Necesita el parche{' '}
           <span className="font-mono text-[10px]">drivertrack_bot.js</span> en tu rudy-bot (Termux).
@@ -507,6 +569,102 @@ export default function AjustesView({
           <span className={sesionActiva ? 'text-emerald-400' : 'text-red-400'}>{sesionActiva ? '●' : '○'}</span>
           {sesionActiva ? 'Sesión de RiderTrack abierta ✓' : 'Sin sesión — el robot necesita tu cuenta'}
         </p>
+      </section>
+
+
+      {/* FASE B2: 🖼️ Imágenes del robot — como las del TRABAJO, pero
+          para tus avisos de inDrive. Subís una imagen por aviso y el
+          robot la manda CON el mensaje; si no hay imagen, va texto
+          pelado. El cambio aplica al siguiente envío, sin reiniciar. */}
+      <section className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/5 p-4" data-testid="seccion-imagenes-robot">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-fuchsia-300">
+          <ImagePlus size={14} /> Imágenes del robot (avisos con imagen)
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          Como en el trabajo: subís una imagen para cada aviso y el robot la manda{' '}
+          <b className="text-fuchsia-300">junto con el mensaje</b> — "estoy llegando en 10 minutos" con una imagen
+          bonita, "ya llegué", "entregado"… La cambiás acá y el siguiente mensaje ya sale con la nueva (sin
+          reiniciar nada). Sin imagen, el aviso va en texto pelado. El <b className="text-fuchsia-300">Cobrar</b>{' '}
+          siempre usa tu QR de Yape 💜 (se configura en Mi QR).
+        </p>
+        <p className="mt-1.5 text-[10px] font-semibold text-slate-500">
+          Máx. 3 MB · JPG, PNG o WebP · solo para tus viajes de inDrive (los del trabajo no se tocan)
+        </p>
+
+        <div className="mt-3 space-y-2">
+          {TIPOS_IMAGEN_DT.map(def => {
+            const actual = imagenesRobot[def.tipo];
+            const cargando = subiendoImagen === def.tipo;
+            return (
+              <div
+                key={def.tipo}
+                className="flex gap-3 rounded-xl border border-slate-700 bg-slate-950/60 p-2.5"
+                data-testid={`imagen-robot-${def.tipo}`}
+              >
+                {/* Vista previa */}
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-700/60 bg-slate-900/60">
+                  {actual?.url ? (
+                    <img src={actual.url} alt={def.etiqueta} className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="px-1 text-center">
+                      <ImagePlus size={16} className="mx-auto mb-0.5 text-slate-600" />
+                      <span className="block text-[8px] leading-tight text-slate-500">solo texto</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Info + acciones */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-[11px] font-black text-slate-200">{def.etiqueta}</p>
+                    {actual && (
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-px text-[8px] font-black text-emerald-400">
+                        CON IMAGEN
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+                    {def.desc}{' '}
+                    <span className="font-mono text-[9px] text-slate-600">({def.boton})</span>
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <input
+                      ref={el => {
+                        inputsImagen.current[def.tipo] = el;
+                      }}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={e => cambiarImagenRobot(def.tipo, e.target.files?.[0])}
+                    />
+                    <button
+                      onClick={() => inputsImagen.current[def.tipo]?.click()}
+                      disabled={cargando}
+                      className="flex items-center gap-1 rounded-lg bg-fuchsia-500/15 px-2.5 py-1.5 text-[10px] font-bold text-fuchsia-300 disabled:opacity-60"
+                    >
+                      {cargando ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                      {cargando ? 'Subiendo…' : actual ? 'Cambiar' : 'Subir imagen'}
+                    </button>
+                    {actual && (
+                      <button
+                        onClick={() => quitarImagenRobot(def.tipo, def.etiqueta)}
+                        className="flex items-center gap-1 rounded-lg bg-slate-700/60 px-2.5 py-1.5 text-[10px] font-bold text-slate-300"
+                      >
+                        <X size={11} /> Quitar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {!sesionActiva && (
+          <p className="mt-2 text-[10px] font-semibold text-red-400">
+            Necesitás sesión abierta de RiderTrack para subir las imágenes
+          </p>
+        )}
       </section>
 
 
@@ -573,7 +731,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.7.0 (Fase A2 — tema y billeteras fusionados) · Lima, PE
+        DriverTrack v0.8.0 (Fase B2 — avisos con imagen + llegando en X min) · Lima, PE
       </p>
     </div>
   );

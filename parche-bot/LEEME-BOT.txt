@@ -1,0 +1,63 @@
+═════════════════════════════════════════════════════════
+🏍️ ROBOT DRIVERTRACK — FASE B2 (avisos con imagen)
+═════════════════════════════════════════════════════════
+
+QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
+  • El parche ahora también manda IMÁGENES en los avisos
+    (la imagen que subís desde la app en Ajustes → 🖼️
+    Imágenes del robot).
+  • Nuevo aviso "Llegando en X minutos" (elegís 5/10/15/20
+    o los que quieras desde el menú 🤖 del viaje).
+
+═════════════════════════════════════════════════════════
+INSTALACIÓN (5 pasos, 2 minutos)
+═════════════════════════════════════════════════════════
+
+ 1. Copiá ESTOS 3 archivos a la carpeta del bot
+    (~/bot-whatsapp, donde está index.js):
+
+      drivertrack_bot.js      ← parche v1.1 (reemplaza el viejo)
+      actualizar_reglas.js    ← reglas v2 (agrega imagenes_dt)
+      instalar_drivertrack.js ← instalador (mismo de siempre)
+
+    (si descomprimís el zip adentro de ~/bot-whatsapp, fijate
+     de que los archivos queden ahí MISMO y no en una subcarpeta)
+
+ 2. cd ~/bot-whatsapp
+
+ 3. node actualizar_reglas.js
+    → agrega la colección IMAGENES_DT a las reglas vivas.
+      Si ya tenés acciones_dt, solo agrega lo nuevo. Podés
+      correrlo las veces que quieras.
+
+ 4. node instalar_drivertrack.js
+    → si ya estaba instalado te dice "nada que hacer" (bien,
+      el parche nuevo se toma igual al reiniciar).
+
+ 5. pm2 restart rudy-bot
+
+    En consola (pm2 logs rudy-bot) tiene que decir:
+    🏍️ [DT] Parche activo (drivertrack_bot.js v1.1 (FASE B2 — avisos con imagen))
+
+═════════════════════════════════════════════════════════
+APK
+═════════════════════════════════════════════════════════
+ Instalá el APK v0.8.0 (GitHub Actions lo compila solo al
+ hacer push). Sin APK nuevo no vas a ver la galería de
+ imágenes ni el botón "Llegando en…".
+
+═════════════════════════════════════════════════════════
+PRUEBA COMPLETA (2 minutos)
+═════════════════════════════════════════════════════════
+ 1. App → inDrive → Ajustes → 🖼️ Imágenes del robot →
+    subí una imagen cualquiera para "⏱️ Llegando en X minutos".
+ 2. InDrive → Ajustes → 👤 Mis datos → tu celular (para
+    probarte a vos mismo).
+ 3. Creá un viaje de prueba con TU celular como cliente.
+ 4. Menú 🤖 del viaje → "Llegando en…" → 10 min.
+ 5. Te tiene que llegar: IMAGEN arriba + el mensaje abajo. ✅
+
+ Si el mensaje llega SOLO texto → revisá el paso 3
+ (actualizar_reglas.js).
+ Si NO llega nada → pm2 logs rudy-bot --lines 30 y fijate
+ si aparece la línea "🏍️ [DT] Parche activo".

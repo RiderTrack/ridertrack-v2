@@ -167,6 +167,15 @@ service cloud.firestore {
       }
     }
 
+    // FASE B2: imágenes de los avisos de inDrive — la app sube la
+    // imagen a Storage (campanas/imagenes_dt/…) y registra la URL
+    // acá (doc id = tipo de aviso); el bot la baja con fetch al
+    // momento del envío (firebase-admin pasa sobre las reglas)
+    match /imagenes_dt/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
     // ═══════════════════════════════════════════════════════
     // COLECCIONES DE BACKUP Y EXCELS
     // ═══════════════════════════════════════════════════════

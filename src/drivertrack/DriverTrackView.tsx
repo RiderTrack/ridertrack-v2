@@ -50,6 +50,9 @@ import { descargarArchivo, armarMensajeCobro, linkWhatsApp, normalizarCelular, v
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
 // instalarse y exigía URL + token a mano.
 import { encolarAccionDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAviso } from './services/robotBot';
+// FASE B2: imágenes del robot — subís una imagen por aviso en
+// Ajustes y el robot la manda CON el mensaje (como el trabajo)
+import { escucharImagenesDT, ImagenDT } from './services/imagenesDT';
 // FASE A2: el tema viene del TRABAJO — mismo toggle para toda la app
 import { useTema } from '../theme/useTema';
 import {
@@ -244,30 +247,55 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
   }
 
   // ═══ FASE B: 🛣️ AVISOS AL CLIENTE por el robot ═══
-  // Voy en camino / Ya llegué / Entregado — apretás el botón y el
-  // cliente lo recibe sin que abras WhatsApp. Si el robot está
-  // apagado o no hay sesión → wa.me como respaldo.
-  async function mandarAviso(viaje: Viaje, tipo: TipoAviso): Promise<void> {
+  // Voy en camino / Llegando en X min / Ya llegué / Entregado —
+  // apretás el botón y el cliente lo recibe sin que abras WhatsApp.
+  // FASE B2: si subiste una imagen para el aviso (Ajustes → 🖼️),
+  // viaja la URL y el robot la manda como IMAGEN + texto, igual
+  // que los avisos del trabajo. Si el robot está apagado o no hay
+  // sesión → wa.me como respaldo (solo texto, sin imagen).
+  const [imagenesDT, setImagenesDT] = useState<Record<string, ImagenDT>>({});
+  useEffect(() => escucharImagenesDT(setImagenesDT), []);
+
+  async function mandarAviso(viaje: Viaje, tipo: TipoAviso, minutos?: number): Promise<void> {
     const cel = normalizarCelular(viaje.celular);
     if (!cel) {
       mostrarToast('Este viaje no tiene celular del cliente');
       return;
     }
-    const texto = armarAviso(tipo, viaje, config.miNombre);
+    const texto = armarAviso(tipo, viaje, config.miNombre, minutos);
+    // FASE B2: la imagen del aviso (si subiste una) viaja como URL —
+    // el bot la baja de la nube y la manda junto con el texto
+    const imagen = imagenesDT[tipo === 'llegando' ? 'llegando' : tipo];
     if (!config.robotActivo || !uidDisponible()) {
       window.open(linkWhatsApp(cel, texto), '_blank');
       vibrar(60);
       return;
     }
-    mostrarToast(tipo === 'camino' ? '🛣️ Avisando que vas en camino…' : tipo === 'llegada' ? '🏁 Avisando que ya llegaste…' : '✅ Avisando entrega…');
+    mostrarToast(
+      tipo === 'camino'
+        ? '🛣️ Avisando que vas en camino…'
+        : tipo === 'llegando'
+          ? `⏱️ Avisando que llegás en ${minutos || 10} min…`
+          : tipo === 'llegada'
+            ? '🏁 Avisando que ya llegaste…'
+            : '✅ Avisando entrega…',
+    );
     const r = await encolarAccionDT({
       tipo: 'dt_aviso',
       telefono: cel,
       texto,
+      imagenUrl: imagen?.url,
+      minutos: tipo === 'llegando' ? minutos : undefined,
       nombre: viaje.cliente || undefined,
       viajeId: viaje.id,
     });
-    mostrarToast(r.ok ? '✓ Aviso enviado' : '⚠️ ' + r.error + ' · abro WhatsApp…');
+    mostrarToast(
+      r.ok
+        ? imagen
+          ? '✓ Aviso enviado con tu imagen 🖼️'
+          : '✓ Aviso enviado'
+        : '⚠️ ' + r.error + ' · abro WhatsApp…',
+    );
     if (!r.ok) window.open(linkWhatsApp(cel, texto), '_blank');
     vibrar(r.ok ? 120 : 60);
   }
@@ -288,6 +316,7 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
       tipo: 'dt_ubicacion',
       telefono: cel,
       texto,
+      imagenUrl: imagenesDT['ubicacion']?.url, // FASE B2: imagen opcional
       nombre: viaje.cliente || undefined,
       viajeId: viaje.id,
     });
@@ -585,6 +614,7 @@ export default function DriverTrackView({ activa, onIrAYape }: PropsDTView) {
               cobroEnCurso={cobroEnCurso}
               onMandarAviso={mandarAviso}
               onPedirUbicacion={pedirUbicacion}
+              tiposConImagen={Object.keys(imagenesDT)}
             />
           </>
         )}

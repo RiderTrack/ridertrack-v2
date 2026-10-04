@@ -56,6 +56,18 @@ const mockSock = {
   },
 };
 
+// ── MOCK de fetch (FASE B2: bajar la imagen del aviso de la nube) ──
+// URL con "ok" → baja una imagen falsa; URL con "fail" → rechaza
+const fetchCalls = [];
+global.fetch = async (url) => {
+  fetchCalls.push(String(url));
+  if (String(url).includes('fail')) throw new Error('sin conexión a Storage');
+  if (String(url).includes('404')) {
+    return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+  }
+  return { ok: true, arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer };
+};
+
 // ── Inyectar los mocks en el cache de require ──
 const Module = require('module');
 const originalResolve = Module._resolveFilename;
@@ -159,9 +171,57 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert(mensajesEnviados[2].jid === '51912345678@s.whatsapp.net', 'respaldo JID mal');
   console.log('   ✓ respaldo clásico cuando resolverJid falla');
 
+  console.log('🧪 Test 10 (B2): dt_aviso con imagenUrl → IMAGEN bajada + caption');
+  simularDoc('doc-imagen', {
+    tipo: 'dt_aviso',
+    telefono: '51987654321',
+    texto: '⏱️ ¡Estoy llegando en 10 minutos! 🛵',
+    imagenUrl: 'https://storage.ok/imagenes_dt/llegando_123.jpg',
+    minutos: 10,
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  assert(mensajesEnviados.length === 4, 'no mandó el aviso con imagen');
+  const conImg = mensajesEnviados[3];
+  assert(conImg.content.image && Buffer.isBuffer(conImg.content.image), 'la imagen no llegó como Buffer');
+  assert(conImg.content.caption.includes('10 minutos'), 'caption sin los minutos');
+  assert(fetchCalls.some(u => u.includes('storage.ok')), 'no llamó a fetch con la URL');
+  assert(updates.some(u => u.id === 'doc-imagen' && u.resultado === 'enviado'), 'doc-imagen mal marcado');
+  console.log('   ✓ imagen bajada de la nube + caption con minutos + enviado');
+
+  console.log('🧪 Test 11 (B2): imagenUrl ROTA → cae a texto pelado (no se pierde)');
+  simularDoc('doc-img-fail', {
+    tipo: 'dt_aviso',
+    telefono: '51987654321',
+    texto: '🏁 ¡Ya llegué! 🛵',
+    imagenUrl: 'https://storage.fail/imagenes_dt/llegada_456.jpg',
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  assert(mensajesEnviados.length === 5, 'no mandó el aviso de respaldo');
+  const textoSolo = mensajesEnviados[4];
+  assert(!textoSolo.content.image && textoSolo.content.text.includes('llegué'), 'no cayó a texto');
+  assert(updates.some(u => u.id === 'doc-img-fail' && u.resultado === 'enviado'), 'doc-img-fail debía marcar enviado igual');
+  console.log('   ✓ la imagen falló y el mensaje salió igual (texto)');
+
+  console.log('🧪 Test 12 (B2): dt_ubicacion con imagenUrl también manda imagen');
+  simularDoc('doc-ubi-img', {
+    tipo: 'dt_ubicacion',
+    telefono: '51987654321',
+    texto: '📍 ¿Me ayudás con tu ubicación exacta?',
+    imagenUrl: 'https://storage.ok/imagenes_dt/ubicacion_789.jpg',
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  assert(mensajesEnviados.length === 6, 'no mandó el pedido de ubicación');
+  assert(mensajesEnviados[5].content.image, 'la ubicación debía llevar imagen');
+  assert(mensajesEnviados[5].content.caption.includes('ubicación'), 'caption de ubicación mal');
+  console.log('   ✓ pedir ubicación también sale con imagen');
+
+
   console.log('');
   console.log('════════════════════════════════════════');
-  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (9/9)');
+  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (12/12)');
   console.log('════════════════════════════════════════');
 })().catch((e) => {
   console.error('❌ FALLO:', e.message);

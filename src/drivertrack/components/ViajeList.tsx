@@ -39,8 +39,10 @@ interface Props {
   onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo
   // FASE B: avisos al cliente por el robot (menú 🤖 de cada viaje)
-  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegada' | 'entregado') => Promise<void> | void;
+  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegando' | 'llegada' | 'entregado', minutos?: number) => Promise<void> | void;
   onPedirUbicacion?: (viaje: Viaje) => Promise<void> | void;
+  /** FASE B2: tipos de aviso con imagen subida (badge 🖼️ en el menú del robot) */
+  tiposConImagen?: string[];
 }
 
 export default function ViajeList({
@@ -55,6 +57,7 @@ export default function ViajeList({
   cobroEnCurso = false,
   onMandarAviso,
   onPedirUbicacion,
+  tiposConImagen,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // F-ID3.3: qué viaje tiene abierto el mini-selector Waze/Google
@@ -288,6 +291,7 @@ export default function ViajeList({
               onAviso={onMandarAviso}
               onPedirUbicacion={onPedirUbicacion}
               onCobrar={onMandarCobro}
+              tiposConImagen={tiposConImagen}
             />
           );
         })()}

@@ -34,6 +34,8 @@ export interface AccionDT {
   telefono: string; // ya normalizado: 51 + 9 dígitos
   texto: string; // el mensaje COMPLETO (la app lo arma)
   imagenBase64?: string; // dataURL del QR de Yape — solo viaja en dt_cobro
+  imagenUrl?: string; // URL en la nube de la imagen del aviso (FASE B2) — el bot la baja con fetch
+  minutos?: number; // ⏱️ solo en dt_aviso llegando: en cuántos minutos llegás
   nombre?: string; // nombre del cliente (para los logs del bot)
   viajeId?: string; // trazabilidad: qué viaje lo disparó
 }
@@ -78,9 +80,16 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
 // mañana querés otra redacción, se cambia sin tocar el bot)
 // ═══════════════════════════════════════════════════════════
 
-export type TipoAviso = 'camino' | 'llegada' | 'entregado';
+// FASE B2: 'llegando' = ⏱️ "estoy llegando en X minutos" (como
+// el avisarLlegada del trabajo, pero con TU estilo inDrive)
+export type TipoAviso = 'camino' | 'llegando' | 'llegada' | 'entregado';
 
-export function armarAviso(tipo: TipoAviso, v: { cliente: string; direccion: string }, miNombre: string): string {
+export function armarAviso(
+  tipo: TipoAviso,
+  v: { cliente: string; direccion: string },
+  miNombre: string,
+  minutos?: number,
+): string {
   const nombre = v.cliente.trim() || 'estimado(a)';
   const dir = v.direccion.trim();
   const firma = miNombre.trim() ? `\n\n— ${miNombre.trim()} · tu conductor inDrive 🛵` : '\n\n— Tu conductor inDrive 🛵';
@@ -90,6 +99,16 @@ export function armarAviso(tipo: TipoAviso, v: { cliente: string; direccion: str
       `📍 ¡Voy en camino, ${nombre}! 🛵\n\n` +
       (dir ? `Salgo hacia *${dir}*` : 'Ya salí hacia tu ubicación') +
       ` y llego en unos minutos 🙌` +
+      firma
+    );
+  }
+  if (tipo === 'llegando') {
+    // ⏱️ FASE B2: el aviso con minutos, como el del trabajo
+    const min = minutos && minutos > 0 ? minutos : 10;
+    return (
+      `⏱️ ¡${nombre}, estoy llegando! 🛵\n\n` +
+      (dir ? `Estoy a *${min} minutos* de ${dir}` : `Me falta *${min} minutos* para llegar a tu ubicación`) +
+      ` — salí ya para que no te espera el tránsito 🙌` +
       firma
     );
   }
