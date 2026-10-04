@@ -62,8 +62,18 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
   }
   try {
     const ref = doc(collection(db, 'acciones_dt', uid, 'pendientes'));
+    // FASE B2.1 (fix avisos): los campos opcionales viajan como undefined
+    // cuando no aplican (imagenUrl sin imagen subida, minutos en avisos
+    // sin minutos…) y el SDK de Firestore RECHAZA el documento entero con
+    // "Unsupported field value: undefined" — por eso los avisos caían al
+    // wa.me aunque el cobro y la prueba funcionaran. Se limpian acá, en
+    // UN solo lugar, para todos los tipos de acción.
+    const datos: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(a)) {
+      if (v !== undefined) datos[k] = v;
+    }
     await setDoc(ref, {
-      ...a,
+      ...datos,
       processed: false,
       createdAt: new Date().toISOString(),
       origen: 'drivertrack',
@@ -71,7 +81,13 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
     });
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: 'No se pudo encolar (¿sin internet?) — probá de nuevo' };
+    // El motivo real al log + al toast: si vuelve a fallar, el código del
+    // error (p.ej. permission-denied) aparece a la vista, no un "¿sin
+    // internet?" genérico que despista.
+    const raz =
+      (e as { code?: string })?.code || (e as Error)?.message?.slice(0, 80) || 'sin detalle';
+    console.error('[robotBot] No se pudo encolar:', e);
+    return { ok: false, error: `No se pudo encolar (${raz})` };
   }
 }
 

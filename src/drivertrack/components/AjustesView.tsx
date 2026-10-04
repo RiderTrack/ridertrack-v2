@@ -731,7 +731,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.8.0 (Fase B2 — avisos con imagen + llegando en X min) · Lima, PE
+        DriverTrack v0.8.1 (Fase B2 — avisos con imagen + fix encolado) · Lima, PE
       </p>
     </div>
   );
