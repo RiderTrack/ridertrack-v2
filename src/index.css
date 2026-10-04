@@ -590,3 +590,144 @@ html {
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   🏍️ FASE A — DRIVERTRACK (módulo inDrive) — CSS propio
+   ═══════════════════════════════════════════════════════════════
+   DriverTrack entra como sección con su MISMA piel del APK
+   standalone. Dos reglas de oro:
+
+   1. PALETA AUTOCONTENIDA: RiderTrack remapea las variables de
+      color de Tailwind para su modo claro (.light) y su Theme
+      Studio. Si dejáramos a DriverTrack heredar, su sección
+      cambiaría de colores según el tema del TRABAJO. El bloque
+      .dt-app declara TODOS los colores que usa DriverTrack con
+      los valores originales de Tailwind (su look oscuro natal)
+      y .dt-app.light aplica su propia paleta clara (F-ID2.3).
+      Así cada app tiene su tema independiente, sin pisarse.
+
+   2. UTILERÍAS: confeti de meta, animación pop de toasts y
+      flechas ocultas de inputs numéricos — nombres únicos,
+      verificado sin colisión con lo existente.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Paleta oscura (default de Tailwind): blindaje contra el
+   tema claro / Theme Studio de RiderTrack ── */
+.dt-app {
+  color-scheme: dark;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-sky-200: #bae6fd;
+  --color-sky-300: #7dd3fc;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+  --color-sky-700: #0369a1;
+  --color-violet-100: #ede9fe;
+  --color-violet-200: #ddd6fe;
+  --color-violet-300: #c4b5fd;
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
+  --color-cyan-300: #67e8f9;
+  --color-cyan-400: #22d3ee;
+  --color-cyan-500: #06b6d4;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
+  --color-purple-300: #d8b4fe;
+}
+
+/* ── Paleta clara de DriverTrack (F-ID2.3): la MISMA del APK
+   standalone — slate invertida + acentos oscurecidos para
+   contraste. Solo aplica dentro de su contenedor ── */
+.dt-app.light {
+  color-scheme: light; /* inputs/scrollbars internos acompañan el tema claro */
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #ffffff;
+  --color-slate-950: #f1f5f9;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-emerald-500: #059669;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-red-400: #dc2626;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-violet-300: #7c3aed;
+}
+
+/* ── Confeti de meta cumplida 🎉 ── */
+@keyframes dt-confeti-cae {
+  0% {
+    transform: translateY(-10vh) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(720deg);
+    opacity: 0.9;
+  }
+}
+.dt-confeti-pieza {
+  position: fixed;
+  top: 0;
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  animation: dt-confeti-cae linear forwards;
+  pointer-events: none;
+  z-index: 100;
+}
+
+@keyframes dt-pop-in {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.dt-anim-pop {
+  animation: dt-pop-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Ocultar flechas de inputs numéricos (S/ y km se tipean limpios) */
+.dt-app input[type='number']::-webkit-outer-spin-button,
+.dt-app input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.dt-app input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

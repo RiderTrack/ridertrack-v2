@@ -36,6 +36,9 @@ import { MediosView } from './components/MediosView';
 import { MediosProvider } from './components/medios/MediosProvider';
 import { MiniPlayerReproductor } from './components/medios/MiniPlayerReproductor';
 import { NewOrderModal } from './components/NewOrderModal';
+// FASE A: 🏍️ DriverTrack (trabajo libre inDrive) integrado como
+// sección — mismo código del APK standalone, datos propios (dt_*)
+import DriverTrackView from './drivertrack/DriverTrackView';
 import { ToastContainer, ToastMessage } from './components/Toast';
 // Fase 3.17: avisos globales de chat (campanita + toast flotante)
 import { AvisoChatToast } from './components/AvisoChatToast';
@@ -101,6 +104,7 @@ const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
   seguimiento: 'Seguimiento',
   yape: 'Mi QR Yape',
   pedidos: 'Pedidos',
+  drivertrack: 'inDrive (Libre)',
   clientes: 'Clientes',
   repartidores: 'Mi Perfil Rider',
   mapa: 'Mapa de Entregas',
@@ -196,6 +200,15 @@ export default function App() {
   // sigue funcionando igual (misma clase .light en el CSS).
   const { modoEfectivo, actualizarConfig } = useTema();
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
+  // FASE A: 🏍️ inDrive — la vista se monta UNA vez (primera visita) y
+  // queda VIVA oculta (keep-alive): si estás grabando un viaje con GPS
+  // y saltás a otra sección, la grabación NO se corta. El div padre
+  // alterna entre '' (visible) y 'hidden' (display:none) — sin key
+  // que lo remonte, como sí pasa con el VistaBoundary de las demás.
+  const [dtMontada, setDtMontada] = useState(false);
+  useEffect(() => {
+    if (activeTab === 'drivertrack') setDtMontada(true);
+  }, [activeTab]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -1062,6 +1075,21 @@ export default function App() {
 
           {activeTab === 'perfil' && <ProfileView />}
           </VistaBoundary>
+
+          {/* ═══ FASE A: 🏍️ DRIVERTRACK (inDrive) — keep-alive ═══
+              Vive FUERA del VistaBoundary key={activeTab} (ese
+              remonta todo al cambiar de pestaña y mataría la
+              grabación GPS en curso). Boundary propio, key fija.
+              Oculto con display:none al salir de la sección —
+              React lo deja MONTADO (estados, watch GPS, wake lock
+              y audio siguen vivos). */}
+          {dtMontada && (
+            <VistaBoundary key="drivertrack-keepalive" nombre="inDrive (Libre)">
+              <div className={activeTab === 'drivertrack' ? '' : 'hidden'}>
+                <DriverTrackView activa={activeTab === 'drivertrack'} />
+              </div>
+            </VistaBoundary>
+          )}
         </main>
       </div>
 

@@ -28,6 +28,7 @@ import {
   MessageSquare,
   Store,
   Smartphone,
+  CarTaxiFront,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -150,6 +151,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'pedidos', label: 'Pedidos', icon: Package },
         { id: 'clientes', label: 'Clientes', icon: Users },
         { id: 'repartidores', label: 'Mi Perfil Rider', icon: Bike },
+        // FASE A: 🏍️ DriverTrack integrado — tus viajes libres de
+        // inDrive con su caja, mapa, stats y escáner. Datos propios
+        // (dt_*) separados del trabajo — nada se mezcla.
+        { id: 'drivertrack', label: 'inDrive (Libre)', icon: CarTaxiFront },
       ],
     },
     // F3.40: 🛣️🔧💰 LA JORNADA — antes eran 3 bloques grandes que

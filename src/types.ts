@@ -4,6 +4,7 @@ export type NavigationTab =
   | 'seguimiento'
   | 'yape'
   | 'pedidos'
+  | 'drivertrack'
   | 'clientes'
   | 'repartidores'
   | 'mapa'
