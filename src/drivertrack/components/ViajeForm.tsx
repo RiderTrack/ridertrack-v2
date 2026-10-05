@@ -35,12 +35,14 @@ import { EvArchivo } from '../tipos';
 import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, X, Zap } from 'lucide-react';
 import { ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
-import { armarMensajeCobro, fmtSoles, linkLlamada, linkWhatsApp, normalizarCelular, vibrar } from '../utils';
+import { armarMensajeCobro, fmtSoles, normalizarCelular, vibrar } from '../utils';
 import { escanearDireccion } from '../services/escanerIA';
 import { abrirNavegacion, tieneDestino, DestinoNav } from '../services/navegacion';
 // FASE F: km A→B calculados solos (Google por calles / recta de respaldo)
 import { calcularRutaAB, claveAB, RutaAB } from '../services/rutaAB';
-import IconoWhatsApp from './IconoWhatsApp';
+// FASE G: los botoncitos 📞💬 de al lado de los inputs se fueron
+// adentro del ContactoModal — un solo botón, inputs a full ancho
+import ContactoModal, { type Contacto } from './ContactoModal';
 import UbicarModal from './UbicarModal';
 import NavegarMenu from './NavegarMenu';
 
@@ -176,6 +178,8 @@ export default function ViajeForm({
   const [navAbierto, setNavAbierto] = useState(false);
   // FASE C: mini-selector para navegar al RECOJO (A) o a un recién agregado
   const [navObjetivo, setNavObjetivo] = useState<{ destino: DestinoNav; etiqueta: string } | null>(null);
+  // FASE G: modal de contacto (llamadas + WhatsApp) del formulario
+  const [contactoAbierto, setContactoAbierto] = useState(false);
   // FASE C.2: el "celular" principal del viaje = el que ENVÍA (y si solo
   // cargaste el que recibe, ese) — así el cobro y el robot siguen
   // andando con la data de siempre
@@ -389,26 +393,9 @@ export default function ViajeForm({
     );
   }
 
-  // F-ID3.2 + FASE C.2: 📞 llamada directa a quien ENVÍA o a quien
-  // RECIBE — cada teléfono tiene su propio botoncito al lado
-  function llamarA(quien: 'envia' | 'recibe') {
-    const crudo = quien === 'envia' ? celularEnvia : celularRecibe;
-    if (!normalizarCelular(crudo)) {
-      setError(quien === 'envia' ? 'Poné el celular de quien envía' : 'Poné el celular de quien recibe');
-      return;
-    }
-    setError('');
-    window.open(linkLlamada(crudo), '_self');
-  }
-
-  // FASE F: 💬 abrir el WhatsApp de un número SIN mensaje — chat
-  // vacío, para escribirle a mano (al que ENVÍA o al que RECIBE)
-  function escribirWhatsApp(crudo: string) {
-    const num = normalizarCelular(crudo.trim());
-    if (!num) return;
-    window.open(`https://wa.me/${num}`, '_blank');
-    vibrar(40);
-  }
+  // FASE G: los botoncitos 📞 y 💬 de al lado de cada input se fueron
+  // a vivir adentro del ContactoModal (mismo modal que la tarjeta del
+  // viaje) — las funciones viejas llamarA/escribirWhatsApp se borraron
 
   // F-ID3.3: 🧭 abre Waze/Google Maps hacia la entrega. Si no hay
   // preferencia guardada ('preguntar'), muestra el mini-selector.
@@ -809,72 +796,42 @@ export default function ViajeForm({
       )}
 
       {/* ── FASE C.2: DOS teléfonos — quien ENVÍA (A, el cliente
-          principal: a él le va el cobro) y quien RECIBE (B). Cada
-          uno con su botoncito 📞 al lado. ── */}
+          principal: a él le va el cobro) y quien RECIBE (B).
+          FASE G: los botoncitos 📞💬 de al lado se fueron al
+          ContactoModal → los inputs ahora van a full ancho. ── */}
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <div className="flex min-w-0 gap-1">
-          <input
-            value={celularEnvia}
-            onChange={e => setCelularEnvia(e.target.value)}
-            inputMode="tel"
-            placeholder="📤 Cel. ENVÍA"
-            className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
-            data-testid="input-celular-envia"
-          />
-          <button
-            onClick={() => llamarA('envia')}
-            disabled={escaneando || !celularEnvia.trim()}
-            className="flex shrink-0 items-center rounded-xl bg-sky-500/20 px-2.5 text-sky-300 transition-all active:scale-[0.98] disabled:opacity-40"
-            title="Llamar a quien ENVÍA"
-            aria-label="Llamar a quien envía"
-            data-testid="boton-llamar-envia"
-          >
-            <Phone size={16} />
-          </button>
-          {/* FASE F: 💬 WhatsApp manual (chat vacío) — para escribirle a mano */}
-          <button
-            onClick={() => escribirWhatsApp(celularEnvia)}
-            disabled={escaneando || !celularEnvia.trim()}
-            className="flex shrink-0 items-center rounded-xl bg-[#25D366]/20 px-2.5 text-[#25D366] transition-all active:scale-[0.98] disabled:opacity-40"
-            title="Escribirle por WhatsApp a quien ENVÍA (chat vacío, escribís vos)"
-            aria-label="WhatsApp a quien envía"
-            data-testid="boton-wa-envia"
-          >
-            <IconoWhatsApp size={16} />
-          </button>
-        </div>
-        <div className="flex min-w-0 gap-1">
-          <input
-            value={celularRecibe}
-            onChange={e => setCelularRecibe(e.target.value)}
-            inputMode="tel"
-            placeholder="📥 Cel. RECIBE"
-            className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
-            data-testid="input-celular-recibe"
-          />
-          <button
-            onClick={() => llamarA('recibe')}
-            disabled={escaneando || !celularRecibe.trim()}
-            className="flex shrink-0 items-center rounded-xl bg-sky-500/20 px-2.5 text-sky-300 transition-all active:scale-[0.98] disabled:opacity-40"
-            title="Llamar a quien RECIBE"
-            aria-label="Llamar a quien recibe"
-            data-testid="boton-llamar-recibe"
-          >
-            <Phone size={16} />
-          </button>
-          {/* FASE F: 💬 WhatsApp manual (chat vacío) — para escribirle a mano */}
-          <button
-            onClick={() => escribirWhatsApp(celularRecibe)}
-            disabled={escaneando || !celularRecibe.trim()}
-            className="flex shrink-0 items-center rounded-xl bg-[#25D366]/20 px-2.5 text-[#25D366] transition-all active:scale-[0.98] disabled:opacity-40"
-            title="Escribirle por WhatsApp a quien RECIBE (chat vacío, escribís vos)"
-            aria-label="WhatsApp a quien recibe"
-            data-testid="boton-wa-recibe"
-          >
-            <IconoWhatsApp size={16} />
-          </button>
-        </div>
+        <input
+          value={celularEnvia}
+          onChange={e => setCelularEnvia(e.target.value)}
+          inputMode="tel"
+          placeholder="📤 Cel. ENVÍA"
+          className="min-w-0 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+          data-testid="input-celular-envia"
+        />
+        <input
+          value={celularRecibe}
+          onChange={e => setCelularRecibe(e.target.value)}
+          inputMode="tel"
+          placeholder="📥 Cel. RECIBE"
+          className="min-w-0 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+          data-testid="input-celular-recibe"
+        />
       </div>
+
+      {/* FASE G: 📞 UN botón para llamar o escribir por WhatsApp —
+          abre el ContactoModal con los DOS números tal como los
+          estás tipeando (antes: 4 botoncitos que apretaban los inputs) */}
+      {(celularEnvia.trim() || celularRecibe.trim()) && (
+        <button
+          onClick={() => setContactoAbierto(true)}
+          disabled={escaneando}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 py-2.5 text-xs font-black text-slate-200 transition-all active:scale-[0.98] hover:bg-slate-700 disabled:opacity-50"
+          data-testid="boton-contacto-form"
+        >
+          <Phone size={14} className="text-sky-300" /> Llamar o escribir
+          <span className="font-semibold text-slate-500">📞 llamada · 💬 WhatsApp</span>
+        </button>
+      )}
 
       {/* 💬/🤖 Cobrar — al que ENVÍA por defecto (si solo cargaste el
           que recibe, a él) — mismo flujo compartido de siempre */}
@@ -1096,6 +1053,26 @@ export default function ViajeForm({
           onCerrar={() => setNavObjetivo(null)}
         />
       )}
+
+      {/* FASE G: modal de contacto del formulario — llamar o escribirle
+          por WhatsApp a quien ENVÍA y a quien RECIBE, con los números
+          tal como los estás tipeando (sin cobro ni avisos: esos siguen
+          con su botón de abajo, como siempre) */}
+      {contactoAbierto && (() => {
+        const telE = celularEnvia.trim();
+        const telR = celularRecibe.trim();
+        const dos = Boolean(telE && telR && telE !== telR);
+        const contactos: Contacto[] = [];
+        if (telE) contactos.push({ id: 'a', label: dos ? '📤 Envía (A)' : '📞 Cliente', numero: telE });
+        else if (telR) contactos.push({ id: 'a', label: '📥 Recibe (B)', numero: telR });
+        if (dos) contactos.push({ id: 'b', label: '📥 Recibe (B)', numero: telR });
+        return (
+          <ContactoModal
+            contactos={contactos}
+            onCerrar={() => setContactoAbierto(false)}
+          />
+        );
+      })()}
     </div>
   );
 }

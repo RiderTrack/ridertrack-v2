@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.6 (FASE F — 🛣️ km A→B calculados solos por calles + línea de recorrido en el mapa · 💬 WhatsApp manual para A y B · ✓ botón de entrega completada con contador del día) · Lima, PE
+        DriverTrack v0.9.7 (FASE G — 📞 ContactoModal: todas las llamadas y los WhatsApp de la tarjeta y el formulario agrupados en UN modal — antes eran 6 botoncitos que ocupaban media tarjeta; ahora 📞 Contacto abre llamar/WhatsApp a A y a B, el cobro y los avisos del robot) · Lima, PE
       </p>
     </div>
   );

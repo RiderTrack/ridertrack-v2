@@ -17,14 +17,16 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
+import { CheckCircle2, Navigation, Phone, Square, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
-import { fmtSoles, linkLlamada, normalizarCelular, vibrar } from '../utils';
+import { fmtSoles, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
 import { abrirNavegacion, tieneDestino } from '../services/navegacion';
 import NavegarMenu from './NavegarMenu';
-// FASE F: el glifo real de WhatsApp para los botones de escribir a mano
-import IconoWhatsApp from './IconoWhatsApp';
+// FASE G: todas las llamadas y WhatsApp de la tarjeta viven ahora
+// adentro del ContactoModal — antes eran 6 botoncitos 📞💬 que
+// ocupaban media tarjeta (pedido de Rudy: agruparlos en un modal)
+import ContactoModal, { type Contacto } from './ContactoModal';
 // FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
 import RobotMenu from './RobotMenu';
 
@@ -102,6 +104,8 @@ export default function ViajeList({
   const [navViajeId, setNavViajeId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
   const [robotViajeId, setRobotViajeId] = useState<string | null>(null);
+  // FASE G: qué viaje tiene abierto el modal de contacto (📞/💬/cobro/avisos)
+  const [contactoViajeId, setContactoViajeId] = useState<string | null>(null);
   // FASE E: qué dirección se acaba de copiar ("{id}-a" / "{id}-b") —
   // muestra el ✓ Copiada en la tarjeta
   const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
@@ -132,15 +136,6 @@ export default function ViajeList({
     const destino = v.coordenadas ?? { direccion: v.direccion.trim() };
     if (!tieneDestino(destino)) return;
     if (!abrirNavegacion(destino)) setNavViajeId(v.id);
-  }
-
-  /** FASE F: 💬 abrir el WhatsApp de un número SIN mensaje pre-cargado
-   *  — chat vacío para escribirle a mano (como pidió Rudy) */
-  function escribirWhatsApp(crudo: string) {
-    const num = normalizarCelular(crudo.trim());
-    if (!num) return;
-    window.open(`https://wa.me/${num}`, '_blank');
-    vibrar(40);
   }
 
   /** FASE C: 🧭 navegar al RECOJO (dirección A) de este viaje */
@@ -402,108 +397,21 @@ export default function ViajeList({
                 </button>
               )}
             </div>
-            {/* FASE C.2: 📞 llamar — un botón por teléfono: A (quien
-                envía / el cliente) y B (quien recibe) cuando son dos.
-                FASE F: + 💬 WhatsApp manual de cada uno → en celus
-                angostos la fila se WRAPea sola (mejor dos filas de
-                botones que un texto aplastado). */}
+            {/* FASE G: 📞 UN solo botón que abre el ContactoModal con
+                TODO adentro: llamar/WhatsApp a A y a B, el cobro y los
+                avisos del robot. Antes eran 6 botoncitos 📞💬 que se
+                comían la tarjeta (y wrappeaban en celus angostos). */}
             {telCobro && (
-              <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
-                {telEnvia && (
-                  <button
-                    onClick={() => window.open(linkLlamada(telEnvia), '_self')}
-                    className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
-                    aria-label={dosNumeros ? 'Llamar a quien envía (A)' : 'Llamar al cliente'}
-                    title={dosNumeros ? 'Llamar a quien ENVÍA (A)' : 'Llamar al cliente'}
-                    data-testid="boton-llamar-lista"
-                  >
-                    <Phone size={15} />
-                    {dosNumeros && <span className="text-[8px] font-black leading-none">A</span>}
-                  </button>
-                )}
-                {/* FASE F: 💬 WhatsApp manual a quien ENVÍA (A) — chat
-                    vacío, escribís vos lo que quieras */}
-                {telEnvia && (
-                  <button
-                    onClick={() => escribirWhatsApp(telEnvia)}
-                    className="flex flex-col items-center rounded-lg bg-[#25D366]/15 p-2 text-[#25D366] transition-colors hover:bg-[#25D366]/25"
-                    aria-label={dosNumeros ? 'WhatsApp a quien envía (A)' : 'WhatsApp al cliente'}
-                    title={dosNumeros ? 'Escribirle por WhatsApp a quien ENVÍA (A) — chat vacío' : 'Escribirle por WhatsApp al cliente — chat vacío'}
-                    data-testid="boton-wa-a"
-                  >
-                    <IconoWhatsApp size={15} />
-                    {dosNumeros && <span className="text-[8px] font-black leading-none">A</span>}
-                  </button>
-                )}
-                {telRecibe && dosNumeros && (
-                  <button
-                    onClick={() => window.open(linkLlamada(telRecibe), '_self')}
-                    className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
-                    aria-label="Llamar a quien recibe (B)"
-                    title="Llamar a quien RECIBE (B)"
-                    data-testid="boton-llamar-recibe-lista"
-                  >
-                    <Phone size={15} />
-                    <span className="text-[8px] font-black leading-none">B</span>
-                  </button>
-                )}
-                {/* FASE F: 💬 WhatsApp manual a quien RECIBE (B) */}
-                {telRecibe && dosNumeros && (
-                  <button
-                    onClick={() => escribirWhatsApp(telRecibe)}
-                    className="flex flex-col items-center rounded-lg bg-[#25D366]/15 p-2 text-[#25D366] transition-colors hover:bg-[#25D366]/25"
-                    aria-label="WhatsApp a quien recibe (B)"
-                    title="Escribirle por WhatsApp a quien RECIBE (B) — chat vacío"
-                    data-testid="boton-wa-b"
-                  >
-                    <IconoWhatsApp size={15} />
-                    <span className="text-[8px] font-black leading-none">B</span>
-                  </button>
-                )}
-                <button
-                  onClick={() =>
-                    // F-ID2.8 + F-ID5: MISMO mensaje del botón Cobrar de
-                    // arriba; con el robot activo lo manda el bot SOLO.
-                    // FASE C.2: le va al que ENVÍA (o al que recibe si
-                    // es el único teléfono del viaje)
-                    onMandarCobro(
-                      { cliente: v.cliente, monto: v.tarifa, direccion: v.direccion },
-                      telCobro,
-                    )
-                  }
-                  disabled={cobroEnCurso}
-                  className={`rounded-lg p-2 transition-colors disabled:opacity-40 ${
-                    config.robotActivo
-                      ? 'bg-violet-500/15 text-violet-300 hover:bg-violet-500/25'
-                      : 'bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25'
-                  }`}
-                  aria-label="Mandar mensaje de cobro"
-                  title={config.robotActivo ? 'Mandar el cobro por el robot (con tu QR)' : 'Mandar el cobro por WhatsApp'}
-                  data-testid="boton-whatsapp-lista"
-                >
-                  {cobroEnCurso ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : config.robotActivo ? (
-                    <Bot size={16} />
-                  ) : (
-                    <MessageCircle size={16} />
-                  )}
-                </button>
-                {/* FASE B: 🤖 menú de avisos — voy en camino / ya llegué /
-                    entregado / pedir ubicación / cobrar. El robot se lo
-                    manda al cliente sin abrir WhatsApp. */}
-                {onMandarAviso && (
-                  <button
-                    onClick={() => setRobotViajeId(v.id)}
-                    className="rounded-lg bg-violet-500/15 p-2 text-violet-300 transition-colors hover:bg-violet-500/25"
-                    aria-label="Avisos del robot para este viaje"
-                    title="Avisos del robot: voy en camino · ya llegué · entregado · ubicación · cobrar"
-                    data-testid="boton-robot-lista"
-                  >
-                    <ChevronDown size={16} />
-                  </button>
-                )}
-              </div>
+              <button
+                onClick={() => setContactoViajeId(v.id)}
+                className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
+                aria-label="Llamar o escribir por WhatsApp"
+                title="Llamar o escribir — abre el contacto de A y B, el cobro y los avisos"
+                data-testid="boton-contacto"
+              >
+                <Phone size={16} />
+                <span className="text-[8px] font-black leading-none">Contacto</span>
+              </button>
             )}
             {confirmarId === v.id ? (
               <div className="flex items-center gap-1">
@@ -561,6 +469,52 @@ export default function ViajeList({
               destino={v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() }}
               etiqueta={(v.dirA ?? '').trim()}
               onCerrar={() => setNavAViajeId(null)}
+            />
+          );
+        })()}
+
+      {/* FASE G: modal de contacto — llamadas + WhatsApp + cobro +
+          avisos, todo junto (antes: 6 botoncitos en la tarjeta) */}
+      {contactoViajeId &&
+        (() => {
+          const v = ordenados.find(x => x.id === contactoViajeId);
+          if (!v) return null;
+          // mismos teléfonos que usaba la fila de botones vieja:
+          // quien ENVÍA (el celular viejo del cliente cuenta como
+          // quien envía) y quien RECIBE, si son dos números distintos
+          const telE = (v.celularEnvia ?? '').trim() || v.celular.trim();
+          const telR = (v.celularRecibe ?? '').trim();
+          const dos = Boolean(telE && telR && telE !== telR);
+          const contactos: Contacto[] = [];
+          if (telE) contactos.push({ id: 'a', label: dos ? '📤 Envía (A)' : '📞 Cliente', numero: telE });
+          else if (telR) contactos.push({ id: 'a', label: '📥 Recibe (B)', numero: telR });
+          if (dos) contactos.push({ id: 'b', label: '📥 Recibe (B)', numero: telR });
+          const puedeAvisar = Boolean(onMandarAviso && onPedirUbicacion);
+          return (
+            <ContactoModal
+              contactos={contactos}
+              onCerrar={() => setContactoViajeId(null)}
+              onCobrar={() => {
+                // F-ID2.8 + F-ID5: MISMO mensaje del botón Cobrar de
+                // siempre; con el robot activo lo manda el bot SOLO.
+                onMandarCobro(
+                  { cliente: v.cliente, monto: v.tarifa, direccion: v.direccion },
+                  telE || telR,
+                );
+                setContactoViajeId(null);
+              }}
+              cobrando={cobroEnCurso}
+              cobroRobot={config.robotActivo}
+              montoCobro={v.tarifa}
+              onAvisos={
+                puedeAvisar
+                  ? () => {
+                      // cerrá este y abrí el menú de avisos del robot
+                      setContactoViajeId(null);
+                      setRobotViajeId(v.id);
+                    }
+                  : undefined
+              }
             />
           );
         })()}
