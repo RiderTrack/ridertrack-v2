@@ -11,16 +11,24 @@
 //   este parche → WhatsApp del cliente
 //
 // Botones que alimentan esta cola (la app arma el texto completo):
-//   • 💜 dt_cobro     — cobro CON tu QR de Yape (imagen + monto)
-//   • 🛣️ dt_aviso     — voy en camino / ⏱️ llegando en X min /
-//                       ya llegué / entregado — FASE B2: puede ir
-//                       CON IMAGEN (la app manda la URL de la
-//                       imagen que subiste en Ajustes → 🖼️ y acá
-//                       se baja de la nube al momento del envío)
-//   • 📍 dt_ubicacion — pedirle al cliente su ubicación (también
-//                       puede llevar imagen, FASE B2)
-//   • 💬 dt_texto     — mensaje libre (futuro)
-//   • 🧪 dt_prueba    — mensaje de prueba a vos mismo (Ajustes)
+//   • 💜 dt_cobro          — cobro CON tu QR de Yape (imagen + monto)
+//   • 🛣️ dt_aviso          — voy en camino / ⏱️ llegando en X min /
+//                          ya llegué / entregado — FASE B2: puede ir
+//                          CON IMAGEN (la app manda la URL de la
+//                          imagen que subiste en Ajustes → 🖼️ y acá
+//                          se baja de la nube al momento del envío)
+//   • 📍 dt_ubicacion      — pedirle al cliente su ubicación (también
+//                          puede llevar imagen, FASE B2)
+//   • 📷 dt_foto_entrega   — FASE J: la FOTO de la entrega 📦 — el
+//                          cliente la recibe SOLO, sin abrir
+//                          WhatsApp (igual que el cobro con QR).
+//                          La foto viaja como imagenBase64 en el
+//                          propio doc (comprimida ~60-150 KB) y el
+//                          texto editable va de caption. Si la foto
+//                          no llega, se marca ERROR (nunca sale un
+//                          texto pelado que confunda al cliente).
+//   • 💬 dt_texto          — mensaje libre (futuro)
+//   • 🧪 dt_prueba         — mensaje de prueba a vos mismo (Ajustes)
 //
 // FASE B2 (imágenes): la app pone `imagenUrl` en la acción (una
 // URL de Firebase Storage). El parche la baja con fetch y manda
@@ -62,9 +70,9 @@ let _sockRef = null;
 let _listenerIniciado = false;
 const _docsEnviados = new Set(); // anti-reenvío en reconexiones
 
-const VERSION = 'drivertrack_bot.js v1.1 (FASE B2 — avisos con imagen)';
+const VERSION = 'drivertrack_bot.js v1.2 (FASE J — foto de entrega automática)';
 const UID_DEFECTO = 'K8wx9X5GGOfindI1RGtIIQN3UGr1';
-const TIPOS_DT = ['dt_cobro', 'dt_aviso', 'dt_ubicacion', 'dt_texto', 'dt_prueba'];
+const TIPOS_DT = ['dt_cobro', 'dt_aviso', 'dt_ubicacion', 'dt_texto', 'dt_foto_entrega', 'dt_prueba'];
 
 function uidRudy() {
   try {
@@ -125,9 +133,12 @@ async function bajarImagen(url) {
 // ⚙️ PROCESAR cada acción — la app ya arma el texto completo;
 // el parche envía (texto, o imagen + el texto de caption):
 //   • dt_cobro con imagenBase64 → tu QR de Yape pegado al mensaje
+//   • dt_foto_entrega con imagenBase64 (FASE J) → la FOTO de la
+//     entrega pegada al mensaje — sin la foto la acción FALLA
+//     (mandar solo el texto confundiría al cliente)
 //   • dt_aviso/dt_ubicacion con imagenUrl (FASE B2) → la imagen
 //     que subiste en Ajustes → 🖼️, bajada de la nube al vuelo
-//   • si la imagen falla → texto nomás (nunca se pierde el envío)
+//   • si la imagen del aviso falla → texto nomás (nunca se pierde)
 // ═══════════════════════════════════════════════════════════
 async function procesarAccionDT(docRef, datos) {
   const tipo = datos.tipo;
@@ -140,11 +151,18 @@ async function procesarAccionDT(docRef, datos) {
     const texto = String(datos.texto || '').trim();
     if (!texto) throw new Error('La acción viene sin texto (versión vieja de la app?)');
 
+    // 📷 FASE J: la foto de entrega viaja igual que el QR del cobro
+    // (base64 dentro del doc) — PERO es obligatoria: si no llegó,
+    // la acción se marca con error para que la app lo muestre.
+    if (tipo === 'dt_foto_entrega' && !datos.imagenBase64) {
+      throw new Error('La foto no llegó en la acción (actualizá la app)');
+    }
+
     // 💜 dt_cobro puede venir con el QR de Yape (dataURL base64) —
     // se manda como IMAGEN con el texto de caption, igual que el
     // enviar_yape del trabajo.
     let buffer = null;
-    if (tipo === 'dt_cobro' && datos.imagenBase64) {
+    if ((tipo === 'dt_cobro' || tipo === 'dt_foto_entrega') && datos.imagenBase64) {
       buffer = Buffer.from(
         String(datos.imagenBase64).replace(/^data:image\/[a-z]+;base64,/, ''),
         'base64'
@@ -209,7 +227,7 @@ function iniciarDrivertrackBot(sock) {
   if (_listenerIniciado) return;
   _listenerIniciado = true;
   console.log('🏍️ [DT] Parche activo (' + VERSION + ')');
-  console.log('🏍️ [DT] Escuchando acciones_dt: cobro 💜 · avisos 🛣️⏱️🏁✅ (con imagen 🖼️ si la subiste) · ubicación 📍 · prueba 🧪');
+  console.log('🏍️ [DT] Escuchando acciones_dt: cobro 💜 · avisos 🛣️⏱️🏁✅ (con imagen 🖼️ si la subiste) · ubicación 📍 · foto de entrega 📷 · prueba 🧪');
 
   try {
     const db = getFirestore();

@@ -19,7 +19,7 @@
 // TU estilo) — el bot solo envía. Texto + QR de Yape opcional.
 // ═══════════════════════════════════════════════════════════
 
-import { collection, doc, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../../services/firebase';
 
 export type TipoAccionDT =
@@ -27,13 +27,14 @@ export type TipoAccionDT =
   | 'dt_aviso' // 🛣️ voy en camino / 🏁 ya llegué / ✅ entregado
   | 'dt_ubicacion' // 📍 pedirle al cliente su ubicación
   | 'dt_texto' // 💬 mensaje libre
+  | 'dt_foto_entrega' // 📷 FASE J: la FOTO de la entrega — el bot la manda SOLO (imagen + mensaje), sin abrir WhatsApp
   | 'dt_prueba'; // 🧪 mensaje de prueba a vos mismo (Ajustes)
 
 export interface AccionDT {
   tipo: TipoAccionDT;
   telefono: string; // ya normalizado: 51 + 9 dígitos
   texto: string; // el mensaje COMPLETO (la app lo arma)
-  imagenBase64?: string; // dataURL del QR de Yape — solo viaja en dt_cobro
+  imagenBase64?: string; // dataURL — viaja en dt_cobro (tu QR de Yape) y en dt_foto_entrega (la foto comprimida ~60-150 KB)
   imagenUrl?: string; // URL en la nube de la imagen del aviso (FASE B2) — el bot la baja con fetch
   minutos?: number; // ⏱️ solo en dt_aviso llegando: en cuántos minutos llegás
   nombre?: string; // nombre del cliente (para los logs del bot)
@@ -55,7 +56,9 @@ export function uidDisponible(): string | null {
  * Si el bot está apagado, la acción queda esperando en la cola
  * y sale cuando revive — no se pierde.
  */
-export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error?: string }> {
+export async function encolarAccionDT(
+  a: AccionDT
+): Promise<{ ok: boolean; docId?: string; error?: string }> {
   const uid = uidDisponible();
   if (!uid) {
     return { ok: false, error: 'Sin sesión — abrí sesión con tu cuenta de RiderTrack' };
@@ -79,7 +82,11 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
       origen: 'drivertrack',
       plataforma: 'ridertrack-v2',
     });
-    return { ok: true };
+    // FASE J: devolvemos el docId para que la UI pueda ESCUCHAR el
+    // resultado real que escribe el bot (enviado/error) — así el
+    // botón de la foto dice lo que PASÓ de verdad, no un "ya está"
+    // optimista.
+    return { ok: true, docId: ref.id };
   } catch (e) {
     // El motivo real al log + al toast: si vuelve a fallar, el código del
     // error (p.ej. permission-denied) aparece a la vista, no un "¿sin
@@ -88,6 +95,86 @@ export async function encolarAccionDT(a: AccionDT): Promise<{ ok: boolean; error
       (e as { code?: string })?.code || (e as Error)?.message?.slice(0, 80) || 'sin detalle';
     console.error('[robotBot] No se pudo encolar:', e);
     return { ok: false, error: `No se pudo encolar (${raz})` };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📡 FASE J: ESCUCHAR el resultado de una acción encolada
+// ═══════════════════════════════════════════════════════════
+// El bot, cuando procesa la acción, escribe en el MISMO doc:
+//   resultado='enviado'  → salió ✅
+//   resultado='error'    → no pudo (el motivo queda en `error`)
+//   resultado='vencido'  → llegó al bot con >10 min de antigüedad
+// Esta función mira ese doc EN VIVO y avisa apenas pasa. Si el bot
+// está apagado nadie escribe nada → a los timeoutMs avisamos
+// 'timeout' (la acción NO se pierde: queda en la cola y sale
+// apenas el bot encienda — esa es la gracia de la cola Firestore).
+// ═══════════════════════════════════════════════════════════
+
+export interface ResultadoAccionDT {
+  estado: 'enviado' | 'error' | 'vencido' | 'timeout';
+  error?: string;
+}
+
+/**
+ * Escucha el doc de una acción hasta que el bot escriba su
+ * resultado. Devuelve una función para dejar de escuchar (hay que
+ * llamarla al cerrar el modal). El 'timeout' NO significa que se
+ * perdió — significa que el bot no respondió todavía (apagado o
+ * sin red) y la acción sigue encolada esperándolo.
+ */
+export function escucharResultadoDT(
+  docId: string,
+  onResultado: (r: ResultadoAccionDT) => void,
+  timeoutMs = 25000
+): () => void {
+  let unsub: (() => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let listo = false;
+
+  const parar = () => {
+    if (listo) return;
+    listo = true;
+    if (timer) clearTimeout(timer);
+    try {
+      unsub?.();
+    } catch {
+      /* nada */
+    }
+  };
+
+  try {
+    const uid = uidDisponible();
+    if (!uid) {
+      onResultado({ estado: 'timeout' });
+      return () => undefined;
+    }
+    const ref = doc(db, 'acciones_dt', uid, 'pendientes', docId);
+    unsub = onSnapshot(
+      ref,
+      snap => {
+        if (listo) return;
+        const d = snap.data() as { resultado?: string; error?: string } | undefined;
+        if (d?.resultado === 'enviado' || d?.resultado === 'error' || d?.resultado === 'vencido') {
+          parar();
+          onResultado({ estado: d.resultado, error: d.error });
+        }
+      },
+      () => {
+        /* sin permiso / sin red para el listener: igual esperamos
+           el timeout — la acción ya quedó escrita y el bot la va a
+           procesar igual; solo perdemos el aviso en vivo */
+      }
+    );
+    timer = setTimeout(() => {
+      parar();
+      onResultado({ estado: 'timeout' });
+    }, timeoutMs);
+    return parar;
+  } catch {
+    parar();
+    onResultado({ estado: 'timeout' });
+    return () => undefined;
   }
 }
 

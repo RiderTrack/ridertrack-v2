@@ -3,14 +3,24 @@
 // inDrive (pedido de Rudy: "a veces los clientes me piden foto de
 // la entrega para comprobar que estás entregando").
 //
+// 🤖 FASE J: ENVÍO AUTOMÁTICO por el robot — "igualito que el APK
+// del trabajo": sacás la foto, apretás y el cliente la RECIBE solo
+// (foto + mensaje), sin abrir WhatsApp ni elegir chat. Va por la
+// misma cola Firestore que el cobro con QR (acciones_dt → el
+// rudy-bot en Termux lo manda). La app queda ESCUCHANDO el doc y
+// te avisa lo que pasó DE VERDAD: enviado ✓ / no pudo / bot
+// apagado (queda encolada y sale apenas encienda).
+//
 // Cómo funciona:
 //   📷 Tomar foto (cámara nativa del plugin @capacitor/camera)
 //   🖼️ De la galería (por si ya le sacaste)
 //   → ves la foto GRANDE + el MENSAJE que va con ella
 //     (editable al vuelo; el original se configura en
 //     Ajustes → 📷 Foto de entrega, con etiquetas {cliente}…)
-//   → "Mandar por WhatsApp": hoja de compartir NATIVA con la FOTO
-//     + el mensaje juntos (elegís WhatsApp → el chat → listo)
+//   → 🤖 "Enviar solo": el robot le manda la foto al cliente
+//     AUTOMÁTICAMENTE (plan A, como el cobro con QR)
+//   → 📎 "a mano": hoja de compartir NATIVA con la FOTO + el
+//     mensaje juntos (elegís WhatsApp → el chat → listo)
 //   → "Solo guardar": queda como evidencia EN el viaje
 //
 // SIEMPRE queda la evidencia comprimida en el viaje (foto +
@@ -22,11 +32,13 @@
 // abre el chat de WhatsApp con el mensaje listo y te avisa que
 // la foto está en la galería para adjuntarla 📎.
 // ═══════════════════════════════════════════════════════════
-import { useEffect, useState } from 'react';
-import { Camera as CamIcon, CheckCircle2, Image as ImageIcon, Loader2, Send, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bot as BotIcon, Camera as CamIcon, CheckCircle2, Image as ImageIcon, Loader2, Send, X } from 'lucide-react';
 import type { ConfigDT, Viaje } from '../types';
 import { armarMensajeFoto } from '../utils';
 import { vibrar } from '../utils';
+import { encolarAccionDT, escucharResultadoDT, uidDisponible } from '../services/robotBot';
+import { normalizarCelular } from '../utils';
 
 interface Props {
   viaje: Viaje;
@@ -88,6 +100,23 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
   const [mandando, setMandando] = useState(false);
   const [guardada, setGuardada] = useState(Boolean(viaje.fotoEntrega));
   const [exito, setExito] = useState(false);
+  const [fueAuto, setFueAuto] = useState(false); // ✓ verde del robot vs "elegí WhatsApp"
+
+  // 🤖 FASE J: estado del envío automático por el robot
+  //   'enviando' → la acción está en la cola y esperamos el resultado
+  //   'cola'     → el bot no respondió (apagado): la acción QUEDÓ encolada
+  //   'error'    → el bot (o la cola) devolvió error → mandar a mano
+  const [estadoRobot, setEstadoRobot] = useState<'enviando' | 'cola' | 'error' | null>(null);
+  const [errorRobot, setErrorRobot] = useState<string | null>(null);
+  const pararEscuchaRef = useRef<(() => void) | null>(null);
+
+  // ¿Puede el robot mandar esta foto? Robot prendido en Ajustes +
+  // sesión de RiderTrack (para escribir en Firestore) + celular del
+  // cliente cargado en el viaje. Si algo falla, el botón 📎 manual
+  // sigue siempre disponible — nunca te quedás sin poder mandarla.
+  const celCliente = normalizarCelular(telDelViaje(viaje));
+  const robotListo =
+    Boolean(config.robotActivo) && uidDisponible() !== null && celCliente.length >= 10;
 
   // 📷 saca la foto con el plugin nativo (cámara o galería)
   async function sacar(source: 'camera' | 'photos') {
@@ -130,10 +159,83 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
     }
   }
 
-  /** Manda la foto + mensaje. Plan A: hoja de compartir nativa
-   *  (foto y texto JUNTOS — elegís WhatsApp y el chat). Plan B:
-   *  wa.me con el mensaje y la foto queda en la galería. */
-  async function mandar() {
+  /** Manda la foto + mensaje POR EL ROBOT (FASE J — plan A):
+   *  la acción va a la cola Firestore con la foto comprimida
+   *  ADENTRO (base64, ~60-150 KB) y el rudy-bot se la entrega al
+   *  cliente en 1-2 segundos — sin abrir WhatsApp, igual que el
+   *  cobro con QR. La app ESCUCHA el resultado real del doc:
+   *  enviado ✓ / error / bot apagado (queda encolada, no se pierde). */
+  async function mandarPorRobot() {
+    if (!fotoSrc || mandando || estadoRobot === 'enviando') return;
+    if (celCliente.length < 10) {
+      onToast('Este viaje no tiene celular del cliente — mandala a mano 📎');
+      return;
+    }
+    setMandando(true);
+    setEstadoRobot('enviando');
+    setErrorRobot(null);
+    try {
+      // la evidencia queda SIEMPRE en el viaje — y es la MISMA foto
+      // comprimida que viaja al robot (una sola compresión)
+      let dataUrl: string;
+      if (guardada && viaje.fotoEntrega) {
+        dataUrl = viaje.fotoEntrega;
+      } else {
+        dataUrl = await comprimirDesdeSrc(fotoSrc);
+        onGuardar(dataUrl);
+        setGuardada(true);
+      }
+
+      const r = await encolarAccionDT({
+        tipo: 'dt_foto_entrega',
+        telefono: celCliente,
+        texto: mensaje,
+        imagenBase64: dataUrl,
+        nombre: viaje.cliente || undefined,
+        viajeId: viaje.id,
+      });
+      if (!r.ok || !r.docId) {
+        setEstadoRobot('error');
+        setErrorRobot(r.error ?? 'no se pudo encolar');
+        onToast('⚠️ ' + (r.error ?? 'No se pudo encolar') + ' — mandala a mano 📎');
+        return;
+      }
+
+      // quedamos A LA ESPERA del resultado real que escribe el bot
+      pararEscuchaRef.current?.();
+      pararEscuchaRef.current = escucharResultadoDT(r.docId, res => {
+        if (res.estado === 'enviado') {
+          setEstadoRobot(null);
+          setFueAuto(true);
+          setExito(true);
+          vibrar(120);
+          onToast('✓ El robot le mandó la foto al cliente 🤖📷');
+          setTimeout(onCerrar, 900);
+        } else if (res.estado === 'timeout') {
+          // el bot no respondió: la acción QUEDÓ ENCOLADA y sale
+          // apenas encienda — no se pierde, pero avisamos igual
+          setEstadoRobot('cola');
+          onToast('🕓 El bot está apagado — la foto queda encolada y sale apenas encienda');
+        } else {
+          setEstadoRobot('error');
+          setErrorRobot(
+            res.error || (res.estado === 'vencido' ? 'la acción llegó vencida al bot' : 'el bot no pudo')
+          );
+          onToast('⚠️ El robot no pudo — mandala a mano 📎');
+        }
+      });
+    } catch (e) {
+      setEstadoRobot('error');
+      setErrorRobot((e as Error)?.message || 'error inesperado');
+    } finally {
+      setMandando(false);
+    }
+  }
+
+  /** Manda la foto + mensaje A MANO (plan B de siempre): hoja de
+   *  compartir nativa (foto y texto JUNTOS — elegís WhatsApp y el
+   *  chat). Si no está, wa.me con el mensaje y la foto en galería. */
+  async function mandarManual() {
     if (!fotoSrc || mandando) return;
     setMandando(true);
     try {
@@ -194,12 +296,14 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
     }
   }
 
-  // Enter no debe mandar el formulario accidentalmente etc. —
-  // el textarea edita libre; nada más que hacer acá.
+  // Al cerrar el modal: soltar el listener del resultado (la
+  // acción ENCOLADA sigue su curso igual — no se pierde nada) y
+  // evitar el setState tardío si el bot responde después.
   useEffect(() => {
-    // si el viaje cambia de evidencia por el sync mientras está
-    // abierto (raro), no pisamos la foto que el usuario está viendo
-    return () => undefined;
+    return () => {
+      pararEscuchaRef.current?.();
+      pararEscuchaRef.current = null;
+    };
   }, []);
 
   return (
@@ -245,7 +349,8 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-emerald-500/20">
                 <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-900/90 p-3">
                   <CheckCircle2 className="h-10 w-10 text-emerald-400" />
-                  <span className="text-sm font-bold text-white">¡Lista!</span>
+                  <span className="text-sm font-bold text-white">{fueAuto ? '¡Enviada!' : '¡Lista!'}</span>
+                  {fueAuto && <span className="text-[10px] font-bold text-emerald-300">el robot se la mandó al cliente</span>}
                 </div>
               </div>
             )}
@@ -320,6 +425,31 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
           </p>
         </div>
 
+        {/* estado del envío automático (FASE J) — lo que pasa DE VERDAD */}
+        {estadoRobot === 'enviando' && (
+          <p className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-300">
+            <Loader2 size={13} className="animate-spin shrink-0" />
+            El robot se la está mandando al cliente… 🤖
+          </p>
+        )}
+        {estadoRobot === 'error' && (
+          <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-300">
+            ⚠️ El robot no pudo{errorRobot ? ` (${errorRobot})` : ''} — mandala a mano con el botón 📎
+          </p>
+        )}
+        {estadoRobot === 'cola' && (
+          <div className="mt-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-bold leading-relaxed text-sky-300">
+            🕓 El bot está apagado — la foto quedó <b>encolada</b> y sale apenas enciendas el bot. Si tenés apuro:
+            <button
+              onClick={mandarManual}
+              disabled={mandando}
+              className="ml-1 underline decoration-dotted underline-offset-2 hover:text-sky-200 disabled:opacity-50"
+            >
+              mandala igual a mano 📎
+            </button>
+          </div>
+        )}
+
         {/* botones de acción */}
         <div className="mt-3 flex gap-2">
           <button
@@ -341,25 +471,59 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
                 {guardada ? <CheckCircle2 size={14} className="text-emerald-400" /> : null}
                 {guardada ? 'Guardada' : 'Solo guardar'}
               </button>
-              <button
-                onClick={mandar}
-                disabled={mandando}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white transition-all hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
-                data-testid="foto-mandar"
-              >
-                {mandando ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" /> Mandando…
-                  </>
-                ) : (
-                  <>
-                    <Send size={14} /> Por WhatsApp
-                  </>
-                )}
-              </button>
+              {robotListo ? (
+                <button
+                  onClick={mandarPorRobot}
+                  disabled={mandando || estadoRobot === 'enviando'}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white transition-all hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                  title="El robot le manda la foto al cliente SOLO — sin abrir WhatsApp (igual que el cobro con QR)"
+                  data-testid="foto-mandar-robot"
+                >
+                  {estadoRobot === 'enviando' ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Mandando…
+                    </>
+                  ) : (
+                    <>
+                      <BotIcon size={14} /> Enviar solo
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={mandarManual}
+                  disabled={mandando}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white transition-all hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                  data-testid="foto-mandar"
+                >
+                  {mandando ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Mandando…
+                    </>
+                  ) : (
+                    <>
+                      <Send size={14} /> Por WhatsApp
+                    </>
+                  )}
+                </button>
+              )}
             </>
           ) : null}
         </div>
+
+        {/* con el robot activo, el envío MANUAL queda como alternativa
+            pequeña abajo — por si querés revisar el chat antes o el
+            robot está fallando */}
+        {fotoSrc && robotListo && estadoRobot !== 'cola' && (
+          <button
+            onClick={mandarManual}
+            disabled={mandando || estadoRobot === 'enviando'}
+            className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-800/50 py-2 text-[10px] font-bold text-slate-400 transition-all hover:bg-slate-800 hover:text-slate-300 active:scale-[0.98] disabled:opacity-50"
+            data-testid="foto-mandar-manual"
+          >
+            📎 o mandarla a mano (compartir por WhatsApp)
+          </button>
+        )}
       </div>
     </div>
   );

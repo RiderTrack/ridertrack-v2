@@ -218,10 +218,47 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert(mensajesEnviados[5].content.caption.includes('ubicación'), 'caption de ubicación mal');
   console.log('   ✓ pedir ubicación también sale con imagen');
 
+  console.log('🧪 Test 13 (FASE J): dt_foto_entrega con imagenBase64 → foto + caption');
+  const fotoMini = 'data:image/jpeg;base64,' + Buffer.from('jpeg-falso-foto-entrega').toString('base64');
+  simularDoc('doc-foto', {
+    tipo: 'dt_foto_entrega',
+    telefono: '987654321',
+    texto: '📦 ¡Foto de tu entrega, Cliente! Todo llegó bien 🙏',
+    imagenBase64: fotoMini,
+    nombre: 'Cliente Foto',
+    viajeId: 'viaje-123',
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(200);
+  assert(mensajesEnviados.length === 7, 'no mandó la foto de entrega');
+  const foto = mensajesEnviados[6];
+  assert(foto.jid === '51987654321@s.whatsapp.net', 'JID de la foto mal');
+  assert(foto.content.image && Buffer.isBuffer(foto.content.image), 'la foto debe viajar como Buffer');
+  assert(foto.content.caption && foto.content.caption.includes('Foto de tu entrega'), 'caption sin el mensaje');
+  assert(foto.content.mimetype === 'image/jpeg', 'mimetype de la foto mal');
+  // el Buffer tiene que ser el JPEG real (sin el prefijo data:)
+  assert(foto.content.image.equals(Buffer.from('jpeg-falso-foto-entrega')), 'el buffer no coincide con la foto enviada');
+  assert(updates.some(u => u.id === 'doc-foto' && u.resultado === 'enviado' && u.processed === true), 'doc-foto mal marcado');
+  console.log('   ✓ foto como Buffer + caption editable + doc resultado=enviado');
+
+  console.log('🧪 Test 14 (FASE J): dt_foto_entrega SIN imagen → ERROR, no sale texto pelado');
+  simularDoc('doc-foto-sin-img', {
+    tipo: 'dt_foto_entrega',
+    telefono: '51987654321',
+    texto: '📦 Foto de tu entrega',
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(200);
+  assert(mensajesEnviados.length === 7, 'mandó algo sin foto (bug: confundiría al cliente)');
+  const errFoto = updates.find(u => u.id === 'doc-foto-sin-img');
+  assert(errFoto && errFoto.resultado === 'error' && errFoto.processed === true, 'doc-foto-sin-img mal marcado');
+  assert(String(errFoto.error || '').includes('foto'), 'el error no explica que faltó la foto');
+  console.log('   ✓ sin foto: marcado error, NADA enviado (la app lo muestra)');
+
 
   console.log('');
   console.log('════════════════════════════════════════');
-  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (12/12)');
+  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (14/14)');
   console.log('════════════════════════════════════════');
 })().catch((e) => {
   console.error('❌ FALLO:', e.message);
