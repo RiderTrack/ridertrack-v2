@@ -14,6 +14,23 @@
 //   · ÚLTIMO ESCRIBE GANA (actualizadoEn): sos vos en 2 cels,
 //     lo que guardaste último pisa lo anterior. Simple y seguro
 //     para un solo driver.
+//   · 🛡️ v0.9.2 BLINDAJE ANTI-PÉRDIDA (3 protecciones):
+//       1) PRIMER SYNC (este cel nunca sincronizó) o CAMBIOS SIN
+//          SUBIR → lo que baja se UNE con lo local (unión por id),
+//          NUNCA lo pisa. Así un cel 2 recién instalado (vacío)
+//          no puede borrar los registros del cel 1, y lo que
+//          agregaste sin internet no se pierde aunque el otro cel
+//          haya subido cosas mientras tanto. La unión se vuelve a
+//          subir para que la nube quede con TODO.
+//       2) ANTI ECO: mientras se aplica lo que bajó de la nube,
+//          los guardar* NO re-disparan la subida → dos cels
+//          abiertos a la vez no se pasan el mismo doc eternamente
+//          (antes: ping-pong infinito de pushes, batería/data).
+//       3) PENDIENTE persistente (dt_pendiente): un cambio que no
+//          pudo subir (sin internet / sin reglas todavía) queda
+//          marcado en el localStorage y se sube solo en cuanto
+//          vuelve la conexión o reabrís la app (antes: si cerrabas
+//          la app antes del reintento, ese cambio no subía nunca).
 //   · Las RUTAS GPS (el dibujo del mapa) NO viajan: pesan mucho
 //     y son del teléfono que grabó — los km y duración SÍ viajan
 //     (son números). Se suben los últimos 1000 viajes.
@@ -29,6 +46,7 @@ import { ConfigDT, Gasto, Viaje } from '../types';
 import { cargarConfig, guardarConfig, guardarGastos, guardarViajes, normalizarConfig } from '../storage';
 
 const K_SYNC_EN = 'dt_sync_en'; // última marca de tiempo que YO escribí (local o nube)
+const K_PENDIENTE = 'dt_pendiente'; // '1' → hay cambios locales que aún no llegaron a la nube
 const MAX_VIAJES_SYNC = 1000; // tope para no pasarse del doc de 1 MB
 const DELAY_PUSH = 2500; // debounce: si seguís editando, espera
 
@@ -42,6 +60,10 @@ let unsubscribe: Unsubscribe | null = null;
 let pushTimer: number | null = null;
 let estado: EstadoSync = 'sin-sesion';
 let ultimoPushEn = 0;
+// 🛡️ anti eco: true mientras aplico lo que bajó de la nube →
+// los guardar* llaman avisarCambioDT y ese aviso se ignora (si no,
+// dos cels abiertos se re-envían el mismo doc para siempre)
+let aplicandoRemoto = false;
 const oyentes = new Set<(e: EstadoSync) => void>();
 
 function notificar(nuevo: EstadoSync) {
@@ -98,6 +120,24 @@ function limpiarUndefined<T>(valor: T): T {
   return valor;
 }
 
+/**
+ * 🛡️ Unión por id de dos listas (viajes o gastos). En colisión gana
+ * la versión LOCAL (es la que todavía no se respaldó, o la que
+ * editaste sin internet). Devuelve si la nube NO tenía algo de lo
+ * local → en ese caso hay que volver a subir para que no se pierda.
+ */
+function unirPorId<T extends { id: string }>(locales: T[], remotos: T[]): { lista: T[]; laNubeNoTenia: boolean } {
+  const porId = new Map<string, T>();
+  for (const r of remotos) porId.set(r.id, r);
+  let laNubeNoTenia = false;
+  for (const l of locales) {
+    const r = porId.get(l.id);
+    if (!r || JSON.stringify(r) !== JSON.stringify(l)) laNubeNoTenia = true;
+    porId.set(l.id, l); // colisión → gana lo local
+  }
+  return { lista: [...porId.values()], laNubeNoTenia };
+}
+
 async function empujar() {
   if (!uidActual) return;
   const actualizadoEn = Date.now();
@@ -120,11 +160,13 @@ async function empujar() {
       }),
     );
     localStorage.setItem(K_SYNC_EN, String(actualizadoEn));
+    localStorage.removeItem(K_PENDIENTE); // 🛡️ todo lo local ya está en la nube
     notificar('sincronizado');
   } catch (e) {
     console.warn('☁️ [DT sync] No pude subir:', e);
     notificar('error');
-    // reintento más lento (la app sigue andando local igual)
+    // queda marcado como pendiente (dt_pendiente) → se reintenta solo
+    // al volver la conexión o al reabrir la app; reintento lento además
     if (pushTimer) window.clearTimeout(pushTimer);
     pushTimer = window.setTimeout(empujar, 20000);
   }
@@ -132,6 +174,9 @@ async function empujar() {
 
 function programarPush() {
   if (!uidActual) return;
+  // 🛡️ queda marcado AHORA: si la app se cierra antes del debounce,
+  // al reabrirla el snapshot ve el pendiente y sube igual
+  localStorage.setItem(K_PENDIENTE, '1');
   if (pushTimer) window.clearTimeout(pushTimer);
   pushTimer = window.setTimeout(empujar, DELAY_PUSH);
 }
@@ -143,18 +188,46 @@ function aplicarRemoto(data: {
   config?: Partial<ConfigDT>;
   actualizadoEn?: number;
 }) {
+  let hayQueSubir = false; // la unión tiene cosas que la nube no tenía
+  aplicandoRemoto = true; // 🛡️ anti eco (ver arriba)
   try {
+    // ¿este teléfono tiene datos SIN respaldar? → unir, jamás pisar:
+    //   · primeraSync: este cel NUNCA sincronizó (acá están los registros
+    //     del cel 1 que todavía no subieron a ningún lado)
+    //   · pendiente: hubo cambios que no pudieron subir (sin internet…)
+    const primeraSync = Number(localStorage.getItem(K_SYNC_EN) || 0) === 0;
+    const protegerLocal = primeraSync || localStorage.getItem(K_PENDIENTE) === '1';
+
     if (Array.isArray(data.viajes)) {
-      // merge: las rutas GPS locales se conservan para los viajes que ya tenía
       const locales = JSON.parse(localStorage.getItem('dt_viajes_v1') || '[]') as Viaje[];
+      // merge: las rutas GPS locales se conservan para los viajes que ya tenía
       const rutasLocales = new Map(locales.map(v => [v.id, v.ruta]));
-      const remotos = data.viajes.map(v => {
+      const conRutaLocal = (v: Viaje): Viaje => {
         const rutaLocal = rutasLocales.get(v.id);
         return rutaLocal && rutaLocal.length >= 2 ? { ...v, ruta: rutaLocal } : v;
-      });
-      guardarViajes(remotos);
+      };
+      if (protegerLocal) {
+        // 🛡️ UNIÓN por id: lo que solo existe en este teléfono NUNCA se borra
+        const remotos = data.viajes.map(conRutaLocal);
+        const union = unirPorId(locales, remotos);
+        hayQueSubir = union.laNubeNoTenia;
+        guardarViajes(union.lista);
+      } else {
+        // flujo normal (todo lo local ya está respaldado): la nube manda el
+        // estado completo → así los viajes BORRADOS en el otro cel acá también se van
+        guardarViajes(data.viajes.map(conRutaLocal));
+      }
     }
-    if (Array.isArray(data.gastos)) guardarGastos(data.gastos);
+    if (Array.isArray(data.gastos)) {
+      if (protegerLocal) {
+        const locales = JSON.parse(localStorage.getItem('dt_gastos_v1') || '[]') as Gasto[];
+        const union = unirPorId(locales, data.gastos);
+        if (union.laNubeNoTenia) hayQueSubir = true;
+        guardarGastos(union.lista);
+      } else {
+        guardarGastos(data.gastos);
+      }
+    }
     if (data.config) {
       // merge sobre la local → las keys de IA del teléfono se conservan
       const merge = normalizarConfig({ ...cargarConfig(), ...data.config } as Partial<ConfigDT>);
@@ -167,6 +240,15 @@ function aplicarRemoto(data: {
   } catch (e) {
     console.warn('☁️ [DT sync] No pude aplicar lo de la nube:', e);
     notificar('error');
+  } finally {
+    aplicandoRemoto = false;
+  }
+  if (hayQueSubir && uidActual) {
+    // la unión tiene viajes/gastos que la nube no conocía → subirla (1 sola vez)
+    programarPush();
+  } else {
+    // quedó todo igual a la nube → nada pendiente por subir
+    localStorage.removeItem(K_PENDIENTE);
   }
 }
 
@@ -206,8 +288,13 @@ export function iniciarSyncDT(uid: string | null) {
         }
         if (data.dispositivo === DISPOSITIVO) return; // mi propio eco
         const localEn = Number(localStorage.getItem(K_SYNC_EN) || 0);
-        if (Number(data.actualizadoEn) <= localEn) return; // ya tengo algo más nuevo
-        aplicarRemoto(data);
+        if (Number(data.actualizadoEn) > localEn) {
+          aplicarRemoto(data);
+          return;
+        }
+        // la nube no tiene nada nuevo… pero si ME QUEDÓ algo sin subir
+        // (🛡️ sin internet / la app se cerró antes del debounce), subilo ya
+        if (localStorage.getItem(K_PENDIENTE) === '1') programarPush();
       },
       err => {
         console.warn('☁️ [DT sync] listener:', err);
@@ -225,7 +312,9 @@ export function iniciarSyncDT(uid: string | null) {
  * cada vez que algo cambia → programa la subida con debounce.
  */
 export function avisarCambioDT() {
-  if (!uidActual) return; // sin sesión: todo queda local como siempre
+  // 🛡️ anti eco: si el guardado viene de aplicar lo de la nube,
+  // re-subirlo sería un ping-pong infinito entre dos cels abiertos
+  if (!uidActual || aplicandoRemoto) return;
   notificar('pendiente');
   programarPush();
 }
@@ -237,6 +326,7 @@ export function forzarSyncDT() {
     window.clearTimeout(pushTimer);
     pushTimer = null;
   }
+  localStorage.setItem(K_PENDIENTE, '1'); // si falla, queda marcado para reintentar
   void empujar();
   return true;
 }
