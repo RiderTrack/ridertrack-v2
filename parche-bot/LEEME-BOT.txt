@@ -8,11 +8,16 @@ QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
     Imágenes del robot).
   • Nuevo aviso "Llegando en X minutos" (elegís 5/10/15/20
     o los que quieras desde el menú 🤖 del viaje).
-  • FASE C: actualizar_reglas.js v3 ahora TAMBIÉN agrega la
+  • FASE C: actualizar_reglas.js v3.1 ahora TAMBIÉN agrega la
     colección dt_sync — es la que hace que tus viajes, gastos
     y ajustes de inDrive se vean en CUALQUIER cel con tu
     misma cuenta de RiderTrack. Si ya corriste la versión
     anterior, esta solo agrega lo que falta (idempotente).
+  • v3.1 FIX: la v3 fallaba al publicar con "Error 404" (usaba
+    PUT, que esta API no tiene) y su plan B crasheaba con
+    "projectId is not defined". Ya está arreglado — si algo
+    falla, ahora te deja reglas-nuevas-completas.txt listo
+    para pegar en la consola.
 
 ═════════════════════════════════════════════════════════
 INSTALACIÓN (5 pasos, 2 minutos)
@@ -22,7 +27,7 @@ INSTALACIÓN (5 pasos, 2 minutos)
     (~/bot-whatsapp, donde está index.js):
 
       drivertrack_bot.js      ← parche v1.1 (reemplaza el viejo)
-      actualizar_reglas.js    ← reglas v3 (agrega imagenes_dt + dt_sync)
+      actualizar_reglas.js    ← reglas v3.1 (agrega dt_sync + fix del 404)
       instalar_drivertrack.js ← instalador (mismo de siempre)
 
     (si descomprimís el zip adentro de ~/bot-whatsapp, fijate
@@ -47,9 +52,10 @@ INSTALACIÓN (5 pasos, 2 minutos)
 ═════════════════════════════════════════════════════════
 APK
 ═════════════════════════════════════════════════════════
- Instalá el APK v0.8.0 (GitHub Actions lo compila solo al
- hacer push). Sin APK nuevo no vas a ver la galería de
- imágenes ni el botón "Llegando en…".
+ Instalá el APK v0.9.0 (GitHub Actions lo compila solo al
+ hacer push). Sin APK nuevo no vas a ver la dirección A/B,
+ los teléfonos de envía/recibe, las plantillas editables ni
+ el panel de libre en Stats/Caja/Mapa del trabajo.
 
 ═════════════════════════════════════════════════════════
 PRUEBA COMPLETA (2 minutos)

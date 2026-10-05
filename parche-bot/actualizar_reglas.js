@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // ═══════════════════════════════════════════════════════════
 // 🔐 actualizar_reglas.js — publica las reglas de inDrive
-//            (acciones_dt + imagenes_dt · FASE B y B2)
+//            (acciones_dt + imagenes_dt + dt_sync · FASE B, B2 y C)
+//            v3.1 — FIX del 404 al publicar (la API NO tiene PUT:
+//            ahora usa PATCH como el CLI oficial de Firebase) y FIX
+//            del crash del Plan B ("projectId is not defined")
 // ═══════════════════════════════════════════════════════════
 // ¿POR QUÉ EXISTE ESTE SCRIPT? Las reglas de Firestore VIVAS (las
 // de la consola de Firebase) no incluyen las colecciones nuevas
 // de inDrive → la app recibe PERMISSION_DENIED:
 //   · acciones_dt  → la cola de mensajes del robot (FASE B)
 //   · imagenes_dt  → las imágenes de los avisos (FASE B2)
+//   · dt_sync      → sync de viajes/gastos/ajustes entre cels (FASE C)
 //
 // Este script usa el serviceAccount.json DEL PROPIO BOT (mismo
 // proyecto ridertrack-93c8a) para:
@@ -34,6 +38,12 @@ const path = require('path');
 
 const CARPETA = __dirname;
 const SA_PATH = path.join(CARPETA, 'serviceAccount.json');
+
+// ⚠️ Estas dos viven AFUERA de main() para que el PLAN B (el catch de
+// abajo) también las pueda usar — antes `projectId` estaba solo dentro
+// de main() y el plan B crasheaba con "projectId is not defined".
+let projectId = '';
+let contenidoParchado = ''; // reglas vivas + bloques nuevos (para el plan B)
 
 if (!fs.existsSync(SA_PATH)) {
   console.error('❌ No encuentro serviceAccount.json en ' + CARPETA);
@@ -91,7 +101,7 @@ async function main() {
   // 1. Token OAuth del serviceAccount (firebase-admin ya está instalado)
   const { cert } = require('firebase-admin/app');
   const sa = JSON.parse(fs.readFileSync(SA_PATH, 'utf8'));
-  const projectId = sa.project_id;
+  projectId = sa.project_id;
   console.log('🔑 Proyecto: ' + projectId);
 
   const credential = cert(sa);
@@ -125,7 +135,7 @@ async function main() {
   // 3. ¿Qué bloques faltan? (idempotente, uno por uno)
   const faltantes = BLOQUES.filter(([marca]) => !contenido.includes(marca));
   if (faltantes.length === 0) {
-    console.log('✅ Las reglas VIVAS ya tienen todo (acciones_dt + imagenes_dt) — nada que hacer.');
+    console.log('✅ Las reglas VIVAS ya tienen todo (acciones_dt + imagenes_dt + dt_sync) — nada que hacer.');
     return;
   }
   faltantes.forEach(([, , nombre]) => console.log('🩹 Falta: ' + nombre));
@@ -143,6 +153,7 @@ async function main() {
     nuevo = nuevo.trimEnd() + '\n\n' + insercion;
   }
   console.log('🩹 Insertando ' + faltantes.length + ' bloque(s) (antes del deny-all)…');
+  contenidoParchado = nuevo; // por si el publish falla → plan B con reglas completas
 
   // 5. Crear el ruleset nuevo
   const crearRes = await fetch(BASE + '/rulesets', {
@@ -159,26 +170,54 @@ async function main() {
   const nuevoRuleset = await crearRes.json();
   console.log('📦 Ruleset nuevo: ' + nuevoRuleset.name);
 
-  // 6. Publicar (release)
-  const pubRes = await fetch(BASE + '/releases/cloud.firestore', {
-    method: 'PUT',
-    headers: HEADERS,
-    body: JSON.stringify({ rulesetName: nuevoRuleset.name }),
-  });
-  if (!pubRes.ok) {
-    const detalle = (await pubRes.text()).slice(0, 400);
-    throw new Error('publicar release: ' + pubRes.status + ' — ' + detalle);
+  // 6. Publicar (release) — el release "cloud.firestore" YA existe, así
+  //    que hay que APUNTARLO al ruleset nuevo. ⚠️ Esta API NO acepta PUT
+  //    (responde 404 con una página HTML — el bug de la v3): se usa
+  //    PATCH, igual que el CLI oficial de Firebase. POST va de respaldo
+  //    por si el release no existiera.
+  const releaseName = 'projects/' + projectId + '/releases/cloud.firestore';
+  const intentos = [
+    ['PATCH', BASE + '/releases/cloud.firestore'],
+    ['PATCH', BASE + '/releases/cloud.firestore?updateMask=rulesetName'],
+    ['POST', BASE + '/releases'],
+  ];
+  let publicado = false;
+  let detalleFalla = '';
+  for (const [metodo, url] of intentos) {
+    const res = await fetch(url, {
+      method: metodo,
+      headers: HEADERS,
+      body: JSON.stringify({ name: releaseName, rulesetName: nuevoRuleset.name }),
+    });
+    if (res.ok) { publicado = true; break; }
+    detalleFalla = metodo + ' ' + url + ' → ' + res.status + ' ' + (await res.text()).slice(0, 200);
+    console.log('   ⚠️ ' + metodo + ' falló (' + res.status + '), probando de otra forma…');
   }
+  if (!publicado) throw new Error(detalleFalla);
   console.log('🚀 Reglas publicadas ✓');
 
-  // 7. Verificación: bajar de nuevo y confirmar cada bloque
-  const verRes = await fetch(BASE + '/releases/cloud.firestore', { headers: HEADERS });
-  const verRel = await verRes.json();
-  const verRs = await fetch('https://firebaserules.googleapis.com/v1/' + verRel.rulesetName, { headers: HEADERS });
-  const verRuleset = await verRs.json();
-  const verContent = verRuleset.source.files[0].content || '';
-  const faltanTodavia = BLOQUES.filter(([marca]) => !verContent.includes(marca));
-  if (faltanTodavia.length) throw new Error('la verificación no encontró: ' + faltanTodavia.map(b => b[0]).join(', '));
+  // 7. Verificación: bajar de nuevo y confirmar cada bloque (hasta 3
+  //    intentos con 2s de espera — la propagación a veces tarda un toque)
+  let verificados = false;
+  for (let intento = 1; intento <= 3 && !verificados; intento++) {
+    const verRes = await fetch(BASE + '/releases/cloud.firestore', { headers: HEADERS });
+    if (!verRes.ok) throw new Error('verificar (GET release): ' + verRes.status);
+    const verRel = await verRes.json();
+    const verRs = await fetch('https://firebaserules.googleapis.com/v1/' + verRel.rulesetName, { headers: HEADERS });
+    if (!verRs.ok) throw new Error('verificar (GET ruleset): ' + verRs.status);
+    const verRuleset = await verRs.json();
+    const verContent = (verRuleset.source && verRuleset.source.files && verRuleset.source.files[0].content) || '';
+    verificados = BLOQUES.every(([marca]) => verContent.includes(marca));
+    if (!verificados && intento < 3) {
+      console.log('   ⏳ todavía no veo el cambio… espero 2s y vuelvo a verificar');
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  if (!verificados) {
+    console.log('⚠️ No pude verificar automáticamente, pero el publish respondió OK.');
+    console.log('   (A veces demora un par de minutos en propagar — abrí la consola de');
+    console.log('    Firebase → Firestore → Reglas y fijate que aparezca dt_sync.)');
+  }
 
   console.log('');
   console.log('✅ ¡LISTO! Las reglas vivas ahora permiten los bloques de inDrive.');
@@ -194,14 +233,36 @@ async function main() {
 main().catch((e) => {
   console.error('');
   console.error('❌ No pude actualizar las reglas: ' + e.message);
+  console.error('   (Tranquilo: tus reglas vivas quedaron IGUAL que antes —');
+  console.error('    no se cambia nada hasta que el publish responde OK.)');
   console.error('');
+
+  // Plan B automático: si ya tenía las reglas parcheadas, las guardo
+  // COMPLETAS en un archivo listo para pegar en la consola de Firebase.
+  let archivoEscrito = '';
+  if (contenidoParchado) {
+    try {
+      const destino = path.join(CARPETA, 'reglas-nuevas-completas.txt');
+      fs.writeFileSync(destino, contenidoParchado, 'utf8');
+      archivoEscrito = destino;
+    } catch (_) { /* sin permisos de escritura → caemos a los bloques */ }
+  }
+
   console.error('═══ PLAN B — A MANO (2 minutos) ═══');
   console.error('1. Abrí https://console.firebase.google.com → proyecto ' + (projectId || 'ridertrack-93c8a'));
   console.error('2. Firestore Database → Reglas');
-  console.error('3. Buscá el bloque que dice:  match /acciones_bot/{userId} {');
-  console.error('4. Justo DEBAJO de su llave de cierre }, pegá estos bloques:');
-  console.error('');
-  BLOQUES.forEach(([, bloque]) => console.error(bloque));
-  console.error('5. Publicar (botón azul) — listo.');
+  if (archivoEscrito) {
+    console.error('3. En Termux:  cat ~/bot-whatsapp/reglas-nuevas-completas.txt');
+    console.error('   (o:  termux-open reglas-nuevas-completas.txt )');
+    console.error('   → copiá TODO el contenido: son tus mismas reglas vivas +');
+    console.error('   los bloques nuevos ya insertados en el lugar correcto.');
+    console.error('4. En la consola: reemplazá TODO el editor con eso → Publicar.');
+  } else {
+    console.error('3. Buscá el bloque que dice:  match /acciones_bot/{userId} {');
+    console.error('4. Justo DEBAJO de su llave de cierre }, pegá estos bloques:');
+    console.error('');
+    BLOQUES.forEach(([, bloque]) => console.error(bloque));
+    console.error('5. Publicar (botón azul) — listo.');
+  }
   process.exit(1);
 });
