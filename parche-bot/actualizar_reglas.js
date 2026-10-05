@@ -11,6 +11,13 @@
 //            código fuente: firebase-tools/src/gcp/rules.ts →
 //            updateRelease). Además ahora cada fallo imprime el
 //            detalle completo de la respuesta para diagnosticar.
+//            v3.3 — CARTEL DE VERSIÓN al arranque: imprime
+//            "📋 actualizar_reglas.js v3.3" como PRIMERA línea. Así
+//            se sabe al instante qué versión corrés (Rudy corrió la
+//            v3.1 vieja sin darse cuenta — el zip se le descomprimió
+//            en una subcarpeta y el archivo viejo siguió en su lugar).
+//            También: el 2do intento ahora usa updateMask (antes iba
+//            el cuerpo plano, que ya demostró dar 400 dos veces).
 // ═══════════════════════════════════════════════════════════
 // ¿POR QUÉ EXISTE ESTE SCRIPT? Las reglas de Firestore VIVAS (las
 // de la consola de Firebase) no incluyen las colecciones nuevas
@@ -103,7 +110,14 @@ const BLOQUES = [
   ['dt_sync', BLOQUE_SYNC, 'dt_sync (sync de datos entre cels)'],
 ];
 
+const VERSION = 'v3.3';
+
 async function main() {
+  // 🪪 CARTEL DE VERSIÓN — si esta línea no aparece arriba de todo,
+  // estás corriendo un archivo VIEJO (v3.1 o anterior) que quedó en
+  // otra carpeta. Verificá con:  head -3 actualizar_reglas.js
+  console.log('📋 actualizar_reglas.js ' + VERSION);
+
   // 1. Token OAuth del serviceAccount (firebase-admin ya está instalado)
   const { cert } = require('firebase-admin/app');
   const sa = JSON.parse(fs.readFileSync(SA_PATH, 'utf8'));
@@ -179,13 +193,21 @@ async function main() {
   // 6. Publicar (release) — el release "cloud.firestore" YA existe, así
   //    que hay que APUNTARLO al ruleset nuevo.
   //    ⚠️ v3: PUT → 404 (la API no tiene PUT).
-  //    ⚠️ v3.1: PATCH con cuerpo plano { name, rulesetName } → 400.
-  //    ✅ v3.2: PATCH con el cuerpo ENVUELTO:
+  //    ⚠️ v3.1: PATCH con cuerpo plano { name, rulesetName } → 400
+  //             (verificado 2 veces contra la API real).
+  //    ✅ v3.2+: PATCH con el cuerpo ENVUELTO:
   //          { release: { name: '...', rulesetName: '...' } }
-  //    que es EXACTAMENTE lo que manda el CLI oficial de Firebase
-  //    (firebase-tools → src/gcp/rules.ts → updateRelease). El POST
-  //    de respaldo es el createRelease del CLI (plano) por si el
-  //    release no existiera — ojo que necesita otro permiso.
+  //    Confirmado por DOS fuentes oficiales:
+  //      · discovery doc: firebaserules v1 → releases.patch pide
+  //        un cuerpo "UpdateReleaseRequest" = { release, updateMask }
+  //      · código del CLI: firebase-tools/src/gcp/rules.ts →
+  //        updateRelease manda PATCH { release: { name, rulesetName } }
+  //    NOTA: si el PATCH da 400 es FORMATO; si diera 403 sería
+  //    PERMISO — el PATCH de Rudy siempre dio 400 (o sea, el permiso
+  //    de publicar LO TIENE; la v3.1 solo mandaba el cuerpo mal).
+  //    El POST de respaldo es el createRelease del CLI (plano) por
+  //    si el release no existiera — ojo que necesita otro permiso
+  //    (a este SA le dio 403, es lo esperado).
   const releaseName = 'projects/' + projectId + '/releases/cloud.firestore';
   const intentos = [
     // [etiqueta, metodo, url, cuerpo] — en orden de preferencia
@@ -196,10 +218,13 @@ async function main() {
       { release: { name: releaseName, rulesetName: nuevoRuleset.name } },
     ],
     [
-      'PATCH plano (por las dudas)',
+      'PATCH (envuelto + updateMask)',
       'PATCH',
       BASE + '/releases/cloud.firestore',
-      { name: releaseName, rulesetName: nuevoRuleset.name },
+      {
+        release: { name: releaseName, rulesetName: nuevoRuleset.name },
+        updateMask: 'rulesetName',
+      },
     ],
     [
       'POST crear release (createRelease del CLI)',
@@ -264,7 +289,7 @@ async function main() {
 
 main().catch((e) => {
   console.error('');
-  console.error('❌ No pude actualizar las reglas: ' + e.message);
+  console.error('❌ No pude actualizar las reglas (' + VERSION + '): ' + e.message);
   console.error('   (Tranquilo: tus reglas vivas quedaron IGUAL que antes —');
   console.error('    no se cambia nada hasta que el publish responde OK.)');
   console.error('');
@@ -281,6 +306,9 @@ main().catch((e) => {
   }
 
   console.error('═══ PLAN B — A MANO (2 minutos) ═══');
+  console.error('0. PRIMERO: arriba de todo tiene que decir "📋 ' + VERSION + '".');
+  console.error('   Si no lo dice, estás corriendo un archivo VIEJO — bajá el zip');
+  console.error('   de nuevo y descomprimilo ENCIMA de ~/bot-whatsapp.');
   console.error('1. Abrí https://console.firebase.google.com → proyecto ' + (projectId || 'ridertrack-93c8a'));
   console.error('2. Firestore Database → Reglas');
   if (archivoEscrito) {

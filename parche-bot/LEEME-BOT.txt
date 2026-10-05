@@ -39,9 +39,15 @@ QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
     - El menú 🤖 ahora te pregunta entre 2 nada más: Envía · Recibe.
     - Fix del sync de la nube: había un campo inválido que hacía
       que NUNCA subiera (aunque las reglas estuvieran publicadas).
-  • FASE C: actualizar_reglas.js v3.2 agrega la colección dt_sync —
+  • FASE C: actualizar_reglas.js v3.3 agrega la colección dt_sync —
     es la que hace que tus viajes, gastos y ajustes de inDrive se
     vean en CUALQUIER cel con tu misma cuenta de RiderTrack.
+  • v3.3: CARTEL DE VERSIÓN al arranque ("📋 actualizar_reglas.js
+    v3.3" — primera línea). IMPORTANTE: si corrés el script y NO
+    aparece ese cartel, estás corriendo un archivo VIEJO que quedó
+    de un zip anterior (el zip se descomprimió en una subcarpeta).
+    El archivo viejo va a fallar con los mismos errores de siempre
+    aunque tengas el zip nuevo descargado.
   • v3.2 FIX: la v3.1 fallaba al publicar con "Error 400" (mandaba
     el cuerpo del PATCH en formato plano — ahora va ENVUELTO como
     el CLI oficial de Firebase) y la v3 crasheaba con "projectId
@@ -56,18 +62,24 @@ INSTALACIÓN (5 pasos, 2 minutos)
     (~/bot-whatsapp, donde está index.js):
 
       drivertrack_bot.js      ← parche v1.1 (reemplaza el viejo)
-      actualizar_reglas.js    ← reglas v3.2 (dt_sync + FIX del 400 del PATCH)
+      actualizar_reglas.js    ← reglas v3.3 (dt_sync + FIX del 400 + cartel de versión)
       instalar_drivertrack.js ← instalador (mismo de siempre)
 
     (si descomprimís el zip adentro de ~/bot-whatsapp, fijate
-     de que los archivos queden ahí MISMO y no en una subcarpeta)
+     de que los archivos queden ahí MISMO y no en una subcarpeta
+     — ⚠️ esto ya pasó: si el zip cae en una subcarpeta, el
+     archivo VIEJO de ~/bot-whatsapp es el que corre y vas a
+     seguir viendo los errores de la v3.1 sin saber por qué)
 
  2. cd ~/bot-whatsapp
 
  3. node actualizar_reglas.js
-    → agrega la colección IMAGENES_DT a las reglas vivas.
-      Si ya tenés acciones_dt, solo agrega lo nuevo. Podés
-      correrlo las veces que quieras.
+    → La PRIMERA línea tiene que decir:
+        📋 actualizar_reglas.js v3.3
+      Si dice otra cosa (o no dice nada), estás corriendo el
+      archivo viejo — volvé al paso 1.
+    → agrega la colección DT_SYNC a las reglas vivas (y las
+      que falten). Podés correrlo las veces que quieras.
 
  4. node instalar_drivertrack.js
     → si ya estaba instalado te dice "nada que hacer" (bien,
