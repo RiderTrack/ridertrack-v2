@@ -786,6 +786,11 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
                         <span className="text-[10px] text-slate-400">
                           Tuyo: <strong className="text-emerald-300">{fmtS(tuyo)}</strong> · Empresa:{' '}
                           <strong className="text-blue-300">{fmtS(empresa)}</strong>
+                          {r.pagoPedidos?.total ? (
+                            <>
+                              {' · '}<strong className="text-amber-300">🛵 {fmtS(r.pagoPedidos.total)}</strong>
+                            </>
+                          ) : null}
                         </span>
                         <span className="text-[10px] font-bold text-indigo-300">
                           {abierto ? '▲ Ocultar detalle' : '▼ Ver detalle'}
@@ -834,6 +839,33 @@ export const HistorialView: React.FC<HistorialViewProps> = ({ onShowToast }) => 
                             <div className="flex justify-between border-t border-blue-500/20 mt-1.5 pt-1.5">
                               <span className="text-[10px] font-black text-blue-400 uppercase">Total empresa</span>
                               <span className="text-sm font-black text-blue-400">{fmtS(empresa)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 🛵 PAGO POR PEDIDOS (FASE D — solo días de temporada) */}
+                        {r.pagoPedidos?.activo && r.pagoPedidos.total > 0 && (
+                          <div className="rounded-lg bg-amber-500/5 border border-amber-500/25 p-2.5">
+                            <div className="text-[9px] text-amber-400 uppercase font-black mb-1.5">
+                              🛵 Pago por pedidos (temporada)
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-slate-400">
+                                {r.pagoPedidos.cantidadNormal} × S/ {r.pagoPedidos.tarifaNormal}
+                              </span>
+                              <span className="text-slate-200 font-bold">{fmtS(r.pagoPedidos.montoNormal)}</span>
+                            </div>
+                            {r.pagoPedidos.cantidadLejos > 0 && (
+                              <div className="flex justify-between text-[10px]">
+                                <span className="text-slate-400">
+                                  {r.pagoPedidos.cantidadLejos} × S/ {r.pagoPedidos.tarifaLejos} (lejos)
+                                </span>
+                                <span className="text-slate-200 font-bold">{fmtS(r.pagoPedidos.montoLejos)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between border-t border-amber-500/25 mt-1.5 pt-1.5">
+                              <span className="text-[10px] font-black text-amber-400 uppercase">Te corresponde</span>
+                              <span className="text-sm font-black text-amber-300">{fmtS(r.pagoPedidos.total)}</span>
                             </div>
                           </div>
                         )}

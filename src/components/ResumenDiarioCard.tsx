@@ -35,6 +35,13 @@ import {
   formatearDuracionCorta,
   formatearKm,
 } from '../utils/resumenCore';
+// 🛵 FASE D: cobro por pedido (temporada)
+import {
+  cargarConfigPagoPedidos,
+  calcularPagoPedidos,
+  calcularLiquidacion,
+  ConfigPagoPedidos,
+} from '../utils/pagoPedidosCore';
 
 type OnShowToast = (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 
@@ -76,6 +83,19 @@ export function useResumenDiario(uid?: string | null, riderNombre?: string): {
     return () => window.removeEventListener('rt-refri-cambio', on);
   }, [uid]);
 
+  // 🛵 FASE D: pago por pedido (temporada) — la config se lee de
+  // localStorage y se refresca en vivo si la cambias en Configuración
+  const [cfgPago, setCfgPago] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  useEffect(() => {
+    const refrescar = () => setCfgPago(cargarConfigPagoPedidos());
+    window.addEventListener('pago-pedidos:changed', refrescar);
+    return () => window.removeEventListener('pago-pedidos:changed', refrescar);
+  }, []);
+  const pagoPedidos = useMemo(
+    () => (cfgPago.activo ? calcularPagoPedidos(clientes, cfgPago) : null),
+    [clientes, cfgPago]
+  );
+
   const resumen = useMemo(
     () =>
       armarResumenDia({
@@ -85,8 +105,9 @@ export function useResumenDiario(uid?: string | null, riderNombre?: string): {
         kmHoyM: odo?.hoyM,
         rutaMs,
         refriSeg,
+        pagoPedidos,
       }),
-    [clientes, gastosHoy, caja.fondo, odo, rutaMs, refriSeg]
+    [clientes, gastosHoy, caja.fondo, odo, rutaMs, refriSeg, pagoPedidos]
   );
 
   const mensaje = useMemo(
@@ -237,6 +258,34 @@ export const ResumenDiarioCard: React.FC<ResumenDiarioCardProps> = ({ uid, rider
           <div className="text-sm font-black text-white tabular-nums mt-0.5">{formatearSoles(caja.cobradoTotal)}</div>
         </div>
       </div>
+
+      {/* ── 🛵 Pago por pedidos (FASE D, solo con temporada activa) ── */}
+      {resumen.pagoPedidos && resumen.pagoPedidos.total > 0 && (() => {
+        const pp = resumen.pagoPedidos!;
+        const liq = calcularLiquidacion(caja.efectivoCobrado, pp);
+        return (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 flex items-center justify-between" data-testid="resumen-pago-pedidos">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400">
+                🛵 Pago por pedidos (temporada)
+              </div>
+              <div className="text-[11px] text-slate-400 font-medium truncate">
+                {pp.entregados} entregados
+                {pp.cantidadLejos > 0 && <> · {pp.cantidadLejos} lejos</>}
+                {' · '}
+                {liq.empresaTeDebe > 0 ? (
+                  <span className="text-emerald-400 font-bold">empresa te debe {formatearSoles(liq.empresaTeDebe)}</span>
+                ) : (
+                  <span className="text-amber-300 font-bold">entregás {formatearSoles(liq.aEntregar)}</span>
+                )}
+              </div>
+            </div>
+            <div className="text-xl font-black text-amber-300 tabular-nums shrink-0 ml-2">
+              {formatearSoles(pp.total)}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Gastos + Caja ── */}
       <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60 space-y-1">

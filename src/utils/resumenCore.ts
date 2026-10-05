@@ -26,6 +26,8 @@ import {
   categoriaInfo,
   resumenCajaDia,
 } from './cajaCore';
+// 🛵 FASE D: cobro por pedido (temporada)
+import { ResumenPagoPedidos, calcularLiquidacion } from './pagoPedidosCore';
 
 // ── Estados ───────────────────────────────────────────────
 
@@ -62,6 +64,8 @@ export interface ResumenDia {
   rutaMs: number;
   /** segundos de refrigerio tomados hoy */
   refriSeg: number;
+  /** 🛵 FASE D: pago por pedido (temporada) — null = modo apagado */
+  pagoPedidos?: ResumenPagoPedidos | null;
 }
 
 /** Entrada para armar el resumen (todo opcional salvo clientes) */
@@ -73,6 +77,9 @@ export interface ResumenDiaEntrada {
   rutaMs?: number;
   refriSeg?: number;
   fechaISO?: string;
+  /** 🛵 FASE D: pago por pedido ya calculado con la config viva
+   *  (la config vive en el caller — el core sigue puro) */
+  pagoPedidos?: ResumenPagoPedidos | null;
 }
 
 // ── Conteo ────────────────────────────────────────────────
@@ -121,6 +128,7 @@ export function armarResumenDia(e: ResumenDiaEntrada): ResumenDia {
     kmHoyM: Math.max(0, num(e.kmHoyM)),
     rutaMs: Math.max(0, num(e.rutaMs)),
     refriSeg: Math.max(0, num(e.refriSeg)),
+    pagoPedidos: e.pagoPedidos ?? null,
   };
 }
 
@@ -204,6 +212,21 @@ export function armarMensajeResumen(r: ResumenDia, cierre: CierreCaja | null, ri
   if (caja.digitalRider > 0) L.push(`· Yape digital: ${mon(caja.digitalRider)}`);
   if (caja.empresa > 0) L.push(`· Empresa: ${mon(caja.empresa)}`);
   L.push(`· Total del día: ${mon(caja.cobradoTotal)}`);
+
+  // ── 🛵 Pago por pedidos (temporada FASE D) ──
+  if (r.pagoPedidos && r.pagoPedidos.total > 0) {
+    const pp = r.pagoPedidos;
+    const partes: string[] = [];
+    if (pp.cantidadNormal > 0) partes.push(`${pp.cantidadNormal} × S/ ${(pp.montoNormal / pp.cantidadNormal).toFixed(0)}`);
+    if (pp.cantidadLejos > 0) partes.push(`${pp.cantidadLejos} × S/ ${(pp.montoLejos / pp.cantidadLejos).toFixed(0)} (lejos)`);
+    L.push(`🛵 *Por pedidos*: ${partes.join(' + ')} = ${mon(pp.total)}`);
+    const liq = calcularLiquidacion(caja.efectivoCobrado, pp);
+    if (liq.empresaTeDebe > 0) {
+      L.push(`🤝 La empresa te debe: ${mon(liq.empresaTeDebe)}`);
+    } else {
+      L.push(`🏦 Entregás a la empresa: ${mon(liq.aEntregar)} (efectivo ${mon(caja.efectivoCobrado)} − pedidos ${mon(pp.total)})`);
+    }
+  }
   L.push('');
 
   // ── Gastos ──

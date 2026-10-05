@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.3 (FASE C.4 — la configuración también viaja: clave de Claude, Yapes y plantillas aparecen en tus otros cels) · Lima, PE
+        DriverTrack v0.9.4 (FASE D — cobro por pedido temporada: botón S/9⇄S/12 en la Ruta, descuento en el Resumen y en el mensaje del MATE) · Lima, PE
       </p>
     </div>
   );

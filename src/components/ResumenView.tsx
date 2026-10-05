@@ -44,12 +44,35 @@ import {
   RadialBar,
 } from 'recharts';
 import { useClientes } from '../hooks/useClientes';
+// 🛵 FASE D: cobro por pedido (temporada)
+import {
+  cargarConfigPagoPedidos,
+  calcularPagoPedidos,
+  calcularLiquidacion,
+  ConfigPagoPedidos,
+} from '../utils/pagoPedidosCore';
+import { resumenCajaDia } from '../utils/cajaCore';
 
 // Colores para gráficos
 const COLORES = ['#10b981', '#a855f7', '#f59e0b', '#3b82f6', '#06b6d4', '#ef4444', '#6366f1', '#eab308', '#64748b', '#ec4899'];
 
 export const ResumenView: React.FC = () => {
   const { clientes, loading } = useClientes();
+
+  // ── 🛵 FASE D: cobro por pedido (temporada) ──
+  const [cfgPago, setCfgPago] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  React.useEffect(() => {
+    const refrescar = () => setCfgPago(cargarConfigPagoPedidos());
+    window.addEventListener('pago-pedidos:changed', refrescar);
+    return () => window.removeEventListener('pago-pedidos:changed', refrescar);
+  }, []);
+
+  const pagoPedidos = useMemo(() => {
+    const pago = calcularPagoPedidos(clientes, cfgPago);
+    // efectivo que ENTRÓ a la caja física hoy (sin gastos — solo lo cobrado)
+    const caja = resumenCajaDia(clientes, [], 0);
+    return { pago, efectivoCobrado: caja.efectivoCobrado, liq: calcularLiquidacion(caja.efectivoCobrado, pago) };
+  }, [clientes, cfgPago]);
 
   const resumen = useMemo(() => {
     const total = clientes.length;
@@ -222,6 +245,50 @@ export const ResumenView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 🛵 FASE D: PAGO POR PEDIDOS (temporada) — solo visible
+          con el modo activado en Configuración */}
+      {cfgPago.activo && (
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-600/5 border border-amber-500/40" data-testid="card-pago-pedidos">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[10px] text-amber-400 uppercase tracking-wider font-bold">🛵 Pago por pedidos (temporada)</div>
+              <div className="text-3xl sm:text-4xl font-black text-white mt-1">S/ {pagoPedidos.pago.total.toFixed(2)}</div>
+              <div className="text-xs text-slate-400 mt-1">
+                {pagoPedidos.pago.cantidadNormal} × S/{cfgPago.tarifaNormal}
+                {pagoPedidos.pago.cantidadLejos > 0 && (
+                  <> + {pagoPedidos.pago.cantidadLejos} × S/{cfgPago.tarifaLejos} (lejos)</>
+                )}{' '}
+                · {pagoPedidos.pago.entregados} entregados
+              </div>
+            </div>
+          </div>
+
+          {/* Liquidación con la empresa */}
+          <div className="space-y-1.5 p-3 rounded-xl bg-slate-900/60 border border-slate-700/60">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">💵 Efectivo cobrado hoy (tu caja)</span>
+              <span className="font-bold text-white">S/ {pagoPedidos.efectivoCobrado.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">🛵 Menos tu pago por pedidos</span>
+              <span className="font-bold text-amber-400">− S/ {pagoPedidos.pago.total.toFixed(2)}</span>
+            </div>
+            <div className="border-t border-slate-700/60 pt-1.5 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300">
+                {pagoPedidos.liq.empresaTeDebe > 0 ? '🤝 La empresa te debe' : '🏦 Entregás a la empresa'}
+              </span>
+              <span className={`text-lg font-black ${pagoPedidos.liq.empresaTeDebe > 0 ? 'text-emerald-400' : 'text-amber-300'}`}>
+                S/ {(pagoPedidos.liq.empresaTeDebe > 0 ? pagoPedidos.liq.empresaTeDebe : pagoPedidos.liq.aEntregar).toFixed(2)}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-relaxed pt-1">
+              💡 Los cobros digitales de la empresa (POS, Yape/Plin, Transferencia) no pasan por tu
+              mano. Tu 💜 Total Tuyo es aparte. Los gastos los descuenta la Caja del día.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 3 Cards: Entregados, Pendientes, Fallidos */}
       <div className="grid grid-cols-3 gap-3">

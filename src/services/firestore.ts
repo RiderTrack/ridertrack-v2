@@ -30,6 +30,7 @@ import {
 } from 'firebase/storage';
 import * as XLSX from 'xlsx';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
+import { cargarConfigPagoPedidos, calcularPagoPedidos } from '../utils/pagoPedidosCore'; // 🛵 FASE D
 
 // ═══════════════════════════════════════════════════════════
 // 📋 TIPOS DE CLIENTE
@@ -65,6 +66,11 @@ export interface Cliente {
   lng?: number;
   /** Origen de la coordenada: google | nominatim | aprox | manual (Fase 1.4) */
   latSrc?: 'google' | 'nominatim' | 'aprox' | 'manual';
+  /** 🛵 FASE D: marca manual del rider para el cobro por pedido —
+   *  true = tarifa lejos (S/12), false = normal (S/9). undefined =
+   *  lo decide la lista de distritos lejanos de la config. Viaja
+   *  con el cliente (ruta_activa + usuarios) → aparece en el cel 2. */
+  lejos?: boolean;
 }
 
 export interface RutaActiva {
@@ -109,6 +115,20 @@ export interface RegistroHistorial {
   km?: number;
   /** duración de la ruta en ms (solo rutas v1) */
   tiempoRuta?: number;
+  /** 🛵 FASE D: cobro por pedido (temporada) — desglose del día si
+   *  la ruta se cerró con el modo activo (null/ausente = jornal) */
+  pagoPedidos?: {
+    activo: boolean;
+    tarifaNormal: number;
+    tarifaLejos: number;
+    distritosLejos: string[];
+    cantidadNormal: number;
+    cantidadLejos: number;
+    entregados: number;
+    montoNormal: number;
+    montoLejos: number;
+    total: number;
+  };
 }
 
 /** Entrada del historial de la v1 (D.hist en el Rider Modular v1) */
@@ -345,6 +365,20 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     const totalRider = desglose.totalRider;
     const cobrado = desglose.cobradoTotal;
 
+    // 🛵 FASE D: pago por pedido (temporada) — si el modo estaba activo
+    // al cerrar la ruta, el desglose 9/12 queda grabado en el historial
+    // (los días de modo OFF no guardan nada = idénticos a antes).
+    const cfgPago = cargarConfigPagoPedidos();
+    const pagoPedidos = cfgPago.activo
+      ? {
+          activo: true,
+          tarifaNormal: cfgPago.tarifaNormal,
+          tarifaLejos: cfgPago.tarifaLejos,
+          distritosLejos: cfgPago.distritosLejos,
+          ...calcularPagoPedidos(clientes, cfgPago),
+        }
+      : null;
+
     // Snapshot de clientes (mismo formato que viaja al historial,
     // al backup de la nube y a clientes_registrados)
     const clientesSnapshot = clientes.map(c => ({
@@ -370,6 +404,9 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
       fotoUrl: c.fotoUrl,
       // ✅ el check de verificación con la empresa viaja al historial
       webReg: c.webReg === true,
+      // 🛵 FASE D: la marca lejos viaja al historial (para re-ver el
+      // desglose de 9/12 de rutas pasadas)
+      ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
     }));
 
     // 2a. Escribir el registro en historial_rutas
@@ -390,6 +427,9 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
       // ⏱ duración de la ruta medida por el cronómetro (como la v1)
       tiempoRuta: tiempoRutaMs && tiempoRutaMs > 0 ? tiempoRutaMs : null,
       clientes: clientesSnapshot,
+      // 🛵 FASE D (solo días con modo activo — el spread con null
+      // no agrega el campo, los días OFF quedan idénticos a antes)
+      ...(pagoPedidos ? { pagoPedidos } : {}),
     }));
 
     // 2b. ☁️ Backup automático a la nube (v1: _backupAutoAlCerrar).
@@ -743,6 +783,7 @@ export async function publicarClientesEnRutaActiva(
       obs: c.obs || '',
       hora: c.hora || '',
       ...(c.webReg != null ? { webReg: !!c.webReg } : {}),
+      ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
       ...(typeof c.lat === 'number' && typeof c.lng === 'number'
         ? { lat: c.lat, lng: c.lng }
         : {}),

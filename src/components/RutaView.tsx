@@ -53,6 +53,12 @@ import { esPagoEmpresa } from '../utils/realData';
 import { sonarPago } from '../services/notificaciones';
 // Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
 import { GRUPO_MATE_JID } from '../utils/chatBaileys';
+// 🛵 FASE D: cobro por pedido (temporada) — botón S/9⇄S/12 por cliente
+import {
+  cargarConfigPagoPedidos,
+  esLejos,
+  ConfigPagoPedidos,
+} from '../utils/pagoPedidosCore';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -67,6 +73,20 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
   const [filtroDistrito, setFiltroDistrito] = useState<string>('');
   const [filtroProducto, setFiltroProducto] = useState<string>('');
+
+  // ── 🛵 FASE D: cobro por pedido (temporada) ──
+  const [cfgPago, setCfgPago] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  useEffect(() => {
+    const refrescar = () => setCfgPago(cargarConfigPagoPedidos());
+    window.addEventListener('pago-pedidos:changed', refrescar);
+    return () => window.removeEventListener('pago-pedidos:changed', refrescar);
+  }, []);
+
+  // Marcar/desmarcar LEJOS un cliente (persiste en el cliente → viaja
+  // al cel 2 por el sync de la ruta, sin colecciones nuevas)
+  const toggleLejos = (id: string | number, actual: boolean) => {
+    actualizarCliente(id, { lejos: !actual });
+  };
   const [clienteExpandido, setClienteExpandido] = useState<string | number | null>(null);
   const [controlModalId, setControlModalId] = useState<string | number | null>(null);
   const [importando, setImportando] = useState(false);
@@ -1259,6 +1279,37 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                     <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
+
+                  {/* 🛵 FASE D: botón S/9⇄S/12 (solo con temporada activa) */}
+                  {cfgPago.activo && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const actual = esLejos(c, cfgPago);
+                        toggleLejos(c.id, actual);
+                        onShowToast?.(
+                          actual ? '🛵 Pago normal' : '🛵 Pago LEJOS',
+                          actual
+                            ? `${c.nombre || 'Cliente'} vuelve a S/${cfgPago.tarifaNormal}`
+                            : `${c.nombre || 'Cliente'} ahora cobra S/${cfgPago.tarifaLejos}`,
+                          'info'
+                        );
+                      }}
+                      data-testid={`btn-lejos-${c.id}`}
+                      title={
+                        esLejos(c, cfgPago)
+                          ? `Cobra S/${cfgPago.tarifaLejos} (lejos) — tocá para volver a S/${cfgPago.tarifaNormal}`
+                          : `Cobra S/${cfgPago.tarifaNormal} — tocá si es distrito lejano (S/${cfgPago.tarifaLejos})`
+                      }
+                      className={`shrink-0 px-2 py-1.5 rounded-lg border text-[11px] font-black transition-all active:scale-90 ${
+                        esLejos(c, cfgPago)
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                          : 'bg-slate-900/60 border-slate-600 text-slate-400'
+                      }`}
+                    >
+                      S/{esLejos(c, cfgPago) ? cfgPago.tarifaLejos : cfgPago.tarifaNormal}
+                    </button>
+                  )}
 
                   {/* Botón expandir */}
                   <div className="text-slate-400 shrink-0">

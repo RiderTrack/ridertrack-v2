@@ -28,6 +28,8 @@ import {
   Mail,
   CarTaxiFront,
   Image as ImageIcon,
+  Plus,
+  X,
 } from 'lucide-react';
 // FASE C: ⚙️ ajustes de inDrive — el panel completo vive acá dentro
 import PanelAjustesDT from '../drivertrack/panels/PanelAjustesDT';
@@ -66,6 +68,12 @@ import {
   guardarPreferenciasNav,
   PREFERENCIAS_NAV_DEFAULT,
 } from '../services/navegacionGps';
+// 🛵 FASE D: cobro por pedido (temporada) — S/9 normal, S/12 lejos
+import {
+  cargarConfigPagoPedidos,
+  guardarConfigPagoPedidos,
+  ConfigPagoPedidos,
+} from '../utils/pagoPedidosCore';
 
 interface SettingsViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -115,6 +123,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
   // FASE C: 🏍️ ajustes de inDrive (viajes libres) — viven ACÁ, en la
   // Configuración del panel general, no más como pestaña propia
   const [dtAbierto, setDtAbierto] = useState(false);
+
+  // ── 🛵 FASE D: cobro por pedido (temporada) ──
+  const [pagoAbierto, setPagoAbierto] = useState(false);
+  const [cfgPago, setCfgPago] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  const [nuevoDistrito, setNuevoDistrito] = useState('');
+
+  // Cambiar la config y avisar a Ruta/Resumen/Dashboard en vivo
+  // (evento global — mismo patrón que dt:sync-remoto)
+  const actualizarCfgPago = (cambios: Partial<ConfigPagoPedidos>) => {
+    setCfgPago((prev) => {
+      const nueva = { ...prev, ...cambios };
+      guardarConfigPagoPedidos(nueva);
+      try { window.dispatchEvent(new Event('pago-pedidos:changed')); } catch {}
+      return nueva;
+    });
+  };
+
+  const agregarDistritoLejos = () => {
+    const d = nuevoDistrito.trim();
+    if (!d) return;
+    if (cfgPago.distritosLejos.some((x) => x.toLowerCase() === d.toLowerCase())) {
+      setNuevoDistrito('');
+      return; // ya estaba — no duplicar
+    }
+    actualizarCfgPago({ distritosLejos: [...cfgPago.distritosLejos, d] });
+    setNuevoDistrito('');
+  };
+
+  const quitarDistritoLejos = (d: string) => {
+    actualizarCfgPago({ distritosLejos: cfgPago.distritosLejos.filter((x) => x !== d) });
+  };
 
   // ── Icono de la App (Fase 3.21 — logo que representa a RiderTrack V2) ──
   const [iconoAbierto, setIconoAbierto] = useState(false);
@@ -445,6 +484,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
               </div>
             </div>
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-all ${dtAbierto ? 'rotate-90' : ''}`} />
+          </div>
+        </button>
+
+        {/* 🛵 FASE D: Cobro por pedido (temporada) — la empresa te
+            paga por pedido: S/9 normal, S/12 distrito lejano */}
+        <button
+          onClick={() => setPagoAbierto((v) => !v)}
+          className="text-left p-4 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all active:scale-95 group"
+          data-testid="pago-pedidos-toggle"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
+              <Coins className="w-5 h-5 text-amber-400" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-white text-sm">
+                Cobro por pedido {cfgPago.activo && <span className="text-amber-400">· ACTIVO</span>}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Temporada: S/{cfgPago.tarifaNormal} por pedido, S/{cfgPago.tarifaLejos} en distrito lejano
+              </div>
+            </div>
+            <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-all ${pagoAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
 
@@ -956,6 +1018,160 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
             onToast={(msg) => onShowToast?.(msg, undefined, 'info')}
             onIrAYape={() => onNavigateTab?.('yape')}
           />
+        </div>
+      )}
+
+      {/* 🛵 FASE D: panel Cobro por pedido (temporada) */}
+      {pagoAbierto && (
+        <div className="sm:col-span-2 p-4 sm:p-5 rounded-2xl bg-slate-800/60 border border-amber-500/30 space-y-4">
+          <div>
+            <h3 className="font-bold text-white text-sm">🛵 Cobro por pedido (temporada)</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Cuando la empresa te paga por pedido en vez de jornal. En la Ruta vas a ver un botón
+              S/9 ⇄ S/12 por cliente, y el Resumen del día te dice cuánto te corresponde y cuánto
+              entregás. Apagado = la app queda exactamente como estaba.
+            </p>
+          </div>
+
+          {/* Interruptor principal */}
+          <button
+            onClick={() => actualizarCfgPago({ activo: !cfgPago.activo })}
+            data-testid="pago-pedidos-switch"
+            className={`w-full p-3.5 rounded-xl border transition-all active:scale-[0.98] flex items-center gap-3 ${
+              cfgPago.activo
+                ? 'bg-amber-500/15 border-amber-500/50'
+                : 'bg-slate-900/60 border-slate-700/60'
+            }`}
+          >
+            <div className={`w-11 h-6 rounded-full relative transition-colors ${cfgPago.activo ? 'bg-amber-500' : 'bg-slate-600'}`}>
+              <div
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${cfgPago.activo ? 'left-[22px]' : 'left-0.5'}`}
+              />
+            </div>
+            <div className="flex-1 text-left">
+              <div className="text-xs font-bold text-white">
+                {cfgPago.activo ? 'temporada ACTIVADA 🛵' : 'temporada desactivada'}
+              </div>
+              <div className="text-[10px] text-slate-400">
+                {cfgPago.activo
+                  ? 'Botón S/9⇄S/12 en la Ruta + card en el Resumen del día'
+                  : 'Todo normal (jornal) — sin botones ni cards extra'}
+              </div>
+            </div>
+          </button>
+
+          {cfgPago.activo && (
+            <div className="space-y-4">
+              {/* Tarifas */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60">
+                  <div className="text-[10px] text-slate-400 uppercase font-bold mb-1.5">Pedido normal</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-black text-emerald-400">S/</span>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={cfgPago.tarifaNormal}
+                      data-testid="tarifa-normal"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (v > 0) actualizarCfgPago({ tarifaNormal: v });
+                      }}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-sm font-bold text-white outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-amber-500/30">
+                  <div className="text-[10px] text-amber-400 uppercase font-bold mb-1.5">Distrito lejano</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-black text-amber-400">S/</span>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={cfgPago.tarifaLejos}
+                      data-testid="tarifa-lejos"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (v > 0) actualizarCfgPago({ tarifaLejos: v });
+                      }}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-sm font-bold text-white outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Distritos lejanos */}
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60 space-y-2">
+                <div>
+                  <p className="text-xs font-bold text-white">📍 Distritos que cobran S/{cfgPago.tarifaLejos} solos</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Opcional: los pedidos de estos distritos se marcan lejanos automáticamente (igual
+                    los podés cambiar con el botón). Vacío = decides todo a mano.
+                  </p>
+                </div>
+                {cfgPago.distritosLejos.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {cfgPago.distritosLejos.map((d) => (
+                      <span
+                        key={d}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold"
+                      >
+                        {d}
+                        <button
+                          onClick={() => quitarDistritoLejos(d)}
+                          className="text-amber-400/70 hover:text-red-400 transition-colors"
+                          title="Quitar"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nuevoDistrito}
+                    data-testid="nuevo-distrito"
+                    onChange={(e) => setNuevoDistrito(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') agregarDistritoLejos(); }}
+                    placeholder="Ej: Chorrillos"
+                    className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-500"
+                  />
+                  <button
+                    onClick={agregarDistritoLejos}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs font-bold hover:bg-amber-500/30 active:scale-95 transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {cfgPago.distritosLejos.length === 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] text-slate-500">Sugeridos:</span>
+                    {['Chorrillos', 'Carabayllo', 'Cieneguilla', 'Ancón'].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => {
+                          actualizarCfgPago({ distritosLejos: [...cfgPago.distritosLejos, d] });
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold hover:border-amber-500/50 hover:text-amber-400 active:scale-95 transition-all"
+                      >
+                        {d} +
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                💡 Solo cuentan los pedidos <b className="text-slate-400">ENTREGADOS</b> (los fallidos o
+                pendientes no pagan). El botón S/9⇄S/12 queda guardado en cada cliente y aparece solo
+                en tu otro cel — sin tocar las reglas de la nube.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
