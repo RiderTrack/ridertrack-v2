@@ -3,7 +3,7 @@
 // Resumen del día con datos REALES + gráficos como el Modular
 // ═══════════════════════════════════════════════════════════
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp,
   CheckCircle2,
@@ -52,6 +52,10 @@ import {
   ConfigPagoPedidos,
 } from '../utils/pagoPedidosCore';
 import { resumenCajaDia } from '../utils/cajaCore';
+// 💰 FASE E: lo que ganaste hoy CON TODO (trabajo + inDrive) — lee los
+// mismos datos del storage de DriverTrack que la card de abajo
+import { Viaje, Gasto } from '../drivertrack/types';
+import { cargarViajes, cargarGastos, fechaHoy as fechaHoyDT } from '../drivertrack/storage';
 
 // Colores para gráficos
 const COLORES = ['#10b981', '#a855f7', '#f59e0b', '#3b82f6', '#06b6d4', '#ef4444', '#6366f1', '#eab308', '#64748b', '#ec4899'];
@@ -73,6 +77,26 @@ export const ResumenView: React.FC = () => {
     const caja = resumenCajaDia(clientes, [], 0);
     return { pago, efectivoCobrado: caja.efectivoCobrado, liq: calcularLiquidacion(caja.efectivoCobrado, pago) };
   }, [clientes, cfgPago]);
+
+  // ── 💰 FASE E: lo de inDrive HOY (mismos datos que ResumenLibreCard:
+  // viajes + gastos del storage de DriverTrack, refresco solo) ──
+  const [viajesDT, setViajesDT] = useState<Viaje[]>(() => cargarViajes());
+  const [gastosDT, setGastosDT] = useState<Gasto[]>(() => cargarGastos());
+  useEffect(() => {
+    const alSync = () => {
+      setViajesDT(cargarViajes());
+      setGastosDT(cargarGastos());
+    };
+    window.addEventListener('dt:sync-remoto', alSync);
+    return () => window.removeEventListener('dt:sync-remoto', alSync);
+  }, []);
+  const inDriveHoy = useMemo(() => {
+    const hoy = fechaHoyDT();
+    const neto = viajesDT.filter(v => v.fecha === hoy).reduce((s, v) => s + v.neto, 0);
+    const gastado = gastosDT.filter(g => g.fecha === hoy).reduce((s, g) => s + g.monto, 0);
+    const n = viajesDT.filter(v => v.fecha === hoy).length;
+    return { n, neto, gastado, enMano: neto - gastado };
+  }, [viajesDT, gastosDT]);
 
   const resumen = useMemo(() => {
     const total = clientes.length;
@@ -227,6 +251,60 @@ export const ResumenView: React.FC = () => {
           {new Date().toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* 💰 FASE E: LO QUE GANASTE HOY CON TODO — la pregunta "¿cuánto
+          gané hoy?" respondida en una sola card: el trabajo (cobro por
+          pedido, temporada) + tus viajes libres (en mano). Solo con la
+          temporada ACTIVA (apagada = esta card no existe, como antes). */}
+      {cfgPago.activo && (() => {
+        const total = pagoPedidos.pago.total + inDriveHoy.enMano;
+        return (
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-violet-500/15 to-violet-600/5 border border-violet-500/40" data-testid="card-ganado-hoy">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10px] text-violet-300 uppercase tracking-wider font-bold">
+                  💰 Lo que ganaste hoy (todo junto)
+                </div>
+                <div className="text-3xl sm:text-4xl font-black text-white mt-1">S/ {total.toFixed(2)}</div>
+                <div className="text-xs text-slate-400 mt-1">
+                  trabajo + inDrive, ya descontando tus gastos anotados
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-amber-500/30">
+                <p className="text-[10px] font-black uppercase tracking-wide text-amber-400">
+                  🛵 Trabajo (pedidos)
+                </p>
+                <p className="mt-1 text-xl font-black leading-none text-amber-300">
+                  S/ {pagoPedidos.pago.total.toFixed(2)}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {pagoPedidos.pago.entregados} entregados
+                  {pagoPedidos.pago.cantidadLejos > 0 && <> · {pagoPedidos.pago.cantidadLejos} lejos</>}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-emerald-500/30">
+                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-400">
+                  🏍️ inDrive (en mano)
+                </p>
+                <p className="mt-1 text-xl font-black leading-none text-emerald-300">
+                  S/ {inDriveHoy.enMano.toFixed(2)}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {inDriveHoy.n} viaje{inDriveHoy.n === 1 ? '' : 's'} · neto S/ {inDriveHoy.neto.toFixed(2)}
+                  {inDriveHoy.gastado > 0 && <> − S/ {inDriveHoy.gastado.toFixed(2)} gastos</>}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-[10px] text-slate-500 leading-relaxed">
+              🛵 El trabajo es lo que la empresa te paga por pedidos entregados (S/{cfgPago.tarifaNormal} normal · S/{cfgPago.tarifaLejos} lejos).{' '}
+              🏍️ inDrive es tu neto de viajes menos los gastos anotados en la Caja. La plata que cobrás de los
+              clientes es de la empresa — va aparte en la liquidación de abajo.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Card principal: Total generado */}
       <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/30">

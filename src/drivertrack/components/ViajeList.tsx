@@ -19,12 +19,40 @@
 import { useEffect, useState } from 'react';
 import { Bot, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
-import { fmtSoles, linkLlamada } from '../utils';
+import { fmtSoles, linkLlamada, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
 import { abrirNavegacion, tieneDestino } from '../services/navegacion';
 import NavegarMenu from './NavegarMenu';
 // FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
 import RobotMenu from './RobotMenu';
+
+// FASE E: 📋 copiar dirección con respaldo (WebView de Android sin
+// clipboard API — el textarea viejo nunca falla)
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch {
+    // sigue al plan B
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 interface Props {
   viajes: Viaje[]; // solo los del día mostrado
@@ -69,6 +97,21 @@ export default function ViajeList({
   const [navViajeId, setNavViajeId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
   const [robotViajeId, setRobotViajeId] = useState<string | null>(null);
+  // FASE E: qué dirección se acaba de copiar ("{id}-a" / "{id}-b") —
+  // muestra el ✓ Copiada en la tarjeta
+  const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
+
+  /** 📋 FASE E: tocar la dirección la copia (A o B por separado) */
+  async function copiarDireccion(viajeId: string, cual: 'a' | 'b', texto: string) {
+    const limpio = texto.trim();
+    if (!limpio) return;
+    const ok = await copiarTexto(limpio);
+    if (ok) {
+      setCopiadoKey(`${viajeId}-${cual}`);
+      vibrar(40);
+      setTimeout(() => setCopiadoKey(null), 1600);
+    }
+  }
 
   // FASE C.2: al agregar un viaje, la lista se desliza solita hasta su
   // tarjeta para verla completa (direcciones, teléfonos y botones)
@@ -159,16 +202,51 @@ export default function ViajeList({
                 −{fmtSoles(v.comision)} ({v.comisionPct}%)
               </span>
             </div>
+            {/* FASE E: las direcciones ahora se TOCAN para COPIARLAS
+                (A y B por separado — ✓ Copiada como feedback). Al lado
+                siguen los botones A/B para navegar. */}
             {v.dirA?.trim() ? (
-              <p className="mt-1 truncate text-[10px] leading-snug text-slate-400" title={`${v.dirA} → ${v.direccion}`}>
-                🅰️ {v.dirA} <span className="text-slate-600">→</span>{' '}
-                <span className="text-slate-500">📍 {v.direccion || '—'}</span>
-              </p>
+              <div className="mt-1 flex items-center gap-1 text-[10px] leading-snug text-slate-400">
+                <button
+                  onClick={() => copiarDireccion(v.id, 'a', v.dirA || '')}
+                  className="min-w-0 truncate rounded px-0.5 py-0.5 text-left transition-colors hover:text-amber-300"
+                  title="Tocá para copiar la dirección del recojo (A)"
+                  data-testid="boton-copiar-a"
+                >
+                  {copiadoKey === `${v.id}-a` ? (
+                    <span className="font-bold text-emerald-400">✓ Copiada 🅰️</span>
+                  ) : (
+                    <>🅰️ {v.dirA}</>
+                  )}
+                </button>
+                <span className="shrink-0 text-slate-600">→</span>
+                <button
+                  onClick={() => copiarDireccion(v.id, 'b', v.direccion || '')}
+                  className="min-w-0 truncate rounded px-0.5 py-0.5 text-left text-slate-500 transition-colors hover:text-sky-300"
+                  title="Tocá para copiar la dirección de entrega (B)"
+                  data-testid="boton-copiar-b"
+                >
+                  {copiadoKey === `${v.id}-b` ? (
+                    <span className="font-bold text-emerald-400">✓ Copiada 📍</span>
+                  ) : (
+                    <>📍 {v.direccion || '—'}</>
+                  )}
+                </button>
+              </div>
             ) : (
               v.direccion && (
-                <p className="mt-1 truncate text-[10px] leading-snug text-slate-400" title={v.direccion}>
-                  📍 {v.direccion}
-                </p>
+                <button
+                  onClick={() => copiarDireccion(v.id, 'b', v.direccion)}
+                  className="mt-1 block max-w-full truncate rounded px-0.5 py-0.5 text-left text-[10px] leading-snug text-slate-400 transition-colors hover:text-sky-300"
+                  title="Tocá para copiar la dirección de entrega"
+                  data-testid="boton-copiar-b"
+                >
+                  {copiadoKey === `${v.id}-b` ? (
+                    <span className="font-bold text-emerald-400">✓ Copiada 📍</span>
+                  ) : (
+                    <>📍 {v.direccion}</>
+                  )}
+                </button>
               )
             )}
             {(v.celularEnvia?.trim() || v.celularRecibe?.trim()) ? (

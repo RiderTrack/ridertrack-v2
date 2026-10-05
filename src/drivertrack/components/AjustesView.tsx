@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.4 (FASE D — cobro por pedido temporada: botón S/9⇄S/12 en la Ruta, descuento en el Resumen y en el mensaje del MATE) · Lima, PE
+        DriverTrack v0.9.5 (FASE E — punto A y B en el mapa al agregar un viaje: buscador por dirección, GPS, copiar y navegar · 💰 ganado hoy con todo: trabajo + inDrive en el header, el Dashboard y el Resumen del día) · Lima, PE
       </p>
     </div>
   );

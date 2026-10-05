@@ -35,9 +35,13 @@ interface Props {
   compacta?: boolean;
   /** clic en "ver viajes" → te manda a la sección inDrive del menú */
   onIrAViajes?: () => void;
+  /** 💰 FASE E: lo que ganaste HOY en el trabajo (cobro por pedido,
+   *  temporada activa) — con > 0 la versión compacta del Dashboard
+   *  suma la línea "con el trabajo" para ver el día entero junto */
+  trabajoHoy?: number;
 }
 
-export default function ResumenLibreCard({ compacta = false, onIrAViajes }: Props) {
+export default function ResumenLibreCard({ compacta = false, onIrAViajes, trabajoHoy = 0 }: Props) {
   const [viajes, setViajes] = useState<Viaje[]>(() => cargarViajes());
   const [gastos, setGastos] = useState<Gasto[]>(() => cargarGastos());
 
@@ -86,6 +90,14 @@ export default function ResumenLibreCard({ compacta = false, onIrAViajes }: Prop
             en mano · {rangos.hoy.n} viaje{rangos.hoy.n === 1 ? '' : 's'}
           </span>
         </div>
+        {/* 💰 FASE E: el día ENTERO en una línea — el trabajo (pago por
+            pedidos) + lo de inDrive. Solo con la temporada activa y
+            habiendo ganado algo en el trabajo hoy. */}
+        {trabajoHoy > 0 && (
+          <p className="mt-1 text-[10px] text-slate-400" data-testid="libre-linea-trabajo">
+            💰 Sumando el trabajo de hoy: <b className="text-violet-300">{soles(rangos.hoy.enMano + trabajoHoy)} en total</b>
+          </p>
+        )}
         <p className="mt-1 text-[10px] text-slate-500">
           Semana: <b className="text-slate-300">{soles(rangos.semana.enMano)}</b> · Mes:{' '}
           <b className="text-slate-300">{soles(rangos.mes.enMano)}</b>

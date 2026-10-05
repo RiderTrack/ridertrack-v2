@@ -59,6 +59,10 @@ import {
 import { sonarMensaje } from './services/notificaciones';
 import { useAuth } from './hooks/useAuth';
 import { useClientes } from './hooks/useClientes';
+// 🛵 FASE E: lo que gana HOY en el trabajo (cobro por pedido) — se
+// calcula acá (App ya tiene los clientes de la ruta) y viaja como
+// prop al header de inDrive, al Dashboard y al Resumen del día
+import { cargarConfigPagoPedidos, calcularPagoPedidos, ConfigPagoPedidos } from './utils/pagoPedidosCore';
 import { LoginScreen } from './components/LoginScreen';
 import { RutaView } from './components/RutaView';
 import { SeguimientoView } from './components/SeguimientoView';
@@ -199,6 +203,18 @@ export default function App() {
     cambiarEstado,
     guardarFotoEntrega,
   } = useClientes();
+
+  // 🛵 FASE E: pago por pedidos del TRABAJO (temporada) — la misma
+  // config de siempre (localStorage + refresco en vivo si la cambiás
+  // en Configuración). Con el modo APAGADO queda null → todo lo nuevo
+  // de la FASE E se oculta y la app se ve exactamente como antes.
+  const [cfgPago, setCfgPago] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  useEffect(() => {
+    const refrescar = () => setCfgPago(cargarConfigPagoPedidos());
+    window.addEventListener('pago-pedidos:changed', refrescar);
+    return () => window.removeEventListener('pago-pedidos:changed', refrescar);
+  }, []);
+  const pagoTrabajoHoy = useMemo(() => calcularPagoPedidos(clientes, cfgPago), [clientes, cfgPago]);
 
   // 🎨 F3.51 — El tema vive en el módulo src/theme/ (contexto):
   // config completa (modo, acento, fuente, escala, fondo, radio),
@@ -947,9 +963,15 @@ export default function App() {
                 onNavigateTab={setActiveTab}
               />
               {/* FASE C: 🏍️ lo que vas ganando en LIBRE — junto a las
-                  stats del trabajo, bien separado y con acceso directo */}
+                  stats del trabajo, bien separado y con acceso directo.
+                  FASE E: con la temporada activa suma la línea del TOTAL
+                  (trabajo + inDrive) para ver de un vistazo el día entero. */}
               <div className="mt-4">
-                <ResumenLibreCard compacta onIrAViajes={() => setActiveTab('drivertrack')} />
+                <ResumenLibreCard
+                  compacta
+                  trabajoHoy={cfgPago.activo ? pagoTrabajoHoy.total : 0}
+                  onIrAViajes={() => setActiveTab('drivertrack')}
+                />
               </div>
             </>
           )}
@@ -1166,6 +1188,7 @@ export default function App() {
               <div className={activeTab === 'drivertrack' ? '' : 'hidden'}>
                 <DriverTrackView
                   activa={activeTab === 'drivertrack'}
+                  pagoTrabajoHoy={cfgPago.activo ? pagoTrabajoHoy : null}
                   onIrAYape={() => setActiveTab('yape')}
                   onIrAAjustes={() => setActiveTab('configuracion')}
                 />

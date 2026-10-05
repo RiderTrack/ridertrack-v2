@@ -1,26 +1,42 @@
 // ═══════════════════════════════════════════════════════════
-// 📍 UBICAR POR COORDENADAS — DriverTrack (F-ID3.2)
-// Modal estilo RiderTrack v2 (UbicarClienteModal) para poner
-// la dirección de entrega EN EL MAPA cuando la dirección de
-// texto no alcanza o no existe (pueblo joven, casa sin número):
+// 📍 UBICAR EN EL MAPA — DriverTrack (F-ID3.2 → FASE E)
+// Modal estilo RiderTrack v2 (UbicarClienteModal) para poner el
+// punto A (recojo) y el punto B (entrega) EN EL MAPA:
+//   • 🔍 buscador por DIRECCIÓN con autocompletado (el mismo del
+//     panel de trabajo: escribís "av sucre" y elegís de la lista,
+//     o pegás coordenadas / link de Google Maps → pin EXACTO)
+//   • 📋 copiar la dirección registrada (para pegarla donde sea)
+//   • 🔄 convertir la dirección registrada en pin (geocodificación)
 //   • pin ARRASTRABLE + toque en el mapa para afinar
 //   • 📌 "Usar mi GPS" → pin donde estás parado ahora
 //   • también podés TIBIAR las coordenadas a mano (lat/lng)
 //   • tiles con el MISMO look del mapa de la app (oscuro/claro/
 //     satélite, el que tengas elegido)
-// Al confirmar, el viaje queda con `coordenadas` → pin 📍 en la
-// pestaña Mapa para siempre.
+// FASE E: el mismo modal sirve para el RECOJO (A) y la ENTREGA
+// (B) — cambia el título y el color del pin (ámbar / celeste).
+// Al confirmar, el viaje queda con `coordenadasA`/`coordenadas`
+// → pins 🅰️📍 en la pestaña Mapa para siempre.
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Check, Crosshair, Loader2, MapPin, Move, X } from 'lucide-react';
+import { Check, Copy, Crosshair, Loader2, MapPin, Move, RefreshCw, X } from 'lucide-react';
 import { agregarTiles, leerEstilo } from '../services/tiles';
+// FASE E: buscador por dirección del panel de trabajo + geocodificación
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
+import { geocodificarDireccion } from '../../services/geocoding';
 
 interface Props {
   coordenadasIniciales?: { lat: number; lng: number } | null;
-  onGuardar: (coords: { lat: number; lng: number }) => void;
+  onGuardar: (coords: { lat: number; lng: number }, nombre?: string) => void;
   onCerrar: () => void;
+  /** FASE E: qué punto se está ubicando — 'A' recojo (ámbar) o 'B' entrega (celeste) */
+  punto?: 'A' | 'B';
+  /** FASE E: la dirección escrita/escaneada del punto — para copiarla
+   *  o convertirla en pin, igual que en el panel de trabajo */
+  direccionRegistrada?: string;
+  /** FASE E: distrito/zona del viaje — ayuda al geocodificador */
+  distrito?: string;
 }
 
 const LIMA: [number, number] = [-12.046374, -77.042793];
@@ -33,7 +49,41 @@ function esCoordValida(lat: number, lng: number): boolean {
   );
 }
 
-export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar }: Props) {
+// 📋 copiar con respaldo (WebViews de Android sin clipboard API)
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch {
+    // sigue al plan B
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+export default function UbicarModal({
+  coordenadasIniciales,
+  onGuardar,
+  onCerrar,
+  punto = 'B',
+  direccionRegistrada = '',
+  distrito = '',
+}: Props) {
   const [latStr, setLatStr] = useState(
     coordenadasIniciales ? String(coordenadasIniciales.lat) : '',
   );
@@ -42,6 +92,14 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
   );
   const [buscandoGps, setBuscandoGps] = useState(false);
   const [aviso, setAviso] = useState('');
+  // FASE E: estado de la dirección — copiar y sincronizar
+  const [copiado, setCopiado] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
+  /** etiqueta de la dirección elegida (buscador o geocodificación) */
+  const [nombreElegido, setNombreElegido] = useState('');
+
+  const esPuntoA = punto === 'A';
+  const colorPin = esPuntoA ? '#f59e0b' : '#38bdf8';
 
   const contenedorRef = useRef<HTMLDivElement | null>(null);
   const mapaRef = useRef<L.Map | null>(null);
@@ -53,6 +111,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
   const lat = parseFloat(latStr);
   const lng = parseFloat(lngStr);
   const hayCoord = esCoordValida(lat, lng);
+  const direccionTrim = direccionRegistrada.trim();
 
   const centroInicial: [number, number] = useMemo(
     () => (coordenadasIniciales ? [coordenadasIniciales.lat, coordenadasIniciales.lng] : LIMA),
@@ -76,6 +135,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
       setLatStr(String(+e.latlng.lat.toFixed(5)));
       setLngStr(String(+e.latlng.lng.toFixed(5)));
       setAviso('');
+      setNombreElegido('');
     });
     mapaRef.current = mapa;
     setTimeout(() => mapa.invalidateSize(), 60);
@@ -103,6 +163,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
 
     if (!pinRef.current) {
       // Pin estilo RiderTrack: gota con borde blanco, arrastrable
+      // FASE E: ámbar para el recojo (A), celeste para la entrega (B)
       pinRef.current = L.marker(pos, {
         draggable: true,
         zIndexOffset: 1000,
@@ -110,7 +171,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
           className: '',
           html:
             `<div style="width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
-            `background:#38bdf8;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.5);` +
+            `background:${colorPin};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.5);` +
             `display:flex;align-items:center;justify-content:center">` +
             `<div style="transform:rotate(45deg);width:10px;height:10px;border-radius:50%;background:#fff"></div>` +
             `</div>`,
@@ -124,6 +185,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
           setLatStr(String(+p.lat.toFixed(5)));
           setLngStr(String(+p.lng.toFixed(5)));
           setArrastre(false);
+          setNombreElegido('');
         })
         .addTo(mapa);
     } else {
@@ -147,6 +209,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
         setLatStr(String(+p.coords.latitude.toFixed(5)));
         setLngStr(String(+p.coords.longitude.toFixed(5)));
         setBuscandoGps(false);
+        setNombreElegido('');
       },
       () => {
         setBuscandoGps(false);
@@ -156,10 +219,46 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
     );
   }
 
+  /** 📋 FASE E: copiar la dirección registrada (como el panel de trabajo) */
+  async function copiarDireccion() {
+    if (!direccionTrim) return;
+    const ok = await copiarTexto(direccionTrim);
+    if (ok) {
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 1800);
+    } else {
+      setAviso('No se pudo copiar — usá toque largo sobre el texto');
+    }
+  }
+
+  /** 🔄 FASE E: convertir la DIRECCIÓN REGISTRADA en pin — la misma
+   *  geocodificación del panel de trabajo (Google + respaldo). Si
+   *  la dirección trae coordenadas pegadas, salen EXACTAS. */
+  async function sincronizarDireccion() {
+    if (!direccionTrim || sincronizando) return;
+    setSincronizando(true);
+    setAviso('');
+    try {
+      const coords = await geocodificarDireccion(direccionTrim, distrito || undefined);
+      if (!coords) {
+        setAviso(`"${direccionTrim}" no devolvió coordenadas — buscá abajo o mové el pin a mano`);
+        return;
+      }
+      setLatStr(String(+coords.lat.toFixed(5)));
+      setLngStr(String(+coords.lng.toFixed(5)));
+      setNombreElegido(direccionTrim);
+    } catch {
+      setAviso('No se pudo buscar la dirección — mové el pin o escribí las coordenadas');
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-[1000] flex items-end justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:items-center"
       data-testid="modal-ubicar"
+      onClick={e => e.target === e.currentTarget && onCerrar()}
     >
       <style>{`
         .dtmap-modal .leaflet-container { background: #0f172a; font-family: inherit; }
@@ -171,12 +270,23 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-700/70 px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-2 text-sky-400">
+            <div
+              className="rounded-xl border p-2"
+              style={{
+                borderColor: `${colorPin}33`,
+                background: `${colorPin}1a`,
+                color: colorPin,
+              }}
+            >
               <MapPin size={16} />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-100">¿Dónde es la entrega?</h3>
-              <p className="text-[11px] text-slate-400">Mové el pin, tocá el mapa o escribí las coordenadas</p>
+              <h3 className="text-sm font-bold text-slate-100">
+                {esPuntoA ? '¿Dónde es el recojo? (A)' : '¿Dónde es la entrega? (B)'}
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Buscá la dirección, mové el pin o escribí las coordenadas
+              </p>
             </div>
           </div>
           <button
@@ -190,7 +300,7 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
         </div>
 
         {/* El mapa */}
-        <div className="relative h-64 w-full shrink-0">
+        <div className="relative h-52 w-full shrink-0">
           <div ref={contenedorRef} className="absolute inset-0" data-testid="modal-mapa-hoja" />
           <div className="pointer-events-none absolute left-2 top-2 z-[500] flex items-center gap-1 rounded-lg bg-slate-900/85 px-2 py-1 text-[10px] font-bold text-slate-300">
             <Move size={11} /> arrastrá el pin · tocá el mapa
@@ -199,6 +309,55 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
 
         {/* Controles */}
         <div className="space-y-2.5 overflow-y-auto p-4">
+          {/* FASE E: dirección registrada + 📋 copiar (como el panel
+              de trabajo) — para pegarla en WhatsApp, inDrive, etc. */}
+          {direccionTrim && (
+            <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-2.5" data-testid="box-direccion-registrada">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Dirección registrada</p>
+                <button
+                  onClick={copiarDireccion}
+                  className="flex items-center gap-1 rounded-lg bg-slate-700/60 px-1.5 py-0.5 text-[9px] font-bold text-slate-300 transition-all hover:bg-slate-600/70 hover:text-white active:scale-95"
+                  title="Copiar la dirección (para pegarla donde quieras)"
+                  data-testid="boton-copiar-dir"
+                >
+                  {copiado ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                  {copiado ? 'Copiada' : 'Copiar'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-200">{direccionTrim}</p>
+              <button
+                onClick={sincronizarDireccion}
+                disabled={sincronizando}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-500/15 py-2 text-[11px] font-bold text-sky-300 transition-all hover:bg-sky-500/25 active:scale-[0.98] disabled:opacity-40"
+                title="Buscar en el mapa la dirección registrada (geocodificación)"
+                data-testid="boton-sincronizar-dir"
+              >
+                {sincronizando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                Ubicar esta dirección en el mapa
+              </button>
+            </div>
+          )}
+
+          {/* FASE E: 🔍 buscador por dirección — el MISMO del panel
+              de trabajo (autocompletado + coordenadas pegadas exactas) */}
+          <div data-testid="ubicar-buscador">
+            <AddressAutocomplete
+              label={`Buscar la dirección ${esPuntoA ? 'del recojo (A)' : 'de la entrega (B)'}`}
+              placeholder="av sucre 523, jr cuzco… o pegá -12.046,-77.042"
+              icono={esPuntoA ? 'inicio' : 'cliente'}
+              valorGuardado={null}
+              onElegir={d => {
+                setLatStr(String(+d.lat.toFixed(5)));
+                setLngStr(String(+d.lng.toFixed(5)));
+                setNombreElegido(d.nombre);
+                setAviso('');
+                vibrarSuave();
+              }}
+              ayuda="Escribí la avenida y elegí de la lista — o pegá coordenadas / link de Google Maps: caen EXACTO."
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-[11px] font-medium text-slate-400">Latitud</label>
@@ -241,15 +400,23 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
             )}
           </button>
 
-          {aviso && <p className="text-center text-[11px] text-amber-400">{aviso}</p>}
+          {aviso && <p className="text-center text-[11px] text-amber-400" data-testid="ubicar-aviso">{aviso}</p>}
           {hayCoord && (
-            <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-center text-[11px] font-semibold text-emerald-300" data-testid="ubicar-vista-coords">
+            <div
+              className="rounded-lg bg-emerald-500/10 px-3 py-2 text-center text-[11px] font-semibold text-emerald-300"
+              data-testid="ubicar-vista-coords"
+            >
               📍 {lat.toFixed(5)}, {lng.toFixed(5)}
-            </p>
+              {nombreElegido && (
+                <span className="block truncate text-[10px] font-medium text-emerald-400/80" data-testid="ubicar-nombre-elegido">
+                  {nombreElegido}
+                </span>
+              )}
+            </div>
           )}
 
           <button
-            onClick={() => hayCoord && onGuardar({ lat: +lat.toFixed(5), lng: +lng.toFixed(5) })}
+            onClick={() => hayCoord && onGuardar({ lat: +lat.toFixed(5), lng: +lng.toFixed(5) }, nombreElegido || undefined)}
             disabled={!hayCoord || arrastre}
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-black transition-all active:scale-[0.98] ${
               hayCoord
@@ -264,4 +431,13 @@ export default function UbicarModal({ coordenadasIniciales, onGuardar, onCerrar 
       </div>
     </div>
   );
+}
+
+/** vibración cortita (best effort — en web no hace nada) */
+function vibrarSuave(): void {
+  try {
+    navigator.vibrate?.(40);
+  } catch {
+    /* nada */
+  }
 }

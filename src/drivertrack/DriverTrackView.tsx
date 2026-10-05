@@ -29,6 +29,9 @@ import { Bike, Info } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { ConfigDT, Gasto, Viaje } from './types';
+// 🛵 FASE E: lo que ganás HOY en el trabajo (cobro por pedido) —
+// llega calculado desde App (que ya tiene los clientes de la ruta)
+import { ResumenPagoPedidos } from '../utils/pagoPedidosCore';
 import {
   cargarConfig,
   cargarGastos,
@@ -90,9 +93,14 @@ interface PropsDTView {
   /** FASE C: te manda a la Configuración del panel general (ahí
    *  viven los Ajustes de inDrive) — p.ej. si falta la key del escáner */
   onIrAAjustes?: () => void;
+  /** 🛵 FASE E: lo que la empresa te paga HOY por pedidos entregados
+   *  (temporada activa) — null con el modo apagado: el header queda
+   *  100% como antes. Con esto el header pasa de "solo inDrive" a
+   *  "💰 Ganado hoy (todo)" = trabajo + inDrive, como pidió Rudy. */
+  pagoTrabajoHoy?: ResumenPagoPedidos | null;
 }
 
-export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: PropsDTView) {
+export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoTrabajoHoy }: PropsDTView) {
   const [viajes, setViajes] = useState<Viaje[]>(() => cargarViajes());
   // FASE C.2: id del último viaje aceptado — ViajeList lo resalta y
   // hace scroll hasta su tarjeta completa
@@ -563,7 +571,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: Pro
               <p className="text-[10px] capitalize text-slate-400">{fechaBonita(hoy)}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end gap-1.5">
             {/* FASE A2: el sol/luna y "Mi QR" ya no viven acá. El tema lo
                 maneja el toggle del TRABAJO (toda la app cambia junta) y
                 tus billeteras personales se configuran en "Mi QR Yape/
@@ -583,6 +591,26 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: Pro
                 {enManoHoy < 0 ? `−S/ ${Math.abs(enManoHoy).toFixed(2)}` : `S/ ${enManoHoy.toFixed(2)}`}
               </p>
             </div>
+            {/* 💰 FASE E: "cuánto gané HOY" con TODO junto — el trabajo
+                (cobro por pedido, temporada) + lo de inDrive. Solo con
+                la temporada ACTIVA (apagada = header como siempre). */}
+            {pagoTrabajoHoy && (
+              <div
+                className="rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-right"
+                data-testid="total-dia-header"
+                title="Lo que ganaste hoy sumando el trabajo (pago por pedidos) y tus viajes libres"
+              >
+                <p className="text-[9px] font-medium uppercase tracking-wide text-violet-300/90">
+                  💰 Ganado hoy (todo)
+                </p>
+                <p className="text-sm font-black leading-none text-violet-200">
+                  S/ {(enManoHoy + pagoTrabajoHoy.total).toFixed(2)}
+                </p>
+                <p className="text-[8px] leading-tight text-slate-400">
+                  🛵 S/ {pagoTrabajoHoy.total.toFixed(2)} trabajo + 🏍️ S/ {enManoHoy.toFixed(2)} libre
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </header>

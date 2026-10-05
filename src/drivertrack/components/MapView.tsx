@@ -93,6 +93,22 @@ function iconoPinEntrega(): L.DivIcon {
   });
 }
 
+/** 🅰️ FASE E: pin de gota ÁMBAR para el RECOJO (coordenadasA) —
+ *  mismo look que el de entrega pero del color del botón A */
+function iconoPinRecojo(): L.DivIcon {
+  return L.divIcon({
+    className: '',
+    html:
+      `<div style="width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
+      `background:#f59e0b;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.5);` +
+      `display:flex;align-items:center;justify-content:center">` +
+      `<div style="transform:rotate(45deg);width:10px;height:10px;border-radius:50%;background:#fff"></div>` +
+      `</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+  });
+}
+
 export default function MapView({ viajes, estadoGPS = null }: Props) {
   const [fecha, setFecha] = useState(fechaHoy());
   const [estilo, setEstilo] = useState<EstiloMapa>(leerEstilo);
@@ -111,6 +127,11 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
   // F-ID3.2: entregas ubicadas por coordenadas (sin ruta grabada)
   const conCoordenadas = useMemo(
     () => delDia.filter(v => v.coordenadas && (!v.ruta || v.ruta.length < 2)),
+    [delDia],
+  );
+  // FASE E: recojos ubicados con el pin A (coordenadasA)
+  const conCoordenadasA = useMemo(
+    () => delDia.filter(v => v.coordenadasA && v.coordenadasA.lat !== v.coordenadas?.lat),
     [delDia],
   );
 
@@ -226,9 +247,29 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
       bounds.extend([v.coordenadas!.lat, v.coordenadas!.lng]);
     }
 
+    // FASE E: 🅰️ pins de RECOJO (viajes ubicados con el punto A) —
+    // se dibujan aunque el viaje tenga ruta grabada (marcás dónde
+    // buscabas el paquete, no dónde manejaste). Si el pin A y el B
+    // caen en el mismo lugar, solo se dibuja el B (evita la mancha).
+    for (const v of conCoordenadasA) {
+      L.marker([v.coordenadasA!.lat, v.coordenadasA!.lng], {
+        icon: iconoPinRecojo(),
+        zIndexOffset: 800,
+      })
+        .bindPopup(
+          `<div style="font-weight:800;font-size:13px;margin-bottom:2px">🅰️ Recojo · ${esc(v.cliente || 'Cliente')}</div>` +
+            `<div style="font-size:11px;color:#94a3b8">${esc(nombreOrigen(v.origen))} · ${fmtSoles(v.tarifa)}</div>` +
+            (v.dirA ? `<div style="font-size:11px;color:#94a3b8">🅰️ ${esc(v.dirA)}</div>` : '') +
+            `<div style="font-size:10px;color:#64748b;font-family:monospace">${v.coordenadasA!.lat.toFixed(5)}, ${v.coordenadasA!.lng.toFixed(5)}</div>`,
+          { className: 'dtmap-popup' },
+        )
+        .addTo(capa);
+      bounds.extend([v.coordenadasA!.lat, v.coordenadasA!.lng]);
+    }
+
     if (bounds.isValid()) mapa.fitBounds(bounds.pad(0.15));
     setTimeout(() => mapa.invalidateSize(), 60); // el div aparece después del mount
-  }, [conRuta, conCoordenadas, estilo]);
+  }, [conRuta, conCoordenadas, conCoordenadasA, estilo]);
 
   // ── F-ID3.2: SEGUIMIENTO EN VIVO — la línea que se dibuja
   //    mientras manejás + el motito con tu posición ──────────

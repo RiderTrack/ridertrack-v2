@@ -57,6 +57,7 @@ interface BorradorViaje {
   yapeNumero: string;
   notas: string;
   coordenadas?: { lat: number; lng: number } | null;
+  coordenadasA?: { lat: number; lng: number } | null; // FASE E: pin del recojo (A)
 }
 
 const K_BORRADOR = 'dt_borrador_v1';
@@ -71,7 +72,7 @@ function leerBorrador(): BorradorViaje | null {
     const algoEscrito =
       (b.tarifa ?? '').trim() || (b.cliente ?? '').trim() || (b.direccion ?? '').trim() ||
       (b.celular ?? '').trim() || (b.zona ?? '').trim() || (b.yapeNombre ?? '').trim() ||
-      (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || b.coordenadas;
+      (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || b.coordenadas || b.coordenadasA;
     if (!algoEscrito) return null;
     return {
       origen: (['indrive', 'rappi', 'pedidosya', 'directo'].includes(b.origen ?? '')
@@ -92,6 +93,7 @@ function leerBorrador(): BorradorViaje | null {
       yapeNumero: b.yapeNumero ?? '',
       notas: b.notas ?? '',
       coordenadas: b.coordenadas ?? null,
+      coordenadasA: b.coordenadasA ?? null, // FASE E: pin del recojo (A)
     };
   } catch {
     return null;
@@ -158,6 +160,11 @@ export default function ViajeForm({
     borradorInicial?.coordenadas ?? null,
   );
   const [ubicarAbierto, setUbicarAbierto] = useState(false);
+  // FASE E: coordenadas del RECOJO (A) — mismo flujo que la entrega
+  const [coordenadasA, setCoordenadasA] = useState<{ lat: number; lng: number } | null>(
+    borradorInicial?.coordenadasA ?? null,
+  );
+  const [ubicarAAbierto, setUbicarAAbierto] = useState(false);
   // F-ID3.3: mini-selector Waze/Google (cuando la preferencia es 'preguntar')
   const [navAbierto, setNavAbierto] = useState(false);
   // FASE C: mini-selector para navegar al RECOJO (A) o a un recién agregado
@@ -202,9 +209,10 @@ export default function ViajeForm({
       origen, tarifa, comisionPct, cliente, zona, direccion, dirA,
       celular: celularEnvia.trim() || celularRecibe.trim(), // FASE C.2: compat
       celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
+      coordenadasA, // FASE E: pin del recojo sobrevive cambios de pestaña
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -374,11 +382,11 @@ export default function ViajeForm({
     if (!abrirNavegacion(destino)) setNavAbierto(true);
   }
 
-  // FASE C: 🧭 navegar al RECOJO (dirección A) — de dónde salís a
-  // buscar el pedido. Mismo flujo que la entrega (app preferida o
-  // mini-selector si querés elegir cada vez).
+  // FASE C → FASE E: 🧭 navegar al RECOJO (punto A) — con el pin
+  // exacto si lo marcaste, o la dirección (texto) si no. Mismo
+  // flujo que la entrega (app preferida o mini-selector).
   function navegarARecojo() {
-    const destino = { direccion: dirA.trim() };
+    const destino = coordenadasA ?? { direccion: dirA.trim() };
     if (!tieneDestino(destino)) return;
     if (!abrirNavegacion(destino)) setNavObjetivo({ destino, etiqueta: dirA.trim() });
   }
@@ -410,7 +418,8 @@ export default function ViajeForm({
       yapeNumero: yapeNumero.trim(),
       kmGPS: 0,        // F-ID3: se llena al grabar el recorrido con el botón 📍
       duracionSeg: 0,  // F-ID3: ídem
-      ...(coordenadas ? { coordenadas } : {}), // F-ID3.2: pin de la entrega
+      ...(coordenadas ? { coordenadas } : {}), // F-ID3.2: pin de la entrega (B)
+      ...(coordenadasA ? { coordenadasA } : {}), // FASE E: pin del recojo (A)
       tarifa: t,
       comisionPct: p,
       comision: c,
@@ -432,6 +441,7 @@ export default function ViajeForm({
     setYapeNumero('');
     setNotas('');
     setCoordenadas(null);
+    setCoordenadasA(null); // FASE E
     borrarBorrador(); // F-ID3.2: el viaje ya está guardado — el borrador se limpia
     limpiarEscaneo();
     vibrar(60);
@@ -620,9 +630,9 @@ export default function ViajeForm({
         />
       </div>
 
-      {/* FASE C: dirección A — el RECOJO (de dónde salís a buscar el
-          pedido). La dirección de ENTREGA (B) va abajo; los avisos del
-          robot mencionan la B, y podés navegar a cualquiera de las dos. */}
+      {/* FASE C → FASE E: dirección A — el RECOJO (de dónde salís a
+          buscar el pedido). Ahora con el MISMO botón 📍 Ubicar que la
+          entrega: mapa + buscador por dirección + GPS + copiar. */}
       <div className="mt-2 flex gap-2">
         <input
           value={dirA}
@@ -631,6 +641,18 @@ export default function ViajeForm({
           className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
           data-testid="input-direccion-a"
         />
+        <button
+          onClick={() => setUbicarAAbierto(true)}
+          className={`flex shrink-0 items-center gap-1 rounded-xl px-3 text-[11px] font-bold transition-all active:scale-[0.98] ${
+            coordenadasA
+              ? 'border border-amber-400 bg-amber-500/25 text-amber-200'
+              : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-amber-500/60 hover:text-amber-300'
+          }`}
+          title="Marcar el recojo (A) en el mapa — por dirección o coordenadas"
+          data-testid="boton-ubicar-a"
+        >
+          <MapPin size={15} /> {coordenadasA ? 'Listo' : 'Ubicar'}
+        </button>
         {dirA.trim() && (
           <button
             onClick={navegarARecojo}
@@ -642,6 +664,24 @@ export default function ViajeForm({
           </button>
         )}
       </div>
+      {coordenadasA && (
+        <div
+          className="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-300"
+          data-testid="chip-coordenadas-a"
+        >
+          <span className="truncate font-mono">
+            🅰️ {coordenadasA.lat.toFixed(5)}, {coordenadasA.lng.toFixed(5)}
+          </span>
+          <button
+            onClick={() => setCoordenadasA(null)}
+            className="shrink-0 rounded p-0.5 text-amber-400/70 hover:text-red-400"
+            aria-label="Quitar coordenadas del recojo"
+            data-testid="quitar-coordenadas-a"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* F-ID2.5: dirección de entrega (campo propio, se llena con el escaneo)
           F-ID3.2: + botón 📍 para marcar la entrega EN EL MAPA (por
@@ -916,16 +956,40 @@ export default function ViajeForm({
         </span>
       </button>
 
-      {/* F-ID3.2: modal de ubicación por coordenadas (estilo RiderTrack v2) */}
+      {/* F-ID3.2 → FASE E: modal de ubicación — el MISMO para el punto
+          A (recojo) y el B (entrega), con buscador por dirección,
+          copiar y GPS, igual que el panel de trabajo. Si elegiste una
+          dirección del buscador y el campo está vacío, se llena solo. */}
       {ubicarAbierto && (
         <UbicarModal
           coordenadasIniciales={coordenadas}
-          onGuardar={coords => {
+          punto="B"
+          direccionRegistrada={direccion}
+          distrito={zona}
+          onGuardar={(coords, nombre) => {
             setCoordenadas(coords);
+            if (nombre && !direccion.trim()) setDireccion(nombre);
             setUbicarAbierto(false);
             vibrar(40);
           }}
           onCerrar={() => setUbicarAbierto(false)}
+        />
+      )}
+
+      {/* FASE E: modal de ubicación del RECOJO (A) */}
+      {ubicarAAbierto && (
+        <UbicarModal
+          coordenadasIniciales={coordenadasA}
+          punto="A"
+          direccionRegistrada={dirA}
+          distrito={zona}
+          onGuardar={(coords, nombre) => {
+            setCoordenadasA(coords);
+            if (nombre && !dirA.trim()) setDirA(nombre);
+            setUbicarAAbierto(false);
+            vibrar(40);
+          }}
+          onCerrar={() => setUbicarAAbierto(false)}
         />
       )}
 

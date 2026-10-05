@@ -234,6 +234,29 @@ check('QR de Yape local conservado', cfg.yape.qrBase64 === 'data:img/qr');
 check('la config COMPLETA sube a la nube (claudeKey en el push)', T.setDocCalls.length === 1 && T.setDocCalls[0].config.claudeKey === 'sk-ant-SECRETA' && T.setDocCalls[0].config.geminiKey === 'GEMI',
   `→ pushes: ${T.setDocCalls.length}`);
 
+// ═══════════ TEST 8: FASE E — los pins A y B viajan al cel 2 ═══════════
+console.log('\n▶ TEST 8 — FASE E: viaje con coordenadasA (pin del recojo) sube a la nube INTACTO');
+await reset({
+  dt_viajes_v1: [{
+    id: 'pinA', fecha: '2026-10-05', tarifa: 12, comision: 1, neto: 11, origen: 'indrive',
+    direccion: 'Av. La Marina 2100', dirA: 'Jr. Cuzco 523',
+    coordenadas: { lat: -12.05, lng: -77.06 },      // pin B (entrega)
+    coordenadasA: { lat: -12.046, lng: -77.042 },   // FASE E: pin A (recojo)
+  }],
+});
+T.snapActual = { data: () => ({ viajes: [], gastos: [], actualizadoEn: 0, dispositivo: 'cel2' }) };
+iniciarSyncDT('rudy');
+await esperarPush();
+check('el push lleva coordenadasA tal cual (pin A del recojo)',
+  T.setDocCalls.length === 1 &&
+  T.setDocCalls[0].viajes[0]?.coordenadasA?.lat === -12.046 &&
+  T.setDocCalls[0].viajes[0]?.coordenadasA?.lng === -77.042,
+  `→ pushes: ${T.setDocCalls.length}`);
+check('el push también lleva coordenadas (pin B de la entrega)',
+  T.setDocCalls[0]?.viajes[0]?.coordenadas?.lat === -12.05);
+check('el pin A sobrevive en el localStorage local (no lo muta el sync)',
+  lsViajes()[0]?.coordenadasA?.lng === -77.042);
+
 // ═══════════ resumen ═══════════
 console.log(`\n══════════════════════════════════`);
 console.log(`RESULTADO: ${pass} ✓ / ${fail} ✗`);
