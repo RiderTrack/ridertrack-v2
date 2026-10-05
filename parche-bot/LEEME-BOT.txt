@@ -3,6 +3,18 @@
 ═════════════════════════════════════════════════════════
 
 QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
+  • FASE C.4 (APP v0.9.3 — instalá el APK NUEVO en TODOS los cels):
+    - La CONFIGURACIÓN ahora también viaja completa entre tus
+      cels: la clave de Claude, los Yapes/Plin (con QR), las
+      comisiones, la meta y las plantillas del robot aparecen
+      solos en el otro celular.
+    - Regla de oro: un valor VACÍO nunca borra un valor LLENO
+      (un cel nuevo a medias no te limpia la clave ni el QR
+      del otro cel).
+    - El cartel amarillo "No pude sincronizar" ahora te dice
+      la causa más común: falta correr actualizar_reglas.js.
+      (El botón "Sincronizar ya" siempre estuvo habilitado:
+      lo que falla es la subida porque la nube sigue cerrada.)
   • FASE C.3 (APP v0.9.2 — instalá el APK NUEVO en TODOS los cels):
     - 🛡️ Sync blindado entre celulares. Por SI o por SI, ahora es
       imposible que un cel recién instalado (vacío) te borre los
@@ -69,28 +81,28 @@ INSTALACIÓN (5 pasos, 2 minutos)
 ═════════════════════════════════════════════════════════
 APK
 ═════════════════════════════════════════════════════════
- Instalá el APK v0.9.2 en TODOS tus celulares (GitHub Actions
+ Instalá el APK v0.9.3 en TODOS tus celulares (GitHub Actions
  lo compila solo al hacer push). Sin APK nuevo no vas a ver el
- formulario con Aceptar, los 2 teléfonos, las llamadas A/B ni
- el sync blindado entre cels.
+ formulario con Aceptar, los 2 teléfonos, las llamadas A/B, el
+ sync blindado entre cels ni la configuración que viaja.
 
 ═════════════════════════════════════════════════════════
 ☁️ SYNC ENTRE CELULARES (lo que hace que los registros
    se vean en el cel 2)
 ═════════════════════════════════════════════════════════
- 1. Los DOS cels con el APK v0.9.2 o más nuevo.
+ 1. Los DOS cels con el APK v0.9.3 o más nuevo.
  2. Los DOS cels con la MISMA cuenta de RiderTrack.
  3. Corré UNA VEZ: node actualizar_reglas.js (paso 3 de arriba)
     → habilita la colección dt_sync en Firestore. SIN ese paso
     la app dice "⚠️ No pude sincronizar" y cada cel vive solo.
  4. Abrí la app en el cel que TIENE los registros, esperá 10
     seg (sube solo), y después abrila en el otro cel → los
-    registros aparecen solos. (Con v0.9.2 el orden ya no
+    registros aparecen solos. (Con v0.9.2 o más nuevo el orden ya no
     importa, pero así es al toque.)
  5. Se actualizan entre sí EN VIVO: agregás un viaje en un cel
-    y a los segundos lo ve el otro (viajes, gastos y ajustes;
-    las rutas GPS del mapa y las keys de IA quedan en el cel
-    que las grabó).
+    y a los segundos lo ve el otro (viajes, gastos y toda la
+    configuración; solo las rutas GPS del mapa quedan en el cel
+    que las grabó, porque pesan mucho).
 
 ═════════════════════════════════════════════════════════
 PRUEBA COMPLETA (2 minutos)

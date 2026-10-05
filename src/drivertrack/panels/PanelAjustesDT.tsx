@@ -92,8 +92,8 @@ export default function PanelAjustesDT({ onToast, onIrAYape }: Props) {
       : estadoSync === 'pendiente'
         ? '☁️ Subiendo tus cambios a la nube…'
         : estadoSync === 'error'
-          ? '⚠️ No pude sincronizar — tus datos están a salvo en el teléfono, reintenta con el botón'
-          : '📱 Sin sesión: los datos viven solo en este teléfono';
+          ? '⚠️ No pude sincronizar (todo está a salvo en este teléfono). Casi siempre falta habilitar la nube: paso 3 del LEEME — node actualizar_reglas.js en Termux'
+          : '📱 Iniciá sesión con tu cuenta de RiderTrack para ver todo en cualquier cel';
 
   return (
     <div className={`dt-app ${temaClaro ? 'light' : ''} w-full`}>

@@ -203,6 +203,37 @@ check('config de la nube aplicada (metaDiaria 150, miNombre Rudy)', (() => {
 check('la key de IA quedó SOLO en el teléfono', JSON.parse(lsMap.get('dt_config_v1')).geminiKey === 'K-SECRETA');
 check('no subió nada innecesario (0 pushes)', T.setDocCalls.length === 0, `→ pushes: ${T.setDocCalls.length}`);
 
+// ═══════════ TEST 7: v0.9.3 config completa viaja + vacío no pisa lleno ═══════════
+console.log('\n▶ TEST 7 — v0.9.3: clave de Claude y Yapes viajan; vacío de la nube no borra el lleno local');
+await reset({
+  dt_viajes_v1: viajes(['a', 'X']), // X no está en la nube → fuerza re-subida de la unión
+  dt_config_v1: {
+    geminiKey: 'GEMI', claudeKey: 'sk-ant-SECRETA', metaDiaria: 100,
+    yape: { numero: '980811297', titular: 'Lorenzo', qrBase64: 'data:img/qr' },
+    plin: { numero: '', titular: '', qrBase64: '' },
+  },
+});
+// la nube manda metaDiaria NUEVA pero con clave VACÍA y yape a medias (un cel sin configurar)
+T.snapActual = {
+  data: () => ({
+    viajes: viajes(['a']),
+    gastos: [],
+    config: { metaDiaria: 150, claudeKey: '', yape: { numero: '956203893', titular: '', qrBase64: '' } },
+    actualizadoEn: 3000, dispositivo: 'cel2',
+  }),
+};
+iniciarSyncDT('rudy');
+await esperarPush();
+const cfg = JSON.parse(lsMap.get('dt_config_v1'));
+check('metaDiaria de la nube aplicada (número sí se propaga)', cfg.metaDiaria === 150);
+check('clave de Claude NO borrada por el vacío de la nube', cfg.claudeKey === 'sk-ant-SECRETA');
+check('geminiKey local conservada (la nube no la mandó)', cfg.geminiKey === 'GEMI');
+check('yape.numero de la nube aplicado (lleno pisa lleno)', cfg.yape.numero === '956203893');
+check('yape.titular local conservado (vacío no pisa lleno)', cfg.yape.titular === 'Lorenzo');
+check('QR de Yape local conservado', cfg.yape.qrBase64 === 'data:img/qr');
+check('la config COMPLETA sube a la nube (claudeKey en el push)', T.setDocCalls.length === 1 && T.setDocCalls[0].config.claudeKey === 'sk-ant-SECRETA' && T.setDocCalls[0].config.geminiKey === 'GEMI',
+  `→ pushes: ${T.setDocCalls.length}`);
+
 // ═══════════ resumen ═══════════
 console.log(`\n══════════════════════════════════`);
 console.log(`RESULTADO: ${pass} ✓ / ${fail} ✗`);

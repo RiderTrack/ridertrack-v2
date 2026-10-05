@@ -23,5 +23,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["node_modules", "parche-bot"]
+  "exclude": ["node_modules", "parche-bot", "test-sync"]
 }

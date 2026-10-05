@@ -34,9 +34,11 @@
 //   · Las RUTAS GPS (el dibujo del mapa) NO viajan: pesan mucho
 //     y son del teléfono que grabó — los km y duración SÍ viajan
 //     (son números). Se suben los últimos 1000 viajes.
-//   · Las KEYS de IA (geminiKey/claudeKey) NO viajan: quedan solo
-//     en el teléfono (mismo criterio de siempre) y se conservan
-//     al bajar la config de la nube (merge, no reemplazo).
+//   · v0.9.3: la config viaja COMPLETA (clave de Claude, Yapes/
+//     Plin con QR, comisiones, meta, plantillas…) dentro del doc
+//     PRIVADO del rider (reglas isOwner: solo él entra). Al bajar,
+//     regla de oro: un valor VACÍO de la nube nunca pisa un valor
+//     LLENO del teléfono (un cel nuevo no te borra nada).
 //   · El doc propio + rules isOwner → nadie más ve tus números.
 // ═══════════════════════════════════════════════════════════
 
@@ -88,10 +90,14 @@ export function suscribirEstadoSyncDT(cb: (e: EstadoSync) => void): () => void {
   return () => oyentes.delete(cb);
 }
 
-/** La config que viaja a la nube: SIN las keys de IA (quedan en el teléfono) */
+/**
+ * v0.9.3: la config que viaja a la nube va COMPLETA (clave de
+ * Claude, Yape/Plin con QR, plantillas…) — pedido de Rudy: lo que
+ * configura en un cel tiene que aparecer en el otro. Viaja dentro
+ * de SU doc dt_sync/{uid}, que las reglas limitan al dueño (isOwner).
+ */
 function configParaNube(c: ConfigDT): Partial<ConfigDT> {
-  const { geminiKey: _g, claudeKey: _c, robotUrl: _u, robotToken: _t, ...resto } = c;
-  return resto;
+  return { ...c };
 }
 
 function viajesParaNube(v: Viaje[]): Viaje[] {
@@ -181,6 +187,31 @@ function programarPush() {
   pushTimer = window.setTimeout(empujar, DELAY_PUSH);
 }
 
+/**
+ * v0.9.3: mezcla la config que bajó de la nube con la local.
+ * REGLA DE ORO: un valor VACÍO de la nube NUNCA pisa un valor
+ * LLENO local (si no, un cel sin configurar te borraría la clave
+ * de Claude o el QR de Yape del otro cel). Números, booleanos y
+ * campos nuevos: gana la nube (así la meta, las comisiones y las
+ * plantillas editadas SÍ se propagan).
+ */
+function mergeConfigRemota(local: Record<string, unknown>, remota: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...local };
+  for (const [k, vRemoto] of Object.entries(remota)) {
+    if (vRemoto === undefined || vRemoto === null) continue; // la nube no lo mandó → queda el local
+    const vLocal = out[k];
+    if (typeof vRemoto === 'string') {
+      out[k] = vRemoto === '' && typeof vLocal === 'string' && vLocal ? vLocal : vRemoto;
+    } else if (vRemoto && typeof vRemoto === 'object' && !Array.isArray(vRemoto)
+      && vLocal && typeof vLocal === 'object' && !Array.isArray(vLocal)) {
+      out[k] = mergeConfigRemota(vLocal as Record<string, unknown>, vRemoto as Record<string, unknown>);
+    } else {
+      out[k] = vRemoto;
+    }
+  }
+  return out;
+}
+
 /** Aplica lo que bajó de la nube al localStorage y avisa a las vistas */
 function aplicarRemoto(data: {
   viajes?: Viaje[];
@@ -229,8 +260,14 @@ function aplicarRemoto(data: {
       }
     }
     if (data.config) {
-      // merge sobre la local → las keys de IA del teléfono se conservan
-      const merge = normalizarConfig({ ...cargarConfig(), ...data.config } as Partial<ConfigDT>);
+      // v0.9.3: la config viaja COMPLETA — merge con la regla de oro
+      // (un valor VACÍO de la nube no pisa un valor LLENO local)
+      const merge = normalizarConfig(
+        mergeConfigRemota(
+          cargarConfig() as unknown as Record<string, unknown>,
+          data.config as unknown as Record<string, unknown>,
+        ) as Partial<ConfigDT>,
+      );
       guardarConfig(merge);
     }
     localStorage.setItem(K_SYNC_EN, String(data.actualizadoEn || Date.now()));

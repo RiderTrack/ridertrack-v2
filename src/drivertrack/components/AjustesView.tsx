@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.2 (FASE C.3 — sync blindado entre celulares: ningún cel nuevo borra tus registros) · Lima, PE
+        DriverTrack v0.9.3 (FASE C.4 — la configuración también viaja: clave de Claude, Yapes y plantillas aparecen en tus otros cels) · Lima, PE
       </p>
     </div>
   );
