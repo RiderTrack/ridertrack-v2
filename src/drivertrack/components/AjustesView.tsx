@@ -900,7 +900,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.8 (FASE H — 🛣️ RutaModal: navegar a A y B, copiar direcciones y grabar los km GPS agrupados en UN modal, la tarjeta queda con ✓ Entrega + Ruta + Contacto; 📷 Foto de entrega: el cliente te la pide, la sacás de la cámara y se manda por WhatsApp CON tu mensaje configurable en Ajustes, quedando guardada como evidencia en el viaje) · Lima, PE
+        DriverTrack v0.9.9 (FASE I — 📷 escáner v4: la dirección A de recojo y la B de entrega ya NO se confunden — la IA las identifica por las etiquetas "Recoger en"/"Entregar en" del pedido, y si duplica o mezcla, el saneamiento lo corrige solo; 📦 nueva OBSERVACIÓN del pedido: qué llevás — una bolsa, un artefacto — leída de los Comentarios, editable en el formulario y visible en la tarjeta del viaje) · Lima, PE
       </p>
     </div>
   );

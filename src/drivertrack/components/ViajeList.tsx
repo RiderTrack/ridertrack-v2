@@ -275,6 +275,19 @@ export default function ViajeList({
                 </button>
               )
             )}
+            {/* FASE I: 📦 OBSERVACIÓN del pedido — qué llevás ("una
+                bolsa", "un artefacto"). La llena el escáner leyendo
+                los Comentarios del pedido; ámbar para verla ANTES de
+                pasar a buscar. */}
+            {v.observacion?.trim() && (
+              <p
+                className="mt-1 truncate rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-amber-300/90"
+                title={v.observacion}
+                data-testid="observacion-viaje"
+              >
+                📦 {v.observacion}
+              </p>
+            )}
             {(v.celularEnvia?.trim() || v.celularRecibe?.trim()) ? (
               <p className="mt-1 truncate text-[10px] leading-snug text-slate-500">
                 {v.celularEnvia?.trim() ? `📤 envía ${v.celularEnvia.trim()}` : ''}

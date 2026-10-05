@@ -22,6 +22,12 @@
 //        📋 vista previa del mensaje SIEMPRE visible (en vivo, nunca
 //        desaparece) y mensaje reorganizado en bloques.
 // ═══════════════════════════════════════════════════════════
+// FASE I: 📷 escáner v4 — el RECOJO (A) también se llena con la
+//        foto (la IA lee el "Recoger en" de inDrive sin confundirlo
+//        con la entrega) + campo 📦 OBSERVACIÓN del pedido: qué
+//        llevás (una bolsa, un artefacto), leído de los
+//        Comentarios y visible en la tarjeta del viaje.
+// ═══════════════════════════════════════════════════════════
 // F-ID3.2: 🧲 BORRADOR — todo lo escrito (o escaneado) sobrevive
 //        cambios de pestaña, recargas y el asesino de memoria de
 //        Android: antes al pasar a Mapa y volver, el formulario
@@ -55,6 +61,7 @@ interface BorradorViaje {
   zona: string;
   direccion: string;
   dirA: string;          // FASE C: dirección de recojo (A)
+  observacion: string;   // FASE I: comentarios del pedido — qué llevás (una bolsa, un artefacto…)
   celular: string;
   celularEnvia: string;  // FASE C: teléfono de quien envía
   celularRecibe: string; // FASE C: teléfono de quien recibe
@@ -77,7 +84,8 @@ function leerBorrador(): BorradorViaje | null {
     const algoEscrito =
       (b.tarifa ?? '').trim() || (b.cliente ?? '').trim() || (b.direccion ?? '').trim() ||
       (b.celular ?? '').trim() || (b.zona ?? '').trim() || (b.yapeNombre ?? '').trim() ||
-      (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || b.coordenadas || b.coordenadasA;
+      (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || (b.dirA ?? '').trim() ||
+      (b.observacion ?? '').trim() || b.coordenadas || b.coordenadasA;
     if (!algoEscrito) return null;
     return {
       origen: (['indrive', 'rappi', 'pedidosya', 'directo'].includes(b.origen ?? '')
@@ -89,6 +97,7 @@ function leerBorrador(): BorradorViaje | null {
       zona: b.zona ?? '',
       direccion: b.direccion ?? '',
       dirA: b.dirA ?? '',
+      observacion: b.observacion ?? '', // FASE I: qué llevás (se llena con el escaneo)
       // FASE C.2: ya no hay campo "celular del cliente" aparte — el
       // borrador viejo lo migra al de quien ENVÍA
       celular: b.celular ?? '',
@@ -151,6 +160,9 @@ export default function ViajeForm({
   const [zona, setZona] = useState(borradorInicial?.zona ?? '');
   const [direccion, setDireccion] = useState(borradorInicial?.direccion ?? ''); // F-ID2.5: campo propio (antes vivía en notas)
   const [dirA, setDirA] = useState(borradorInicial?.dirA ?? ''); // FASE C: dirección de RECOJO (A)
+  // FASE I: observación del pedido — QUÉ llevás ("una bolsa", "un
+  // artefacto") — la lee el escáner de los Comentarios del pedido
+  const [observacion, setObservacion] = useState(borradorInicial?.observacion ?? '');
   // FASE C.2: SOLO DOS teléfonos — quien ENVÍA (el cliente principal,
   // a él le va el cobro) y quien RECIBE. El viejo "celular del cliente"
   // se migró al de quien envía (arriba, en leerBorrador).
@@ -217,13 +229,13 @@ export default function ViajeForm({
   // cambiar de pestaña (o que Android mate la app) no pierde nada
   useEffect(() => {
     guardarBorrador({
-      origen, tarifa, comisionPct, cliente, zona, direccion, dirA,
+      origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion,
       celular: celularEnvia.trim() || celularRecibe.trim(), // FASE C.2: compat
       celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
       coordenadasA, // FASE E: pin del recojo sobrevive cambios de pestaña
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -305,6 +317,13 @@ export default function ViajeForm({
     try {
       const { comprimirImagenParaOCR } = await import('../utils');
       const b64 = await comprimirImagenParaOCR(file);
+      // FASE I: si ESTO ya venía de un escaneo BIEN sucedido (re-scan
+      // para CORREGIR — el caso real: "salió mal, escaneo de nuevo"),
+      // la nueva foto es la verdad: REEMPLAZA las direcciones aunque
+      // traiga campos vacíos (así la A vieja equivocada no queda
+      // pegada). Si venía tipeo manual o un escaneo fallido, solo se
+      // llena lo que la foto trajo (lo escrito a mano se protege).
+      const yaHabiaScan = scanOk;
       setFotoB64(b64);
       // F-ID2.5: se pasan LAS DOS keys — si Gemini revienta con error
       // de cuenta (ej: sin créditos), Claude lo rescata solo
@@ -314,9 +333,18 @@ export default function ViajeForm({
       if (datos.cliente) setCliente(datos.cliente);
       if (datos.zona) setZona(datos.zona);
       if (datos.tarifa !== null) setTarifa(String(datos.tarifa));
+      // FASE I: el RECOJO (A) ahora TAMBIÉN lo llena el escaneo — la
+      // IA lee el "Recoger en" de inDrive (antes el campo A quedaba
+      // vacío y a veces la dirección del recojo terminaba en la B).
+      // Con yaHabiaScan, un re-scan LIMPIA la A si la foto no trae
+      // recojo (no queda la dirección vieja equivocada pegada).
+      if (datos.direccionA || yaHabiaScan) setDirA(datos.direccionA);
       // F-ID2.5: dirección y celular a sus PROPIOS campos (antes
       // terminaban aplastados dentro de notas)
-      if (datos.direccion) setDireccion(datos.direccion);
+      if (datos.direccion || yaHabiaScan) setDireccion(datos.direccion);
+      // FASE I: 📦 la OBSERVACIÓN del pedido (qué llevás — una bolsa,
+      // un artefacto…) a su propio campo, leída de los Comentarios
+      if (datos.observacion || yaHabiaScan) setObservacion(datos.observacion);
       // F-ID2.6: si la foto no trae teléfono pero sí yape, el celular
       // se llena con el número del yape — en Perú el yape ES el
       // celular del cliente (editable como todo el formulario)
@@ -433,6 +461,7 @@ export default function ViajeForm({
       zona: zona.trim(),
       direccion: direccion.trim(),
       ...(dirA.trim() ? { dirA: dirA.trim() } : {}), // FASE C: recojo (A)
+      ...(observacion.trim() ? { observacion: observacion.trim() } : {}), // FASE I: qué llevás
       // FASE C.2: el "celular" principal del viaje = el que ENVÍA
       // (o el que recibe si es el único) — cobro y robot andan igual
       celular: celularEnvia.trim() || celularRecibe.trim(),
@@ -464,6 +493,7 @@ export default function ViajeForm({
     setZona('');
     setDireccion('');
     setDirA('');
+    setObservacion(''); // FASE I
     setCelularEnvia('');
     setCelularRecibe('');
     setYapeNombre('');
@@ -794,6 +824,17 @@ export default function ViajeForm({
           </span>
         </button>
       )}
+
+      {/* FASE I: 📦 OBSERVACIÓN del pedido — qué llevás ("una bolsa",
+          "un artefacto"). La lee el escáner de los Comentarios del
+          pedido inDrive y queda visible en la tarjeta del viaje. */}
+      <input
+        value={observacion}
+        onChange={e => setObservacion(e.target.value)}
+        placeholder="📦 Observación — qué llevás (se llena con el escaneo)"
+        className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-amber-400"
+        data-testid="input-observacion"
+      />
 
       {/* ── FASE C.2: DOS teléfonos — quien ENVÍA (A, el cliente
           principal: a él le va el cobro) y quien RECIBE (B).

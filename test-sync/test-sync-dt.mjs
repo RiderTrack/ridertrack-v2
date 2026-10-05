@@ -240,6 +240,7 @@ await reset({
   dt_viajes_v1: [{
     id: 'pinA', fecha: '2026-10-05', tarifa: 12, comision: 1, neto: 11, origen: 'indrive',
     direccion: 'Av. La Marina 2100', dirA: 'Jr. Cuzco 523',
+    observacion: 'Llevo una bolsa con un artefacto', // FASE I: qué llevás — también viaja
     coordenadas: { lat: -12.05, lng: -77.06 },      // pin B (entrega)
     coordenadasA: { lat: -12.046, lng: -77.042 },   // FASE E: pin A (recojo)
   }],
@@ -256,6 +257,8 @@ check('el push también lleva coordenadas (pin B de la entrega)',
   T.setDocCalls[0]?.viajes[0]?.coordenadas?.lat === -12.05);
 check('el pin A sobrevive en el localStorage local (no lo muta el sync)',
   lsViajes()[0]?.coordenadasA?.lng === -77.042);
+check('FASE I: la observación (qué llevás) también viaja al cel 2',
+  T.setDocCalls[0]?.viajes[0]?.observacion === 'Llevo una bolsa con un artefacto');
 
 // ═══════════ TEST 9: FASE H — la FOTO de evidencia: no sube, no se pierde, no loopea ═══════════
 console.log('\n▶ TEST 9 — FASE H: 📷 la foto NO sube a la nube (pesa) pero NO se pierde del teléfono');

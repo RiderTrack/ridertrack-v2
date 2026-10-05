@@ -3,6 +3,25 @@
 // Foto del pedido → la IA lee cliente, dirección, zona,
 // referencia, teléfono, tarifa y yape → el formulario se llena solo.
 //
+// FASE I — escáner v4: A y B SIN CONFUNDIRSE + 📦 OBSERVACIÓN
+// (caso real del usuario: "cuando tomo la foto no capta la dirección
+// A, o la confunde con la B — el pedido inDrive está desordenado"):
+//   · La IA solo tenía UN campo "direccion" con la regla "si hay
+//     varias, la de entrega final" → el recojo (A) NUNCA llegaba al
+//     formulario y a veces la de ENTREGA terminaba siendo la del
+//     RECOJO. Ahora hay DOS campos con reglas explícitas:
+//     direccionA (recojo — "Recoger en" en inDrive) y direccion
+//     (entrega — "Entregar en"/"Destino"), guiados por las ETIQUETAS
+//     de la pantalla, no por el orden.
+//   · Saneamiento POST-scan: si la IA copia la MISMA dirección en
+//     los dos campos → se borra la A (duplicó); si deja la entrega
+//     vacía pero llenó la A → se muda a la B (un solo lugar).
+//   · NUEVO campo observacion: los COMENTARIOS del pedido — qué
+//     lleva el cliente ("una bolsa", "un artefacto", "silla de
+//     oficina") o cómo manejarlo ("es frágil", "timbre azul").
+//     Se llena solo con el escaneo y queda visible en la tarjeta
+//     del viaje para saber QUÉ llevás antes de pasar a buscar.
+//
 // F-ID2.6 — escáner v3, NOMBRE REAL + YAPE (caso real del usuario):
 //   · La IA puso "C.1" como cliente — pero C.1 es la CALLE 1 del
 //     barrio (código de pueblo joven/proyecto de vivienda) → el
@@ -57,9 +76,11 @@
 
 export interface DatosEscaneados {
   cliente: string;
-  direccion: string;
+  direccionA: string; // FASE I: dirección de RECOJO (A) — "Recoger en" en inDrive
+  direccion: string; // dirección de ENTREGA (B)
   zona: string;
   referencia: string;
+  observacion: string; // FASE I: comentarios del pedido — qué lleva el cliente (una bolsa, un artefacto…)
   telefono: string;
   yapeNombre: string; // F-ID2.6: "Mk" en "Mk yape 980811297"
   yapeNumero: string; // F-ID2.6: "980811297" — solo dígitos
@@ -127,28 +148,48 @@ const PROMPT = `Eres el escáner de pedidos de DriverTrack, una app de delivery 
 Te mando la FOTO de un pedido. Puede ser: una captura de pantalla de inDrive, Rappi o PedidosYa; un chat de WhatsApp; una nota o sticker escrito a mano; o el sticker del paquete. MUCHOS pedidos son de pueblos jóvenes y proyectos de vivienda: las calles van con CÓDIGO — "C.1" es Calle 1, "C.2" es Calle 2, y "Mz B Lt 5" es Manzana B Lote 5. Esos códigos son PARTE DE LA DIRECCIÓN, jamás nombres de personas.
 
 Extrae los datos del ENVÍO con estas reglas:
+
+DIRECCIONES — OJO, SON DOS CAMPOS DISTINTOS (A y B), NO LOS CONFUNDAS:
+- direccionA: la dirección de RECOJO (punto A) — dónde agarrás el paquete. En inDrive aparece bajo "Recoger en", "Dirección de recogida", "Origen", "Punto de partida" o la marca 🅰️; en Rappi/PedidosYa suele ser la dirección de la TIENDA o RESTAURANTE. Guíate por la ETIQUETA que acompaña la dirección, NO por el orden en la pantalla.
+- direccion: la dirección de ENTREGA (punto B, el DESTINO FINAL) — dónde dejás el paquete. En inDrive aparece bajo "Entregar en", "Dirección de destino", "Destino", "Punto de entrega" o la marca 🅱️. Incluye urbanización/barrio/etapa/manzana/lote o código ("C.1", "Mz C Lt 5"), interior, departamento. NUNCA metas nombres de personas acá.
+REGLAS DE ORO DE LAS DIRECCIONES:
+1. Si la foto muestra UNA SOLA dirección → esa es la ENTREGA: va en "direccion" y "direccionA" queda "".
+2. Si muestra DOS direcciones → identificá cuál es el RECOJO por su etiqueta ("Recoger en", tienda, origen) y cuál la ENTREGA ("Entregar en", "Destino", el cliente). Si el pedido es de delivery, la ENTREGA es la del CLIENTE que recibe (la que va con el nombre del destinatario o la referencia de su casa).
+3. NUNCA copies la misma dirección en los dos campos. Si no podés distinguir cuál es el recojo, dejá "direccionA" en "" y poné la de entrega en "direccion".
+4. En los pueblos jóvenes, el pedido del cliente (la entrega B) suele llevar códigos tipo "C.1 Mz B Lt 5"; el recojo (A) suele ser una tienda, local o dirección de avenida.
+
 - cliente: el NOMBRE DE PERSONA del cliente (quién recibe o pide). Ej: "Mk", "María Fernández", "Kevin Rojas". NUNCA pongas acá códigos de dirección ("C.1", "C-1", "Casa 2", "Mz B", "Lote 5", "#123", "Cliente 3") ni barrios/zonas. OJO: si el único nombre de persona aparece junto al yape (ej: "Mk yape 987654321"), ese ES el cliente. Si la foto no tiene ningún nombre de persona, devuelve "".
-- direccion: la dirección de ENTREGA COMPLETA tal cual está escrita: avenida/calle/jirón con su número O CÓDIGO ("C.1", "Mz C Lt 5"), urbanización/barrio/proyecto/etapa, interior, departamento, manzana, lote. Si hay varias direcciones, la de entrega final. NUNCA metas nombres de personas acá.
-- zona: el distrito o zona (ej: San Miguel, La Perla, Cercado, SMP). Solo el nombre, sin "Distrito de".
-- referencia: el punto de referencia si aparece (ej: "frente a la bodega", "portón azul").
+- zona: el distrito o zona DE LA ENTREGA (ej: San Miguel, La Perla, Cercado, SMP). Solo el nombre, sin "Distrito de".
+- referencia: el punto de referencia del LUGAR DE ENTREGA si aparece (ej: "frente a la bodega", "portón azul") — cómo RECONOCER la casa, no qué llevás.
+- observacion: los COMENTARIOS u observaciones del pedido — QUÉ lleva o envía el cliente (ej: "una bolsa", "un artefacto", "una silla de oficina", "documento") o cómo manejarlo (ej: "es frágil", "tocar el timbre", "dejar en recepción"). En inDrive está en la sección "Comentarios" o "Observaciones". Copiala tal cual. NO es la referencia del lugar ni la dirección. Si no aparece, "".
 - telefono: el celular del cliente si aparece (dígitos y espacios). BÚSCALO BIEN: suele estar como "teléfono", "celular", "contacto" o en el propio chat. Es MUY importante para el cobro.
 - yapeNombre: si aparece la palabra "yape" o "plin", el NOMBRE que la acompaña (ej: en "Mk yape 987654321" es "Mk"). Si no aparece, "".
 - yapeNumero: el número de la cuenta yape/plin que aparece en la foto, SOLO dígitos (ej: "987654321"). Si no aparece, "".
 - tarifa: el precio/tarifa del viaje SÍ Y SOLO SÍ aparece escrito explícitamente (ej: "S/ 8.50", "8 soles", "16"). Solo el número ("8.50"). Si no aparece, "".
 
-EJEMPLO REAL — la foto dice:
+EJEMPLO 1 (pedido de pueblo joven, UNA sola dirección) — la foto dice:
 C.1
 Barrio XV Popular de Intereses Social Proyecto
 Mk yape 980811297
 16
 La respuesta correcta es:
-{"cliente":"Mk","direccion":"C.1 Barrio XV Popular de Intereses Social Proyecto","zona":"","referencia":"","telefono":"","yapeNombre":"Mk","yapeNumero":"980811297","tarifa":"16"}
+{"cliente":"Mk","direccionA":"","direccion":"C.1 Barrio XV Popular de Intereses Social Proyecto","zona":"","referencia":"","observacion":"","telefono":"","yapeNombre":"Mk","yapeNumero":"980811297","tarifa":"16"}
 Fíjate: "C.1" es la CALLE → va al INICIO de la direccion; "Mk" es la PERSONA → va en cliente (y en yapeNombre).
+
+EJEMPLO 2 (captura de inDrive con las DOS direcciones + comentario) — la foto dice:
+Recoger en
+Av. Sucre 1450 — San Miguel
+Entregar en
+C.1 Mz B Lt 5, Barrio XV
+Comentarios: Llevo una bolsa con un artefacto pequeño
+La respuesta correcta es:
+{"cliente":"","direccionA":"Av. Sucre 1450 — San Miguel","direccion":"C.1 Mz B Lt 5, Barrio XV","zona":"","referencia":"","observacion":"Llevo una bolsa con un artefacto pequeño","telefono":"","yapeNombre":"","yapeNumero":"","tarifa":""}
+Fíjate: el recojo va en direccionA (etiqueta "Recoger en"), la entrega en direccion (etiqueta "Entregar en"), y el comentario de QUÉ se lleva va en observacion.
 
 REGLAS DE ORO:
 - Copia el texto EXACTO de la foto. No corrijas ortografía. NO INVENTES NADA. No repitas palabras pegadas (si la foto dice "Barrio XV", es "Barrio XV", no "Barrio Barrio XV").
 - Si un dato no aparece en la foto, devuelve "" (cadena vacía).
-- Responde SOLO el JSON, con EXACTAMENTE estas claves: cliente, direccion, zona, referencia, telefono, yapeNombre, yapeNumero, tarifa.`;
+- Responde SOLO el JSON, con EXACTAMENTE estas claves: cliente, direccionA, direccion, zona, referencia, observacion, telefono, yapeNombre, yapeNumero, tarifa.`;
 
 // Claude no tiene responseSchema: se le exige el JSON por el prompt
 const PROMPT_CLAUDE_EXTRA = `
@@ -442,6 +483,21 @@ function sinPalabrasRepetidas(s: string): string {
   return s.replace(/\b(\S+)(\s+\1\b)+/gi, '$1').replace(/\s{2,}/g, ' ').trim();
 }
 
+/** FASE I: normaliza una dirección para compararla (sin mayúsculas,
+ *  tildes ni puntuación) — para detectar cuando la IA copió la MISMA
+ *  dirección en el campo A y en el B ("Av. Sucre 1450" vs "av sucre 1450").
+ *  La puntuación se BORRA sin dejar espacio: "C.1", "C-1" y "c1" dan
+ *  igual (los códigos de pueblo joven vienen escritos de mil formas). */
+function normalizarDir(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /** La red de seguridad completa: corrige cliente/dirección confundidos. */
 function sanearDatos(d: DatosEscaneados): DatosEscaneados {
   // 1. La IA puso un código de calle ("C.1") o un trozo de dirección
@@ -456,9 +512,26 @@ function sanearDatos(d: DatosEscaneados): DatosEscaneados {
   if (!d.cliente && d.yapeNombre) d.cliente = d.yapeNombre;
   // 3. Palabras pegadas repetidas en dirección/zona
   d.direccion = sinPalabrasRepetidas(d.direccion);
+  d.direccionA = sinPalabrasRepetidas(d.direccionA);
   d.zona = sinPalabrasRepetidas(d.zona);
   // 4. El número de yape queda limpio: solo dígitos
   d.yapeNumero = d.yapeNumero.replace(/[^0-9]/g, '');
+  // ── FASE I: guarda anti-confusión A/B ──
+  // 5. La IA copió la MISMA dirección en A y en B (con o sin
+  //    mayúsculas/tildes/puntos de diferencia) → la A se borra:
+  //    era la entrega duplicada, no un recojo real
+  if (d.direccionA && d.direccion && normalizarDir(d.direccionA) === normalizarDir(d.direccion)) {
+    d.direccionA = '';
+  }
+  // 6. La IA llenó la A pero dejó la B vacía → ese único lugar es
+  //    la ENTREGA (la B es la que importa para el cobro y la
+  //    navegación): se muda
+  if (!d.direccion && d.direccionA) {
+    d.direccion = d.direccionA;
+    d.direccionA = '';
+  }
+  // 7. La observación queda prolija (sin palabras pegadas repetidas)
+  d.observacion = sinPalabrasRepetidas(d.observacion);
   return d;
 }
 
@@ -514,9 +587,11 @@ export async function escanearDireccion(
       const d = parsearJsonTexto(texto);
       const datos: DatosEscaneados = sanearDatos({
         cliente: (d.cliente ?? '').trim(),
+        direccionA: (d.direccionA ?? '').trim(), // FASE I: recojo (A)
         direccion: (d.direccion ?? '').trim(),
         zona: (d.zona ?? '').trim(),
         referencia: (d.referencia ?? '').trim(),
+        observacion: (d.observacion ?? '').trim(), // FASE I: qué lleva
         telefono: (d.telefono ?? '').trim(),
         yapeNombre: (d.yapeNombre ?? '').trim(),
         yapeNumero: (d.yapeNumero ?? '').trim(),
@@ -524,9 +599,11 @@ export async function escanearDireccion(
       });
       if (
         !datos.cliente &&
+        !datos.direccionA &&
         !datos.direccion &&
         !datos.zona &&
         !datos.referencia &&
+        !datos.observacion &&
         !datos.telefono &&
         !datos.yapeNombre &&
         !datos.yapeNumero &&
@@ -604,3 +681,17 @@ export async function probarKeyIA(
 
   return { ok: algunaOk, mensaje: resultados.join(' · ') };
 }
+
+// ═══════════════════════════════════════════════════════════
+// 🧪 FASE I: hook de tests — expone las funciones PURAS internas
+// del escáner (el prompt y el saneamiento A/B) para poder probarlas
+// sin llamar a la IA (mismo patrón que __rutaABTests en rutaAB.ts).
+// ═══════════════════════════════════════════════════════════
+export const __escanerTests = {
+  sanearDatos,
+  parsearJsonTexto,
+  pareceCodigoDireccion,
+  pareceTrozoDireccion,
+  normalizarDir,
+  PROMPT,
+};
