@@ -17,16 +17,21 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Navigation, Phone, Square, Trash2 } from 'lucide-react';
+import { Camera, CheckCircle2, Phone, Route, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
 import { fmtSoles, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
-import { abrirNavegacion, tieneDestino } from '../services/navegacion';
-import NavegarMenu from './NavegarMenu';
+// FASE H: 🛣️ TODO lo de la ruta (navegar A/B, copiar, GPS, km) vive
+// ahora adentro del RutaModal — antes eran botoncitos A + B + GPS
+// sueltos en la tarjeta (pedido de Rudy: agrupar como el contacto)
+import RutaModal from './RutaModal';
 // FASE G: todas las llamadas y WhatsApp de la tarjeta viven ahora
 // adentro del ContactoModal — antes eran 6 botoncitos 📞💬 que
 // ocupaban media tarjeta (pedido de Rudy: agruparlos en un modal)
 import ContactoModal, { type Contacto } from './ContactoModal';
+// FASE H: 📷 foto de la entrega — el cliente la pide para comprobar,
+// se saca acá y se manda por WhatsApp con el mensaje configurable
+import FotoEntregaModal from './FotoEntregaModal';
 // FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
 import RobotMenu from './RobotMenu';
 
@@ -81,6 +86,11 @@ interface Props {
   destacadoId?: string | null;
   /** FASE F: ✓ marcar/desmarcar la ENTREGA COMPLETADA de un viaje */
   onToggleEntregado?: (id: string) => void;
+  /** FASE H: 📷 guardar la foto de entrega (evidencia comprimida)
+   *  en el viaje — el shell le pone la hora */
+  onGuardarFoto?: (id: string, dataUrl: string) => void;
+  /** FASE H: toasts del shell para el modal de la foto */
+  onToast?: (msg: string) => void;
 }
 
 export default function ViajeList({
@@ -98,14 +108,18 @@ export default function ViajeList({
   tiposConImagen,
   destacadoId,
   onToggleEntregado,
+  onGuardarFoto,
+  onToast,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
-  // F-ID3.3: qué viaje tiene abierto el mini-selector Waze/Google
-  const [navViajeId, setNavViajeId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
   const [robotViajeId, setRobotViajeId] = useState<string | null>(null);
   // FASE G: qué viaje tiene abierto el modal de contacto (📞/💬/cobro/avisos)
   const [contactoViajeId, setContactoViajeId] = useState<string | null>(null);
+  // FASE H: qué viaje tiene abierto el modal de la RUTA (A/B/GPS/km)
+  const [rutaViajeId, setRutaViajeId] = useState<string | null>(null);
+  // FASE H: qué viaje tiene abierto el modal de la FOTO de entrega
+  const [fotoViajeId, setFotoViajeId] = useState<string | null>(null);
   // FASE E: qué dirección se acaba de copiar ("{id}-a" / "{id}-b") —
   // muestra el ✓ Copiada en la tarjeta
   const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
@@ -131,20 +145,7 @@ export default function ViajeList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destacadoId]);
 
-  /** 🧭 abrir Waze/Google hacia la entrega de ESTE viaje */
-  function navegarViaje(v: Viaje) {
-    const destino = v.coordenadas ?? { direccion: v.direccion.trim() };
-    if (!tieneDestino(destino)) return;
-    if (!abrirNavegacion(destino)) setNavViajeId(v.id);
-  }
-
-  /** FASE C: 🧭 navegar al RECOJO (dirección A) de este viaje */
-  const [navAViajeId, setNavAViajeId] = useState<string | null>(null);
-  function navegarViajeA(v: Viaje) {
-    const destino = v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() };
-    if (!tieneDestino(destino)) return;
-    if (!abrirNavegacion(destino)) setNavAViajeId(v.id);
-  }
+  // FASE H: navegar/copiar/GPS se manejan adentro del RutaModal
 
   if (viajes.length === 0) {
     return (
@@ -318,6 +319,18 @@ export default function ViajeList({
                 📝 {v.notas.split('\n')[0]}
               </p>
             )}
+            {/* FASE H: 📷 evidencia de la entrega guardada — tocá para
+                verla, mandarla de nuevo o sacar otra */}
+            {v.fotoEntrega && (
+              <button
+                onClick={() => setFotoViajeId(v.id)}
+                className="mt-1 truncate rounded px-0.5 py-0.5 text-left text-[10px] font-semibold leading-snug text-emerald-300/90 transition-colors hover:text-emerald-200"
+                title={`Foto de la entrega guardada${v.fotoEntregaHora ? ` a las ${v.fotoEntregaHora}` : ''} — tocá para verla o mandarla de nuevo`}
+                data-testid="linea-evidencia"
+              >
+                📷 Foto de la entrega{v.fotoEntregaHora ? ` · ${v.fotoEntregaHora}` : ''}
+              </button>
+            )}
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1">
@@ -350,63 +363,39 @@ export default function ViajeList({
                   </span>
                 </button>
               )}
-              {viajeGPSActivo === v.id && onDetenerGPS ? (
-                <button
-                  onClick={onDetenerGPS}
-                  className="relative flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2 py-2 text-[10px] font-bold text-emerald-300"
-                  aria-label="Terminar grabación GPS"
-                  data-testid="boton-gps-activo"
-                >
+              {/* FASE H: 🛣️ UN solo botón que abre el RutaModal con TODO
+                  adentro: navegar al recojo (A) y a la entrega (B), copiar
+                  las direcciones y grabar los km con GPS. Antes eran 3
+                  botoncitos (GPS · B · A) sueltos en la tarjeta. Si está
+                  grabando ESTE viaje, el puntito verde pulsa. */}
+              <button
+                onClick={() => setRutaViajeId(v.id)}
+                className={`relative flex flex-col items-center rounded-lg p-2 transition-all active:scale-95 ${
+                  viajeGPSActivo === v.id
+                    ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/50'
+                    : 'bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25'
+                }`}
+                aria-label="Ruta del viaje: navegar, copiar dirección, grabar km"
+                title="Ruta del viaje — navegar a A y a B, copiar las direcciones y grabar los km con GPS"
+                data-testid="boton-ruta"
+              >
+                {viajeGPSActivo === v.id && (
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400" />
-                  <Square size={11} fill="currentColor" /> GPS
-                </button>
-              ) : onIniciarGPS ? (
-                <button
-                  onClick={() => onIniciarGPS(v.id)}
-                  className="rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
-                  aria-label="Grabar los km GPS de este viaje"
-                  title="Grabar los km de este viaje"
-                  data-testid="boton-gps"
-                >
-                  <Navigation size={16} />
-                </button>
-              ) : null}
-              {/* F-ID3.3: 🧭 navegar a la entrega (solo si hay destino) —
-                  FASE C: se llama "B" porque ahora también hay una A (recojo) */}
-              {(v.coordenadas || v.direccion.trim()) && (
-                <button
-                  onClick={() => navegarViaje(v)}
-                  className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 transition-colors hover:bg-cyan-500/25"
-                  aria-label="Navegar a la entrega (B) con Waze o Google Maps"
-                  title="Navegar a la ENTREGA (B) — Waze / Google Maps"
-                  data-testid="boton-navegar-lista"
-                >
-                  <span className="text-[11px] font-black">B</span>
-                </button>
-              )}
-              {/* FASE C: 🧭 navegar al RECOJO (dirección A) */}
-              {(v.dirA ?? '').trim() && (
-                <button
-                  onClick={() => navegarViajeA(v)}
-                  className="rounded-lg bg-amber-500/15 p-2 text-amber-300 transition-colors hover:bg-amber-500/25"
-                  aria-label="Navegar al recojo (A) con Waze o Google Maps"
-                  title="Navegar al RECOJO (A) — Waze / Google Maps"
-                  data-testid="boton-navegar-a-lista"
-                >
-                  <span className="text-[11px] font-black">A</span>
-                </button>
-              )}
+                )}
+                <Route size={16} />
+                <span className="text-[8px] font-black leading-none">Ruta</span>
+              </button>
             </div>
             {/* FASE G: 📞 UN solo botón que abre el ContactoModal con
-                TODO adentro: llamar/WhatsApp a A y a B, el cobro y los
-                avisos del robot. Antes eran 6 botoncitos 📞💬 que se
-                comían la tarjeta (y wrappeaban en celus angostos). */}
+                TODO adentro: llamar/WhatsApp a A y a B, el cobro, los
+                avisos del robot y la FOTO de la entrega. Antes eran 6
+                botoncitos 📞💬 que se comían la tarjeta. */}
             {telCobro && (
               <button
                 onClick={() => setContactoViajeId(v.id)}
                 className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
                 aria-label="Llamar o escribir por WhatsApp"
-                title="Llamar o escribir — abre el contacto de A y B, el cobro y los avisos"
+                title="Llamar o escribir — abre el contacto de A y B, el cobro, los avisos y la foto de la entrega"
                 data-testid="boton-contacto"
               >
                 <Phone size={16} />
@@ -445,30 +434,36 @@ export default function ViajeList({
         );
       })}
 
-      {/* F-ID3.3: mini-selector Waze / Google Maps del viaje elegido */}
-      {navViajeId &&
+      {/* FASE H: 🛣️ modal de la RUTA — navegar a A y a B, copiar las
+          direcciones, grabar los km con GPS (antes: 3 botoncitos) */}
+      {rutaViajeId &&
         (() => {
-          const v = ordenados.find(x => x.id === navViajeId);
+          const v = ordenados.find(x => x.id === rutaViajeId);
           if (!v) return null;
           return (
-            <NavegarMenu
-              destino={v.coordenadas ?? { direccion: v.direccion.trim() }}
-              etiqueta={v.direccion.trim()}
-              onCerrar={() => setNavViajeId(null)}
+            <RutaModal
+              viaje={v}
+              onCerrar={() => setRutaViajeId(null)}
+              grabando={viajeGPSActivo === v.id}
+              onIniciarGPS={onIniciarGPS ? () => onIniciarGPS(v.id) : undefined}
+              onDetenerGPS={onDetenerGPS}
             />
           );
         })()}
 
-      {/* FASE C: mini-selector Waze / Google del RECOJO (A) del viaje elegido */}
-      {navAViajeId &&
+      {/* FASE H: 📷 modal de la FOTO de entrega — sacar, mandar por
+          WhatsApp con el mensaje y guardar la evidencia */}
+      {fotoViajeId &&
         (() => {
-          const v = ordenados.find(x => x.id === navAViajeId);
-          if (!v) return null;
+          const v = ordenados.find(x => x.id === fotoViajeId);
+          if (!v || !onGuardarFoto) return null;
           return (
-            <NavegarMenu
-              destino={v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() }}
-              etiqueta={(v.dirA ?? '').trim()}
-              onCerrar={() => setNavAViajeId(null)}
+            <FotoEntregaModal
+              viaje={v}
+              config={config}
+              onCerrar={() => setFotoViajeId(null)}
+              onGuardar={dataUrl => onGuardarFoto(v.id, dataUrl)}
+              onToast={onToast ?? (() => {})}
             />
           );
         })()}
@@ -512,6 +507,16 @@ export default function ViajeList({
                       // cerrá este y abrí el menú de avisos del robot
                       setContactoViajeId(null);
                       setRobotViajeId(v.id);
+                    }
+                  : undefined
+              }
+              onFoto={
+                onGuardarFoto
+                  ? () => {
+                      // FASE H: cerrá el contacto y abrí la FOTO de
+                      // la entrega (sacar/mirar/mandar al cliente)
+                      setContactoViajeId(null);
+                      setFotoViajeId(v.id);
                     }
                   : undefined
               }

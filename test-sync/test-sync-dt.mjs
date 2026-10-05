@@ -257,6 +257,40 @@ check('el push también lleva coordenadas (pin B de la entrega)',
 check('el pin A sobrevive en el localStorage local (no lo muta el sync)',
   lsViajes()[0]?.coordenadasA?.lng === -77.042);
 
+// ═══════════ TEST 9: FASE H — la FOTO de evidencia: no sube, no se pierde, no loopea ═══════════
+console.log('\n▶ TEST 9 — FASE H: 📷 la foto NO sube a la nube (pesa) pero NO se pierde del teléfono');
+const conFoto = {
+  id: 'foto1', fecha: '2026-10-05', tarifa: 10, comision: 1, neto: 9, origen: 'indrive',
+  direccion: 'Av. La Marina 2100', cliente: 'Carlos',
+  fotoEntrega: 'data:image/jpeg;base64,AAAA', fotoEntregaHora: '15:17',
+};
+// 9a. el push NO lleva la foto (viajesParaNube la quita, como la ruta)
+await reset({ dt_viajes_v1: [conFoto] });
+T.snapActual = { data: () => ({ viajes: [], gastos: [], actualizadoEn: 0, dispositivo: 'cel2' }) };
+iniciarSyncDT('rudy');
+await esperarPush();
+const subido = T.setDocCalls[0]?.viajes?.[0];
+check('el push NO lleva fotoEntrega ni fotoEntregaHora (pesan, como la ruta)',
+  !!subido && !('fotoEntrega' in subido) && !('fotoEntregaHora' in subido),
+  `→ keys subidas: ${subido ? Object.keys(subido).join(',') : 'nada'}`);
+check('la foto QUEDÓ en el teléfono (evidencia local intacta)',
+  lsViajes()[0]?.fotoEntrega === 'data:image/jpeg;base64,AAAA');
+
+// 9b. lo que baja del otro cel (sin foto, como quedó en la nube) NO
+//     borra la evidencia local y NO genera push eterno: la unión
+//     compara SIN la foto (viajeComparable)
+await reset({ dt_viajes_v1: [conFoto], dt_pendiente: '1' }); // cambios sin subir → unión
+const sinFoto = { ...conFoto };
+delete sinFoto.fotoEntrega;
+delete sinFoto.fotoEntregaHora; // así quedó en la nube cuando subió (sin foto)
+T.snapActual = { data: () => ({ viajes: [sinFoto], gastos: [], actualizadoEn: 9500, dispositivo: 'cel2' }) };
+iniciarSyncDT('rudy');
+await esperarPush();
+check('la evidencia local SOBREVIVE a lo que bajó de la nube',
+  lsViajes()[0]?.fotoEntrega === 'data:image/jpeg;base64,AAAA' && lsViajes()[0]?.fotoEntregaHora === '15:17');
+check('sin push eterno: la foto local NO obliga a re-subir (0 pushes)',
+  T.setDocCalls.length === 0, `→ pushes: ${T.setDocCalls.length}`);
+
 // ═══════════ resumen ═══════════
 console.log(`\n══════════════════════════════════`);
 console.log(`RESULTADO: ${pass} ✓ / ${fail} ✗`);

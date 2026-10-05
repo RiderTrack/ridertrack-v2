@@ -72,6 +72,10 @@ export function cargarViajes(): Viaje[] {
       ...(v.entregadoHora ? { entregadoHora: v.entregadoHora } : {}),
       ...(v.kmEstimado != null ? { kmEstimado: v.kmEstimado } : {}),
       ...(v.minEstimados != null ? { minEstimados: v.minEstimados } : {}),
+      // FASE H: 📷 evidencia de la entrega (foto comprimida + hora) —
+      // undefined en los viajes viejos o sin foto
+      ...(v.fotoEntrega ? { fotoEntrega: v.fotoEntrega } : {}),
+      ...(v.fotoEntregaHora ? { fotoEntregaHora: v.fotoEntregaHora } : {}),
     })) as Viaje[];
   } catch {
     return [];
@@ -79,6 +83,11 @@ export function cargarViajes(): Viaje[] {
 }
 
 export function guardarViajes(v: Viaje[]): void {
+  // FASE H: las FOTOS de evidencia pesan casi como las rutas GPS —
+  // si hay que alivianar, se sueltan las de los viajes MÁS VIEJOS
+  // primero (junto con las rutas); los números nunca se pierden.
+  const alivianar = (x: Viaje, conFoto: boolean): Viaje =>
+    conFoto ? x : { ...x, fotoEntrega: undefined, fotoEntregaHora: undefined };
   try {
     localStorage.setItem(K_VIAJES, JSON.stringify(v));
   } catch {
@@ -87,12 +96,19 @@ export function guardarViajes(v: Viaje[]): void {
     // los viajes MÁS VIEJOS (los km numéricos quedan, solo se
     // pierde el dibujo) y se reintenta.
     try {
-      const alivianados = v.map((x, i) => (i < v.length / 2 ? { ...x, ruta: undefined } : x));
+      const alivianados = v.map((x, i) =>
+        i < v.length / 2
+          ? alivianar({ ...x, ruta: undefined }, false)
+          : alivianar(x, true),
+      );
       localStorage.setItem(K_VIAJES, JSON.stringify(alivianados));
     } catch {
-      // último recurso: sin rutas en absoluto, los números nunca se pierden
+      // último recurso: sin rutas ni fotos en absoluto, los números nunca se pierden
       try {
-        localStorage.setItem(K_VIAJES, JSON.stringify(v.map(x => ({ ...x, ruta: undefined }))));
+        localStorage.setItem(
+          K_VIAJES,
+          JSON.stringify(v.map(x => alivianar({ ...x, ruta: undefined }, false))),
+        );
       } catch {
         /* sin espacio ni para eso: no hay mucho más que hacer */
       }

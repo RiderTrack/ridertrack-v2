@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // 🛠️ DriverTrack — Utilidades (formato, vibración, imagen, compartir)
 // ═══════════════════════════════════════════════════════════
-import type { ConfigDT } from './types';
+import type { ConfigDT, Viaje } from './types';
 
 export function fmtSoles(n: number): string {
   return 'S/ ' + n.toFixed(2);
@@ -163,6 +163,38 @@ export function linkLlamada(celular: string): string {
   const num = normalizarCelular(celular);
   if (!num) return '';
   return num.startsWith('+') ? `tel:${num}` : `tel:+${num}`;
+}
+
+// ═══ FASE H: 📷 mensaje que va CON la foto de la entrega ═══
+// El ORIGINAL se edita en Ajustes → 📷 Foto de entrega (config.
+// mensajeFoto); si está vacío se usa MENSAJE_FOTO_DEF. Etiquetas
+// soportadas: {cliente} {direccion} {hora} {miNombre} {firma}.
+// {firma} → " — Tu Nombre" (con guión) o '' si no configuraste
+// nombre — así el mensaje default nunca queda pegado feo.
+export const MENSAJE_FOTO_DEF =
+  'Hola {cliente} 👋 le mando la foto de su entrega ✅ ¡Gracias por su confianza!{firma}';
+
+function reemplazar(t: string, de: string, a: string): string {
+  return t.split(de).join(a); // split/join: seguro en cualquier target de TS
+}
+
+/** Resuelve las etiquetas del mensaje de la foto con los datos del viaje */
+export function armarMensajeFoto(viaje: Viaje, config: ConfigDT): string {
+  const base = (config.mensajeFoto ?? '').trim() || MENSAJE_FOTO_DEF;
+  const miNombre = config.miNombre.trim();
+  let out = base;
+  out = reemplazar(out, '{cliente}', viaje.cliente.trim() || 'estimado cliente');
+  out = reemplazar(out, '{direccion}', viaje.direccion.trim());
+  out = reemplazar(out, '{hora}', horaAhoraLinda());
+  out = reemplazar(out, '{miNombre}', miNombre);
+  out = reemplazar(out, '{firma}', miNombre ? ` — ${miNombre}` : '');
+  return out;
+}
+
+/** HH:MM actual — utils no importa storage (dependencia circular) */
+function horaAhoraLinda(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 export function descargarArchivo(nombre: string, contenido: string, tipo = 'application/json'): void {

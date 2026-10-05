@@ -8,6 +8,7 @@ import { EvArchivo } from '../tipos';
 import {
   ArrowRight,
   Bot,
+  Camera,
   Check,
   ChevronDown,
   Compass,
@@ -37,7 +38,8 @@ import {
   quitarImagenDT,
 } from '../services/imagenesDT';
 import { auth } from '../../services/firebase';
-import { normalizarCelular } from '../utils';
+import { armarMensajeFoto, MENSAJE_FOTO_DEF, normalizarCelular } from '../utils';
+import type { Viaje } from '../types';
 
 interface Props {
   config: ConfigDT;
@@ -116,6 +118,9 @@ export default function AjustesView({
   }));
   // qué plantilla está abierta para editar (una a la vez, colapsables)
   const [plantillaAbierta, setPlantillaAbierta] = useState<string | null>(null);
+  // FASE H: 📷 el mensaje que va CON la foto de la entrega — el
+  // original vive acá (se puede retocar por foto en el momento)
+  const [mensajeFoto, setMensajeFoto] = useState(config.mensajeFoto ?? '');
 
   // 🧪 FASE B: probás el robot de verdad — te manda un mensaje a TU
   // WhatsApp (miCelular). Si llega, todo el circuito funciona.
@@ -228,6 +233,9 @@ export default function AjustesView({
           .filter(t => (plantillas[t] ?? '').trim() !== PLANTILLAS_DEF[t].trim())
           .map(t => [t, (plantillas[t] ?? '').trim()]),
       ),
+      // FASE H: el mensaje de la foto — si quedó igual al original
+      // se guarda vacío (usa el default de fábrica en cada envío)
+      mensajeFoto: mensajeFoto.trim() === MENSAJE_FOTO_DEF.trim() ? '' : mensajeFoto.trim(),
       // FASE B: la URL y el token del viejo puente localhost quedan
       // jubilados — se conservan los defaults en la config para que
       // los backups viejos sigan importando sin romper nada.
@@ -249,7 +257,7 @@ export default function AjustesView({
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas]);
+  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas, mensajeFoto]);
 
   async function probarKey() {
     setProbando(true);
@@ -276,6 +284,7 @@ export default function AjustesView({
         setGeminiKey(data.config.geminiKey ?? '');
         setClaudeKey(data.config.claudeKey ?? '');
         setRobotActivo(data.config.robotActivo === true);
+        setMensajeFoto(data.config.mensajeFoto ?? '');
       }
     } catch {
       /* App ya muestra el toast de archivo inválido */
@@ -675,6 +684,63 @@ export default function AjustesView({
         </div>
       </section>
 
+      {/* ═══ FASE H: 📷 Foto de entrega — el MENSAJE que va con la foto ═══ */}
+      <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4" data-testid="seccion-foto-entrega">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+          <Camera size={14} /> Foto de entrega (mensaje)
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          Cuando un cliente te pide <b className="text-emerald-300">la foto para comprobar la entrega</b>, se la
+          sacás desde el viaje (📞 Contacto → 📷 Foto de la entrega) y sale por WhatsApp con{' '}
+          <b className="text-emerald-300">este mensaje</b> — <b>se guarda solo</b> al escribir. Podés retocarlo
+          también en el momento, justo antes de mandar cada foto.
+        </p>
+
+        <div className="mt-3">
+          <textarea
+            value={mensajeFoto}
+            onChange={e => setMensajeFoto(e.target.value)}
+            rows={4}
+            placeholder={MENSAJE_FOTO_DEF}
+            className="w-full resize-none rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-xs leading-relaxed text-slate-200 outline-none focus:border-emerald-400"
+            data-testid="foto-mensaje-input"
+          />
+          <div className="mt-1.5 rounded-xl bg-slate-900/80 px-3 py-2">
+            <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">
+              👀 Así va a salir (con datos de ejemplo)
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-300">
+              {armarMensajeFoto(
+                {
+                  cliente: 'Carlos',
+                  direccion: 'Av. Prueba 123',
+                } as Viaje,
+                { miNombre } as ConfigDT,
+              )}
+            </p>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <p className="text-[10px] text-slate-500">
+              Etiquetas: <code className="rounded bg-slate-900 px-1 text-[9px] text-emerald-300">{'{cliente}'}</code>{' '}
+              <code className="rounded bg-slate-900 px-1 text-[9px] text-emerald-300">{'{direccion}'}</code>{' '}
+              <code className="rounded bg-slate-900 px-1 text-[9px] text-emerald-300">{'{hora}'}</code>{' '}
+              <code className="rounded bg-slate-900 px-1 text-[9px] text-emerald-300">{'{miNombre}'}</code>{' '}
+              <code className="rounded bg-slate-900 px-1 text-[9px] text-emerald-300">{'{firma}'}</code> — y se
+              guarda solo ☁️
+            </p>
+            {(mensajeFoto ?? '').trim() !== '' && (
+              <button
+                onClick={() => setMensajeFoto('')}
+                className="shrink-0 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition-colors hover:bg-slate-700"
+                data-testid="foto-mensaje-reset"
+              >
+                ↩️ Volver al original
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* FASE B2: 🖼️ Imágenes del robot — como las del TRABAJO, pero
           para tus avisos de inDrive. Subís una imagen por aviso y el
           robot la manda CON el mensaje; si no hay imagen, va texto
@@ -834,7 +900,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.7 (FASE G — 📞 ContactoModal: todas las llamadas y los WhatsApp de la tarjeta y el formulario agrupados en UN modal — antes eran 6 botoncitos que ocupaban media tarjeta; ahora 📞 Contacto abre llamar/WhatsApp a A y a B, el cobro y los avisos del robot) · Lima, PE
+        DriverTrack v0.9.8 (FASE H — 🛣️ RutaModal: navegar a A y B, copiar direcciones y grabar los km GPS agrupados en UN modal, la tarjeta queda con ✓ Entrega + Ruta + Contacto; 📷 Foto de entrega: el cliente te la pide, la sacás de la cámara y se manda por WhatsApp CON tu mensaje configurable en Ajustes, quedando guardada como evidencia en el viaje) · Lima, PE
       </p>
     </div>
   );

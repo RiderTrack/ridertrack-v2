@@ -101,11 +101,23 @@ function configParaNube(c: ConfigDT): Partial<ConfigDT> {
 }
 
 function viajesParaNube(v: Viaje[]): Viaje[] {
-  // Sin rutas GPS (pesan) y solo los últimos MAX — los km/duración SÍ viajan.
+  // Sin rutas GPS ni FOTOS de evidencia (pesan) y solo los últimos
+  // MAX — los km/duración SÍ viajan. La foto queda en el teléfono
+  // que la sacó (como la ruta GPS del mapa).
   // ⚠️ La clave ruta se ELIMINA (destructuring), NO se pone en undefined:
   // un campo undefined hace que el SDK de Firestore rechaze el documento
   // ENTERO con invalid-argument (mismo bug que la FASE B2.1 en el robot).
-  return v.slice(-MAX_VIAJES_SYNC).map(({ ruta: _ruta, ...x }) => x as Viaje);
+  return v
+    .slice(-MAX_VIAJES_SYNC)
+    .map(({ ruta: _ruta, fotoEntrega: _foto, fotoEntregaHora: _fotoHora, ...x }) => x as Viaje);
+}
+
+/** FASE H: versión "comparable" de un viaje (sin ruta GPS ni foto)
+ * — para decidir si la nube tenía lo local SIN que la foto local
+ * (que nunca sube) haga creer que hay cambios nuevos eternamente. */
+function viajeComparable(v: Viaje): string {
+  const { ruta: _r, fotoEntrega: _f, fotoEntregaHora: _fh, ...resto } = v;
+  return JSON.stringify(resto);
 }
 
 /**
@@ -131,14 +143,20 @@ function limpiarUndefined<T>(valor: T): T {
  * la versión LOCAL (es la que todavía no se respaldó, o la que
  * editaste sin internet). Devuelve si la nube NO tenía algo de lo
  * local → en ese caso hay que volver a subir para que no se pierda.
+ * FASE H: comparador opcional — para viajes se compara SIN la ruta
+ * GPS ni la foto (que nunca suben) para no re-subir eternamente.
  */
-function unirPorId<T extends { id: string }>(locales: T[], remotos: T[]): { lista: T[]; laNubeNoTenia: boolean } {
+function unirPorId<T extends { id: string }>(
+  locales: T[],
+  remotos: T[],
+  sonIguales: (a: T, b: T) => boolean = (a, b) => JSON.stringify(a) === JSON.stringify(b),
+): { lista: T[]; laNubeNoTenia: boolean } {
   const porId = new Map<string, T>();
   for (const r of remotos) porId.set(r.id, r);
   let laNubeNoTenia = false;
   for (const l of locales) {
     const r = porId.get(l.id);
-    if (!r || JSON.stringify(r) !== JSON.stringify(l)) laNubeNoTenia = true;
+    if (!r || !sonIguales(r, l)) laNubeNoTenia = true;
     porId.set(l.id, l); // colisión → gana lo local
   }
   return { lista: [...porId.values()], laNubeNoTenia };
@@ -231,22 +249,31 @@ function aplicarRemoto(data: {
 
     if (Array.isArray(data.viajes)) {
       const locales = JSON.parse(localStorage.getItem('dt_viajes_v1') || '[]') as Viaje[];
-      // merge: las rutas GPS locales se conservan para los viajes que ya tenía
-      const rutasLocales = new Map(locales.map(v => [v.id, v.ruta]));
-      const conRutaLocal = (v: Viaje): Viaje => {
-        const rutaLocal = rutasLocales.get(v.id);
-        return rutaLocal && rutaLocal.length >= 2 ? { ...v, ruta: rutaLocal } : v;
+      // merge: las rutas GPS y las FOTOS de evidencia locales se
+      // conservan para los viajes que ya tenía (nunca suben: pesan)
+      const pesadosLocales = new Map(
+        locales.map(v => [v.id, { ruta: v.ruta, foto: v.fotoEntrega, fotoHora: v.fotoEntregaHora }]),
+      );
+      const conLocalPesado = (v: Viaje): Viaje => {
+        const p = pesadosLocales.get(v.id);
+        if (!p) return v;
+        const conRuta = p.ruta && p.ruta.length >= 2 ? { ...v, ruta: p.ruta } : v;
+        return p.foto ? { ...conRuta, fotoEntrega: p.foto, fotoEntregaHora: p.fotoHora } : conRuta;
       };
       if (protegerLocal) {
         // 🛡️ UNIÓN por id: lo que solo existe en este teléfono NUNCA se borra
-        const remotos = data.viajes.map(conRutaLocal);
-        const union = unirPorId(locales, remotos);
+        const remotos = data.viajes.map(conLocalPesado);
+        const union = unirPorId(
+          locales,
+          remotos,
+          (a, b) => viajeComparable(a) === viajeComparable(b), // sin ruta/foto
+        );
         hayQueSubir = union.laNubeNoTenia;
         guardarViajes(union.lista);
       } else {
         // flujo normal (todo lo local ya está respaldado): la nube manda el
         // estado completo → así los viajes BORRADOS en el otro cel acá también se van
-        guardarViajes(data.viajes.map(conRutaLocal));
+        guardarViajes(data.viajes.map(conLocalPesado));
       }
     }
     if (Array.isArray(data.gastos)) {

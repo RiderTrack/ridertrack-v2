@@ -35,6 +35,9 @@ export interface Viaje {
   minEstimados?: number; // FASE F: minutos estimados de manejo A→B
   entregado?: boolean;   // FASE F: ✓ entrega completada — para saber cuántos quedan pendientes
   entregadoHora?: string; // FASE F: HH:MM de cuándo marcaste la entrega
+  fotoEntrega?: string;   // FASE H: 📷 evidencia de la entrega (dataURL comprimido ~50-90 KB)
+                           // NO viaja a la nube (pesa, como la ruta GPS): queda en el teléfono que la sacó
+  fotoEntregaHora?: string; // FASE H: HH:MM de cuándo se guardó la evidencia
   tarifa: number;      // lo que cobra la app / el cliente
   comisionPct: number; // % que se queda la plataforma
   comision: number;    // monto de la comisión
@@ -94,6 +97,10 @@ export interface ConfigDT {
    * está, se usa el original). Se editan en Ajustes → 💬 Mensajes
    * del robot y viajan en el backup y la sincronización en la nube. */
   plantillas?: Record<string, string>;
+  /** FASE H: mensaje que va CON la foto de la entrega (Ajustes →
+   * 📷 Foto de entrega). Etiquetas {cliente} {direccion} {hora}
+   * {miNombre} {firma}. Vacío → MENSAJE_FOTO_DEF de utils. */
+  mensajeFoto?: string;
 }
 
 export interface ResumenDia {

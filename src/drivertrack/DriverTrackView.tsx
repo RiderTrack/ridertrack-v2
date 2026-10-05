@@ -225,6 +225,20 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     );
   }
 
+  // FASE H: 📷 guarda la FOTO de la entrega (evidencia comprimida)
+  // en el viaje, con la hora. NO viaja a la nube (pesa, como la ruta
+  // GPS) — queda en ESTE teléfono como comprobante, y la original
+  // además quedó en la galería del teléfono al sacarla.
+  function guardarFotoEntrega(id: string, dataUrl: string) {
+    setViajes(prev =>
+      prev.map(v =>
+        v.id === id
+          ? { ...v, fotoEntrega: dataUrl, fotoEntregaHora: horaAhora() }
+          : v,
+      ),
+    );
+  }
+
   // FASE F: 🛣️ los km A→B se calculan SOLOS — apenas aceptás un viaje
   // con los DOS pines (o cuando llega del otro cel sin el número),
   // Google mide la ruta por calles; sin internet queda el estimado
@@ -728,6 +742,8 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           tiposConImagen={Object.keys(imagenesDT)}
           destacadoId={ultimoAgregadoId}
           onToggleEntregado={toggleEntregado}
+          onGuardarFoto={guardarFotoEntrega}
+          onToast={mostrarToast}
         />
 
         {/* FASE C: cartelito para que no busqués con el viejo hábito —

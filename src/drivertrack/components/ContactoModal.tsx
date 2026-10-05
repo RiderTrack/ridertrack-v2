@@ -13,7 +13,7 @@
 // (ViajeForm, sin cobro ni avisos — esos ya tienen su botón ahí).
 // Patrón visual del RobotMenu (FASE B): hoja de abajo, blur, pop.
 // ═══════════════════════════════════════════════════════════
-import { Bot, Loader2, MessageCircle, Phone, Send, X } from 'lucide-react';
+import { Bot, Camera, Loader2, MessageCircle, Phone, Send, X } from 'lucide-react';
 import { linkLlamada, normalizarCelular, vibrar } from '../utils';
 import IconoWhatsApp from './IconoWhatsApp';
 
@@ -40,6 +40,9 @@ interface Props {
   montoCobro?: number;
   /** fila ancha: abrir el menú de avisos del robot (lo abre el padre) */
   onAvisos?: () => void;
+  /** FASE H: fila ancha — sacar/mirar la FOTO de la entrega y
+   *  mandársela al cliente por WhatsApp con el mensaje configurable */
+  onFoto?: () => void;
 }
 
 export default function ContactoModal({
@@ -50,6 +53,7 @@ export default function ContactoModal({
   cobroRobot = false,
   montoCobro,
   onAvisos,
+  onFoto,
 }: Props) {
   // solo los que de verdad tienen número cargado
   const conNumero = contactos.filter(c => normalizarCelular(c.numero.trim()));
@@ -127,8 +131,8 @@ export default function ContactoModal({
           ))}
         </div>
 
-        {/* filas anchas abajo — cobro y avisos del robot */}
-        {(onCobrar || onAvisos) && (
+        {/* filas anchas abajo — cobro, FOTO de la entrega y avisos */}
+        {(onCobrar || onFoto || onAvisos) && (
           <div className="mt-2 space-y-2">
             {onCobrar && (
               <button
@@ -154,6 +158,21 @@ export default function ContactoModal({
                     {cobroRobot
                       ? `el robot le manda el mensaje con tu QR${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`
                       : `mensaje listo por WhatsApp${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`}
+                  </span>
+                </span>
+              </button>
+            )}
+            {onFoto && (
+              <button
+                onClick={() => onFoto()}
+                className="flex w-full items-center gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-3 text-left text-emerald-300 transition-all active:scale-[0.99] hover:bg-emerald-500/20"
+                data-testid="contacto-foto"
+              >
+                <Camera size={20} className="shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-xs font-black">📷 Foto de la entrega</span>
+                  <span className="block text-[10px] font-medium opacity-70">
+                    se la mandás por WhatsApp con tu mensaje (editable en Ajustes)
                   </span>
                 </span>
               </button>
