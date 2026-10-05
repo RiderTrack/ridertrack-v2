@@ -31,6 +31,10 @@ export interface Viaje {
   ruta?: PuntoRuta[];  // F-ID3: el trazado para el mapa (se guarda comprimido, máx ~1500 puntos)
   coordenadas?: { lat: number; lng: number }; // F-ID3.2: dónde es la ENTREGA (pin en el mapa, se pone a mano o por GPS)
   coordenadasA?: { lat: number; lng: number }; // FASE C: pin del RECOJO (dirección A)
+  kmEstimado?: number;   // FASE F: km A→B calculados SOLOS (Google por calles, o recta ×1.35 de respaldo)
+  minEstimados?: number; // FASE F: minutos estimados de manejo A→B
+  entregado?: boolean;   // FASE F: ✓ entrega completada — para saber cuántos quedan pendientes
+  entregadoHora?: string; // FASE F: HH:MM de cuándo marcaste la entrega
   tarifa: number;      // lo que cobra la app / el cliente
   comisionPct: number; // % que se queda la plataforma
   comision: number;    // monto de la comisión

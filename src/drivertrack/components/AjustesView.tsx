@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.5 (FASE E — punto A y B en el mapa al agregar un viaje: buscador por dirección, GPS, copiar y navegar · 💰 ganado hoy con todo: trabajo + inDrive en el header, el Dashboard y el Resumen del día) · Lima, PE
+        DriverTrack v0.9.6 (FASE F — 🛣️ km A→B calculados solos por calles + línea de recorrido en el mapa · 💬 WhatsApp manual para A y B · ✓ botón de entrega completada con contador del día) · Lima, PE
       </p>
     </div>
   );

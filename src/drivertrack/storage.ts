@@ -66,6 +66,12 @@ export function cargarViajes(): Viaje[] {
       yapeNumero: v.yapeNumero ?? '',
       kmGPS: v.kmGPS ?? 0,
       duracionSeg: v.duracionSeg ?? 0,
+      // FASE F: ✓ entrega completada + km/min A→B calculados (viajes
+      // viejos no los tienen — undefined = todavía no calculado / no marcado)
+      entregado: v.entregado === true,
+      ...(v.entregadoHora ? { entregadoHora: v.entregadoHora } : {}),
+      ...(v.kmEstimado != null ? { kmEstimado: v.kmEstimado } : {}),
+      ...(v.minEstimados != null ? { minEstimados: v.minEstimados } : {}),
     })) as Viaje[];
   } catch {
     return [];

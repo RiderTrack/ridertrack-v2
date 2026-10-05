@@ -8,3 +8,4 @@ coverage/
 !.env.example
 test-sync/.tmp-resumenCore.mjs
 test-sync/syncDT.compilado.cjs
+test-sync/.tmp-*

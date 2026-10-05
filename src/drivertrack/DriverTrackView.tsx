@@ -41,6 +41,7 @@ import {
   guardarConfig,
   guardarGastos,
   guardarViajes,
+  horaAhora,
   marcarMetaCelebrada,
   metaYaCelebrada,
   resumenDia,
@@ -55,6 +56,8 @@ import { encolarAccionDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAv
 // FASE B2: imágenes del robot — subís una imagen por aviso en
 // Ajustes y el robot la manda CON el mensaje (como el trabajo)
 import { escucharImagenesDT, ImagenDT } from './services/imagenesDT';
+// FASE F: 🛣️ km A→B calculados solos para los viajes con ambos pines
+import { calcularRutaAB } from './services/rutaAB';
 // FASE A2: el tema viene del TRABAJO — mismo toggle para toda la app
 import { useTema } from '../theme/useTema';
 import {
@@ -136,6 +139,8 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
   const hoy = fechaHoy();
   const resumenHoy = useMemo(() => resumenDia(viajes, hoy), [viajes, hoy]);
   const delDia = useMemo(() => viajes.filter(v => v.fecha === hoy), [viajes, hoy]);
+  // FASE F: ✓ cuántas entregas del día ya están completadas
+  const viajesEntregados = useMemo(() => delDia.filter(v => v.entregado === true).length, [delDia]);
   // F-ID6: lo que quedó EN MANO hoy (neto de viajes − gastos anotados)
   const gastosHoy = useMemo(() => totalGastosDia(gastos, hoy), [gastos, hoy]);
   const enManoHoy = resumenHoy.neto - gastosHoy;
@@ -204,6 +209,52 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     setUltimoAgregadoId(v.id);
     vibrar(120);
   }
+
+  // FASE F: ✓ ENTREGA COMPLETADA — marca/desmarca con la hora en que
+  // la hiciste. Viaja al otro cel por el sync de siempre (viajesParaNube
+  // pasa el objeto completo) y alimenta el contador "X de Y" del día.
+  function toggleEntregado(id: string) {
+    setViajes(prev =>
+      prev.map(v =>
+        v.id === id
+          ? v.entregado
+            ? { ...v, entregado: false, entregadoHora: undefined }
+            : { ...v, entregado: true, entregadoHora: horaAhora() }
+          : v,
+      ),
+    );
+  }
+
+  // FASE F: 🛣️ los km A→B se calculan SOLOS — apenas aceptás un viaje
+  // con los DOS pines (o cuando llega del otro cel sin el número),
+  // Google mide la ruta por calles; sin internet queda el estimado
+  // de la recta ×1.35 y a la próxima se refina. El número queda
+  // PERSISTIDO en el viaje (viaja en el sync, sobrevive recargas).
+  useEffect(() => {
+    const pendientes = viajes.filter(
+      v => v.coordenadasA && v.coordenadas && v.kmEstimado == null,
+    );
+    if (pendientes.length === 0) return;
+    let cancelado = false;
+    (async () => {
+      for (const v of pendientes) {
+        const r = await calcularRutaAB(v.coordenadasA, v.coordenadas);
+        if (cancelado || !r) continue;
+        // actualización por id (funcional) — nunca pisa cambios
+        // concurrentes (GPS, entregado, borrados…)
+        setViajes(prev =>
+          prev.map(x =>
+            x.id === v.id && x.kmEstimado == null
+              ? { ...x, kmEstimado: r.km, minEstimados: r.min }
+              : x,
+          ),
+        );
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [viajes]);
 
   // FASE C: agregarGasto/eliminarGasto se mudaron a PanelCajaDT (la
   // Caja de inDrive vive ahora en el 💰 Caja del día del panel general).
@@ -633,6 +684,35 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
             mostrarToast('Pegá tu key de IA en inDrive → 🤖 Escáner — Gemini gratis, 1 minuto');
           }}
         />
+
+        {/* FASE F: ✓ contador de entregas del día — cuántas hiciste y
+            cuántas te faltan (se marca con el botón ✓ de cada viaje) */}
+        {delDia.length > 0 && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2"
+            data-testid="chip-entregas-hoy"
+          >
+            <p className="flex items-baseline gap-2 text-xs font-bold text-emerald-300">
+              ✓ Entregas de hoy
+              <span className="tabular-nums text-emerald-200">
+                {viajesEntregados} de {delDia.length}
+              </span>
+            </p>
+            <p className="text-[10px] font-semibold text-slate-400">
+              {viajesEntregados === delDia.length
+                ? '¡día completo! 🎉'
+                : `te faltan ${delDia.length - viajesEntregados}`}
+            </p>
+            {/* barrita de progreso — verde lleno sobre gris */}
+            <div className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-slate-700">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{ width: `${Math.round((viajesEntregados / delDia.length) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <ViajeList
           viajes={delDia}
           onEliminar={eliminarViaje}
@@ -647,6 +727,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           onPedirUbicacion={pedirUbicacion}
           tiposConImagen={Object.keys(imagenesDT)}
           destacadoId={ultimoAgregadoId}
+          onToggleEntregado={toggleEntregado}
         />
 
         {/* FASE C: cartelito para que no busqués con el viejo hábito —

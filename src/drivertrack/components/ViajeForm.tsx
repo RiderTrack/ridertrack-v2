@@ -38,6 +38,9 @@ import { fechaHoy, horaAhora } from '../storage';
 import { armarMensajeCobro, fmtSoles, linkLlamada, linkWhatsApp, normalizarCelular, vibrar } from '../utils';
 import { escanearDireccion } from '../services/escanerIA';
 import { abrirNavegacion, tieneDestino, DestinoNav } from '../services/navegacion';
+// FASE F: km A→B calculados solos (Google por calles / recta de respaldo)
+import { calcularRutaAB, claveAB, RutaAB } from '../services/rutaAB';
+import IconoWhatsApp from './IconoWhatsApp';
 import UbicarModal from './UbicarModal';
 import NavegarMenu from './NavegarMenu';
 
@@ -165,6 +168,10 @@ export default function ViajeForm({
     borradorInicial?.coordenadasA ?? null,
   );
   const [ubicarAAbierto, setUbicarAAbierto] = useState(false);
+  // FASE F: 🛣️ km y minutos A→B calculados SOLOS mientras cargás el
+  // viaje — con la clave de los pines que lo calcularon (para no
+  // guardar un número viejo si movés un pin a último momento)
+  const [rutaEstimada, setRutaEstimada] = useState<(RutaAB & { clave: string }) | null>(null);
   // F-ID3.3: mini-selector Waze/Google (cuando la preferencia es 'preguntar')
   const [navAbierto, setNavAbierto] = useState(false);
   // FASE C: mini-selector para navegar al RECOJO (A) o a un recién agregado
@@ -220,6 +227,27 @@ export default function ViajeForm({
     const c = +(t * (p / 100)).toFixed(2);
     return { comision: c, neto: +(t - c).toFixed(2) };
   }, [tarifa, comisionPct]);
+
+  // FASE F: 🛣️ con los DOS pines puestos, los km y minutos A→B se
+  // calculan SOLOS (Google por calles, o recta de respaldo sin
+  // internet) — mismo número que va a quedar guardado en el viaje.
+  // Con un pequeño debounce para no pedir mientras arrastrás el pin.
+  useEffect(() => {
+    if (!coordenadas || !coordenadasA) {
+      setRutaEstimada(null);
+      return;
+    }
+    const clave = claveAB(coordenadasA, coordenadas);
+    let cancelado = false;
+    const t = window.setTimeout(async () => {
+      const r = await calcularRutaAB(coordenadasA, coordenadas);
+      if (!cancelado && r) setRutaEstimada({ ...r, clave });
+    }, 350);
+    return () => {
+      cancelado = true;
+      window.clearTimeout(t);
+    };
+  }, [coordenadas, coordenadasA]);
 
   const puedeEnviar = parseFloat(tarifa) > 0;
 
@@ -373,6 +401,15 @@ export default function ViajeForm({
     window.open(linkLlamada(crudo), '_self');
   }
 
+  // FASE F: 💬 abrir el WhatsApp de un número SIN mensaje — chat
+  // vacío, para escribirle a mano (al que ENVÍA o al que RECIBE)
+  function escribirWhatsApp(crudo: string) {
+    const num = normalizarCelular(crudo.trim());
+    if (!num) return;
+    window.open(`https://wa.me/${num}`, '_blank');
+    vibrar(40);
+  }
+
   // F-ID3.3: 🧭 abre Waze/Google Maps hacia la entrega. Si no hay
   // preferencia guardada ('preguntar'), muestra el mini-selector.
   // Escaneaste el pedido → Navegar → manejá (y grabá tus km 📍).
@@ -420,6 +457,11 @@ export default function ViajeForm({
       duracionSeg: 0,  // F-ID3: ídem
       ...(coordenadas ? { coordenadas } : {}), // F-ID3.2: pin de la entrega (B)
       ...(coordenadasA ? { coordenadasA } : {}), // FASE E: pin del recojo (A)
+      // FASE F: 🛣️ km/min A→B — solo si el cálculo corresponde a ESTOS
+      // pines (si moviste uno a último momento, el shell lo recalcula)
+      ...(rutaEstimada && coordenadas && coordenadasA && rutaEstimada.clave === claveAB(coordenadasA, coordenadas)
+        ? { kmEstimado: rutaEstimada.km, minEstimados: rutaEstimada.min }
+        : {}),
       tarifa: t,
       comisionPct: p,
       comision: c,
@@ -727,6 +769,28 @@ export default function ViajeForm({
         </div>
       )}
 
+      {/* FASE F: 🛣️ km A→B calculados solos — aparece cuando están los
+          DOS pines. Google por calles cuando hay internet; si no, el
+          estimado de la recta ×1.35 (mismo que el trabajo antes). */}
+      {rutaEstimada && coordenadas && coordenadasA && (
+        <div
+          className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-bold text-indigo-300"
+          data-testid="chip-km-ab"
+          title={
+            rutaEstimada.fuente === 'google'
+              ? 'Km y minutos reales por calles (Google) — se guardan solos en el viaje'
+              : 'Estimado por distancia recta ×1.35 (sin conexión con Google) — cuando haya internet se afina'
+          }
+        >
+          <span className="truncate">
+            🛣️ A → B: ~{rutaEstimada.km.toFixed(1)} km · ~{rutaEstimada.min} min
+          </span>
+          <span className="shrink-0 text-[9px] font-medium text-indigo-400/80">
+            {rutaEstimada.fuente === 'google' ? 'por calles' : 'estimado'}
+          </span>
+        </div>
+      )}
+
       {/* F-ID3.3: 🧭 viajar hasta la entrega con Waze o Google Maps —
           aparece cuando hay dirección (escaneada o escrita) o pin.
           Así la app no solo CUENTA los km: también te LLEVA. */}
@@ -767,6 +831,17 @@ export default function ViajeForm({
           >
             <Phone size={16} />
           </button>
+          {/* FASE F: 💬 WhatsApp manual (chat vacío) — para escribirle a mano */}
+          <button
+            onClick={() => escribirWhatsApp(celularEnvia)}
+            disabled={escaneando || !celularEnvia.trim()}
+            className="flex shrink-0 items-center rounded-xl bg-[#25D366]/20 px-2.5 text-[#25D366] transition-all active:scale-[0.98] disabled:opacity-40"
+            title="Escribirle por WhatsApp a quien ENVÍA (chat vacío, escribís vos)"
+            aria-label="WhatsApp a quien envía"
+            data-testid="boton-wa-envia"
+          >
+            <IconoWhatsApp size={16} />
+          </button>
         </div>
         <div className="flex min-w-0 gap-1">
           <input
@@ -786,6 +861,17 @@ export default function ViajeForm({
             data-testid="boton-llamar-recibe"
           >
             <Phone size={16} />
+          </button>
+          {/* FASE F: 💬 WhatsApp manual (chat vacío) — para escribirle a mano */}
+          <button
+            onClick={() => escribirWhatsApp(celularRecibe)}
+            disabled={escaneando || !celularRecibe.trim()}
+            className="flex shrink-0 items-center rounded-xl bg-[#25D366]/20 px-2.5 text-[#25D366] transition-all active:scale-[0.98] disabled:opacity-40"
+            title="Escribirle por WhatsApp a quien RECIBE (chat vacío, escribís vos)"
+            aria-label="WhatsApp a quien recibe"
+            data-testid="boton-wa-recibe"
+          >
+            <IconoWhatsApp size={16} />
           </button>
         </div>
       </div>

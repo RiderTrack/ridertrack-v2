@@ -27,6 +27,9 @@ import { fmtSoles } from '../utils';
 import { formatearDuracion } from '../services/gps';
 import type { EstadoGPS } from '../services/gps';
 import { agregarTiles, EstiloMapa, guardarEstilo, leerEstilo, ORDEN_ESTILOS, TILES } from '../services/tiles';
+// FASE F: 🛣️ la línea de recorrido A→B se dibuja siguiendo las
+// CALLES (Google Directions) — igual que la del mapa del trabajo
+import { calcularRutaAB, RutaAB } from '../services/rutaAB';
 
 interface Props {
   viajes: Viaje[]; // TODOS los viajes (acá se filtra por día)
@@ -134,6 +137,18 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
     () => delDia.filter(v => v.coordenadasA && v.coordenadasA.lat !== v.coordenadas?.lat),
     [delDia],
   );
+  // FASE F: viajes con los DOS pines y sin ruta GPS grabada → les
+  // dibujamos la LÍNEA DE RECORRIDO A→B (por calles, como el trabajo)
+  const conAB = useMemo(
+    () => delDia.filter(v => v.coordenadasA && v.coordenadas && (!v.ruta || v.ruta.length < 2)),
+    [delDia],
+  );
+  // FASE F: geometría por calles de cada línea A→B (se trae async con
+  // caché — mientras tanto se dibuja la recta). El bump de estado
+  // redibuja el mapa cuando llega la geometría real.
+  const rutasABRef = useRef<Record<string, RutaAB | null | undefined>>({});
+  const abEnCursoRef = useRef<Set<string>>(new Set());
+  const [abTick, setAbTick] = useState(0);
 
   const kmTotal = delDia.reduce((s, v) => s + (v.kmGPS ?? 0), 0);
   const segTotal = delDia.reduce((s, v) => s + (v.duracionSeg ?? 0), 0);
@@ -267,9 +282,53 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
       bounds.extend([v.coordenadasA!.lat, v.coordenadasA!.lng]);
     }
 
+    // FASE F: 🛣️ LÍNEA DE RECORRIDO A→B — igual que la del mapa del
+    // trabajo: punteada animada y siguiendo las CALLES cuando Google
+    // contesta (geometría async con caché). Mientras llega (o sin
+    // internet), se ve la recta A→B con los km estimados igual.
+    for (const v of conAB) {
+      const A = v.coordenadasA!, B = v.coordenadas!;
+      const yaBuscada = v.id in rutasABRef.current;
+      const r = rutasABRef.current[v.id] ?? null;
+      if (!yaBuscada && !abEnCursoRef.current.has(v.id)) {
+        abEnCursoRef.current.add(v.id);
+        calcularRutaAB(A, B)
+          .then(res => {
+            rutasABRef.current[v.id] = res; // null = se queda la recta
+          })
+          .catch(() => {
+            rutasABRef.current[v.id] = null;
+          })
+          .finally(() => {
+            abEnCursoRef.current.delete(v.id);
+            setAbTick(t => t + 1);
+          });
+      }
+      const puntos: Array<[number, number]> = r?.puntos?.length
+        ? r.puntos.map(p => [p.lat, p.lng])
+        : [[A.lat, A.lng], [B.lat, B.lng]];
+      const km = r?.km ?? v.kmEstimado ?? 0;
+      const min = r?.min ?? v.minEstimados ?? 0;
+      L.polyline(puntos, {
+        color: '#6366f1', // índigo — el mismo color de la ruta del trabajo
+        weight: 3.5,
+        dashArray: '6 9',
+        opacity: 0.9,
+        className: 'dtmap-ruta',
+      })
+        .bindPopup(
+          `<div style="font-weight:800;font-size:13px;margin-bottom:2px">🛣️ A → B · ${esc(v.cliente || 'Cliente')}</div>` +
+            `<div style="font-size:11px;color:#94a3b8">${esc(nombreOrigen(v.origen))} · ${fmtSoles(v.tarifa)}</div>` +
+            `<div style="font-size:11px;color:#94a3b8">🛣️ ~${km.toFixed(1)} km · ~${min} min${r?.fuente === 'google' ? '' : ' (estimado)'}</div>`,
+          { className: 'dtmap-popup' },
+        )
+        .addTo(capa);
+      bounds.extend(puntos);
+    }
+
     if (bounds.isValid()) mapa.fitBounds(bounds.pad(0.15));
     setTimeout(() => mapa.invalidateSize(), 60); // el div aparece después del mount
-  }, [conRuta, conCoordenadas, conCoordenadasA, estilo]);
+  }, [conRuta, conCoordenadas, conCoordenadasA, conAB, abTick, estilo]);
 
   // ── F-ID3.2: SEGUIMIENTO EN VIVO — la línea que se dibuja
   //    mientras manejás + el motito con tu posición ──────────
@@ -441,7 +500,7 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
         </button>
 
         {/* Leyenda flotante DENTRO del mapa (estilo RiderTrack) */}
-        {(conRuta.length > 0 || grabando) && (
+        {(conRuta.length > 0 || conAB.length > 0 || grabando) && (
           <div
             className="absolute left-2 top-2 z-[500] flex flex-col gap-1 rounded-xl border border-slate-700 bg-slate-900/80 px-2.5 py-2 text-[10px] font-bold text-slate-300 backdrop-blur-md"
             data-testid="mapa-leyenda"
@@ -477,6 +536,16 @@ export default function MapView({ viajes, estadoGPS = null }: Props) {
                   <span className="h-2.5 w-2.5 rounded-full border border-white/60 bg-rose-500" /> llegada
                 </span>
               </>
+            )}
+            {/* FASE F: la línea de recorrido A→B (índigo, como el trabajo) */}
+            {conAB.length > 0 && (
+              <span className="flex items-center gap-1.5 text-indigo-300">
+                <span
+                  className="h-2.5 w-2.5 rounded-full border border-white/60"
+                  style={{ background: '#6366f1' }}
+                />
+                recorrido A→B
+              </span>
             )}
           </div>
         )}

@@ -17,12 +17,14 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useEffect, useState } from 'react';
-import { Bot, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
-import { fmtSoles, linkLlamada, vibrar } from '../utils';
+import { fmtSoles, linkLlamada, normalizarCelular, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
 import { abrirNavegacion, tieneDestino } from '../services/navegacion';
 import NavegarMenu from './NavegarMenu';
+// FASE F: el glifo real de WhatsApp para los botones de escribir a mano
+import IconoWhatsApp from './IconoWhatsApp';
 // FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
 import RobotMenu from './RobotMenu';
 
@@ -75,6 +77,8 @@ interface Props {
   /** FASE C.2: id del viaje recién agregado — se resalta (✨ NUEVO)
    *  y la lista se desliza hasta él para verlo completo con sus botones */
   destacadoId?: string | null;
+  /** FASE F: ✓ marcar/desmarcar la ENTREGA COMPLETADA de un viaje */
+  onToggleEntregado?: (id: string) => void;
 }
 
 export default function ViajeList({
@@ -91,6 +95,7 @@ export default function ViajeList({
   onPedirUbicacion,
   tiposConImagen,
   destacadoId,
+  onToggleEntregado,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // F-ID3.3: qué viaje tiene abierto el mini-selector Waze/Google
@@ -129,6 +134,15 @@ export default function ViajeList({
     if (!abrirNavegacion(destino)) setNavViajeId(v.id);
   }
 
+  /** FASE F: 💬 abrir el WhatsApp de un número SIN mensaje pre-cargado
+   *  — chat vacío para escribirle a mano (como pidió Rudy) */
+  function escribirWhatsApp(crudo: string) {
+    const num = normalizarCelular(crudo.trim());
+    if (!num) return;
+    window.open(`https://wa.me/${num}`, '_blank');
+    vibrar(40);
+  }
+
   /** FASE C: 🧭 navegar al RECOJO (dirección A) de este viaje */
   const [navAViajeId, setNavAViajeId] = useState<string | null>(null);
   function navegarViajeA(v: Viaje) {
@@ -162,6 +176,9 @@ export default function ViajeList({
         const telCobro = telEnvia || telRecibe; // cobro/aviso por defecto
         const dosNumeros = telEnvia && telRecibe && telEnvia !== telRecibe;
         const esNuevo = destacadoId === v.id;
+        // FASE F: ✓ entrega completada — la tarjeta se pinta de verde
+        // suave y el horario queda guardado (para saber cuántos faltan)
+        const yaEntregado = v.entregado === true;
         return (
         <div
           key={v.id}
@@ -169,9 +186,12 @@ export default function ViajeList({
           className={`flex items-center gap-3 rounded-xl border bg-slate-800/60 p-3 scroll-mt-24 ${
             esNuevo
               ? 'border-emerald-500/70 ring-2 ring-emerald-500/40'
-              : 'border-slate-700'
+              : yaEntregado
+                ? 'border-emerald-500/50 bg-emerald-500/[0.06]'
+                : 'border-slate-700'
           }`}
           data-testid="tarjeta-viaje"
+          data-entregado={yaEntregado ? 'si' : 'no'}
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -184,6 +204,16 @@ export default function ViajeList({
                   data-testid="badge-nuevo"
                 >
                   ✨ Nuevo
+                </span>
+              )}
+              {/* FASE F: ✓ entrega completada — a qué hora quedó entregado */}
+              {yaEntregado && (
+                <span
+                  className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-300"
+                  data-testid="badge-entregado"
+                  title={v.entregadoHora ? `Marcado entregado a las ${v.entregadoHora}` : 'Entrega completada'}
+                >
+                  ✓ Entregado{v.entregadoHora ? ` ${v.entregadoHora}` : ''}
                 </span>
               )}
               <span className="text-xs font-semibold text-emerald-300">{nombreOrigen(v.origen)}</span>
@@ -277,6 +307,17 @@ export default function ViajeList({
                 📍 {v.kmGPS.toFixed(1)} km reales · {formatearDuracion(v.duracionSeg)}
               </p>
             )}
+            {/* FASE F: 🛣️ km A→B calculados solos — se muestran mientras
+                no tengas los km reales del GPS grabado */}
+            {v.kmGPS === 0 && v.kmEstimado != null && v.kmEstimado > 0 && (
+              <p
+                className="mt-1 truncate text-[10px] font-semibold leading-snug text-indigo-300/80"
+                data-testid="km-estimado-viaje"
+                title="Distancia A → B calculada con los pines del mapa (Google por calles, o estimado sin conexión)"
+              >
+                🛣️ A→B ~{v.kmEstimado.toFixed(1)} km{v.minEstimados ? ` · ~${v.minEstimados} min` : ''}
+              </p>
+            )}
             {v.notas && (
               <p className="mt-1 truncate text-[10px] leading-snug text-slate-500" title={v.notas}>
                 📝 {v.notas.split('\n')[0]}
@@ -285,9 +326,35 @@ export default function ViajeList({
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1">
-            {/* F-ID3: 📍 grabar los km GPS de ESTE viaje + F-ID3.3:
-                🧭 viajar a la entrega con Waze / Google Maps */}
-            <div className="flex items-center gap-1">
+            {/* FASE F: ✓ ENTREGA COMPLETADA — un toque y queda marcado con
+                la hora; el contador del día suma. Tocá de nuevo para
+                desmarcar (por si se apretó sin querer). */}
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
+              {onToggleEntregado && (
+                <button
+                  onClick={() => {
+                    onToggleEntregado(v.id);
+                    vibrar(yaEntregado ? 30 : 90);
+                  }}
+                  className={`flex flex-col items-center rounded-lg p-2 transition-all active:scale-95 ${
+                    yaEntregado
+                      ? 'bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/60'
+                      : 'bg-slate-700/40 text-slate-300 hover:bg-emerald-500/15 hover:text-emerald-300'
+                  }`}
+                  aria-label={yaEntregado ? 'Desmarcar entrega' : 'Marcar entrega completada'}
+                  title={
+                    yaEntregado
+                      ? `✓ Entregado${v.entregadoHora ? ` a las ${v.entregadoHora}` : ''} — tocá para DESMARCAR`
+                      : 'Marcar como ENTREGADO — queda con la hora y el contador del día'
+                  }
+                  data-testid="boton-entregado"
+                >
+                  <CheckCircle2 size={16} fill={yaEntregado ? 'currentColor' : 'none'} />
+                  <span className="text-[8px] font-black leading-none">
+                    {yaEntregado ? v.entregadoHora ?? '✓' : 'Entrega'}
+                  </span>
+                </button>
+              )}
               {viajeGPSActivo === v.id && onDetenerGPS ? (
                 <button
                   onClick={onDetenerGPS}
@@ -336,9 +403,12 @@ export default function ViajeList({
               )}
             </div>
             {/* FASE C.2: 📞 llamar — un botón por teléfono: A (quien
-                envía / el cliente) y B (quien recibe) cuando son dos */}
+                envía / el cliente) y B (quien recibe) cuando son dos.
+                FASE F: + 💬 WhatsApp manual de cada uno → en celus
+                angostos la fila se WRAPea sola (mejor dos filas de
+                botones que un texto aplastado). */}
             {telCobro && (
-              <div className="flex items-center gap-1">
+              <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
                 {telEnvia && (
                   <button
                     onClick={() => window.open(linkLlamada(telEnvia), '_self')}
@@ -351,6 +421,20 @@ export default function ViajeList({
                     {dosNumeros && <span className="text-[8px] font-black leading-none">A</span>}
                   </button>
                 )}
+                {/* FASE F: 💬 WhatsApp manual a quien ENVÍA (A) — chat
+                    vacío, escribís vos lo que quieras */}
+                {telEnvia && (
+                  <button
+                    onClick={() => escribirWhatsApp(telEnvia)}
+                    className="flex flex-col items-center rounded-lg bg-[#25D366]/15 p-2 text-[#25D366] transition-colors hover:bg-[#25D366]/25"
+                    aria-label={dosNumeros ? 'WhatsApp a quien envía (A)' : 'WhatsApp al cliente'}
+                    title={dosNumeros ? 'Escribirle por WhatsApp a quien ENVÍA (A) — chat vacío' : 'Escribirle por WhatsApp al cliente — chat vacío'}
+                    data-testid="boton-wa-a"
+                  >
+                    <IconoWhatsApp size={15} />
+                    {dosNumeros && <span className="text-[8px] font-black leading-none">A</span>}
+                  </button>
+                )}
                 {telRecibe && dosNumeros && (
                   <button
                     onClick={() => window.open(linkLlamada(telRecibe), '_self')}
@@ -360,6 +444,19 @@ export default function ViajeList({
                     data-testid="boton-llamar-recibe-lista"
                   >
                     <Phone size={15} />
+                    <span className="text-[8px] font-black leading-none">B</span>
+                  </button>
+                )}
+                {/* FASE F: 💬 WhatsApp manual a quien RECIBE (B) */}
+                {telRecibe && dosNumeros && (
+                  <button
+                    onClick={() => escribirWhatsApp(telRecibe)}
+                    className="flex flex-col items-center rounded-lg bg-[#25D366]/15 p-2 text-[#25D366] transition-colors hover:bg-[#25D366]/25"
+                    aria-label="WhatsApp a quien recibe (B)"
+                    title="Escribirle por WhatsApp a quien RECIBE (B) — chat vacío"
+                    data-testid="boton-wa-b"
+                  >
+                    <IconoWhatsApp size={15} />
                     <span className="text-[8px] font-black leading-none">B</span>
                   </button>
                 )}
