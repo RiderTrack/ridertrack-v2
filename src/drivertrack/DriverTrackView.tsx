@@ -94,6 +94,9 @@ interface PropsDTView {
 
 export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: PropsDTView) {
   const [viajes, setViajes] = useState<Viaje[]>(() => cargarViajes());
+  // FASE C.2: id del último viaje aceptado — ViajeList lo resalta y
+  // hace scroll hasta su tarjeta completa
+  const [ultimoAgregadoId, setUltimoAgregadoId] = useState<string | null>(null);
   // F-ID6: 💸 gastos del día (recargas, gasolina…) — se descuentan del
   // neto para mostrar lo que queda EN MANO. Viven igual que los viajes:
   // en el teléfono, y entran en el backup.
@@ -188,6 +191,9 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: Pro
 
   function agregarViaje(v: Viaje) {
     setViajes(prev => [...prev, v]);
+    // FASE C.2: la lista resalta el viaje recién aceptado (✨ Nuevo)
+    // y se desliza solita hasta su tarjeta completa
+    setUltimoAgregadoId(v.id);
     vibrar(120);
   }
 
@@ -592,9 +598,6 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: Pro
           onGuardarMiYape={guardarMiYape}
           onMandarCobro={mandarCobro}
           cobroEnCurso={cobroEnCurso}
-          onMandarAviso={mandarAviso}
-          onPedirUbicacion={pedirUbicacion}
-          tiposConImagen={Object.keys(imagenesDT)}
           onNecesitaKey={() => {
             // FASE C: los Ajustes de inDrive viven en la Configuración
             // del panel general → te mando ahí
@@ -615,6 +618,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes }: Pro
           onMandarAviso={mandarAviso}
           onPedirUbicacion={pedirUbicacion}
           tiposConImagen={Object.keys(imagenesDT)}
+          destacadoId={ultimoAgregadoId}
         />
 
         {/* FASE C: cartelito para que no busqués con el viejo hábito —

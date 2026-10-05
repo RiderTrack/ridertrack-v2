@@ -73,8 +73,29 @@ function configParaNube(c: ConfigDT): Partial<ConfigDT> {
 }
 
 function viajesParaNube(v: Viaje[]): Viaje[] {
-  // sin rutas GPS (pesan) y solo los últimos MAX — los km/duración sí viajan
-  return v.slice(-MAX_VIAJES_SYNC).map(x => ({ ...x, ruta: undefined }));
+  // Sin rutas GPS (pesan) y solo los últimos MAX — los km/duración SÍ viajan.
+  // ⚠️ La clave ruta se ELIMINA (destructuring), NO se pone en undefined:
+  // un campo undefined hace que el SDK de Firestore rechaze el documento
+  // ENTERO con invalid-argument (mismo bug que la FASE B2.1 en el robot).
+  return v.slice(-MAX_VIAJES_SYNC).map(({ ruta: _ruta, ...x }) => x as Viaje);
+}
+
+/**
+ * ⚠️ Cinturón de seguridad: elimina RECURSIVAMENTE cualquier campo
+ * undefined del payload (el SDK de Firestore v10 sin
+ * ignoreUndefinedProperties rechaza el doc entero si encuentra uno —
+ * bug de la FASE B2.1 que acá se colaba por `ruta: undefined`).
+ */
+function limpiarUndefined<T>(valor: T): T {
+  if (Array.isArray(valor)) return valor.map(x => limpiarUndefined(x)) as unknown as T;
+  if (valor && typeof valor === 'object') {
+    const limpio: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) {
+      if (v !== undefined) limpio[k] = limpiarUndefined(v);
+    }
+    return limpio as T;
+  }
+  return valor;
 }
 
 async function empujar() {
@@ -87,14 +108,17 @@ async function empujar() {
     const viajes = viajesParaNube(JSON.parse(localStorage.getItem('dt_viajes_v1') || '[]') as Viaje[]);
     const gastos = JSON.parse(localStorage.getItem('dt_gastos_v1') || '[]') as Gasto[];
     const config = configParaNube(cargarConfig());
-    await setDoc(doc(db, 'dt_sync', uidActual), {
-      viajes,
-      gastos,
-      config,
-      actualizadoEn,
-      dispositivo: DISPOSITIVO,
-      origen: 'ridertrack-v2',
-    });
+    await setDoc(
+      doc(db, 'dt_sync', uidActual),
+      limpiarUndefined({
+        viajes,
+        gastos,
+        config,
+        actualizadoEn,
+        dispositivo: DISPOSITIVO,
+        origen: 'ridertrack-v2',
+      }),
+    );
     localStorage.setItem(K_SYNC_EN, String(actualizadoEn));
     notificar('sincronizado');
   } catch (e) {

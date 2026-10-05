@@ -3,21 +3,28 @@
 ═════════════════════════════════════════════════════════
 
 QUÉ HAY DE NUEVO (vs la FASE B que ya instalaste):
-  • El parche ahora también manda IMÁGENES en los avisos
-    (la imagen que subís desde la app en Ajustes → 🖼️
-    Imágenes del robot).
-  • Nuevo aviso "Llegando en X minutos" (elegís 5/10/15/20
-    o los que quieras desde el menú 🤖 del viaje).
-  • FASE C: actualizar_reglas.js v3.1 ahora TAMBIÉN agrega la
-    colección dt_sync — es la que hace que tus viajes, gastos
-    y ajustes de inDrive se vean en CUALQUIER cel con tu
-    misma cuenta de RiderTrack. Si ya corriste la versión
-    anterior, esta solo agrega lo que falta (idempotente).
-  • v3.1 FIX: la v3 fallaba al publicar con "Error 404" (usaba
-    PUT, que esta API no tiene) y su plan B crasheaba con
-    "projectId is not defined". Ya está arreglado — si algo
-    falla, ahora te deja reglas-nuevas-completas.txt listo
-    para pegar en la consola.
+  • FASE C.2 (APP v0.9.1 — instalá el APK nuevo):
+    - El formulario de arriba queda listo para llenar y el botón
+      ahora dice "✓ Aceptar viaje" — al aceptarlo, el viaje aparece
+      ABAJO como tarjeta completa (direcciones A→B, teléfonos y
+      todos los botones) con cartel ✨ Nuevo y la pantalla se baja
+      solita hasta él.
+    - SOLO DOS teléfonos: 📤 quien ENVÍA y 📥 quien RECIBE (cada uno
+      con su botoncito 📞 al lado). El viejo "celular del cliente"
+      desapareció — el que envía ES el cliente.
+    - En la lista podés llamar a los DOS: 📞A (quien envía) y
+      📞B (quien recibe). Antes solo se podía llamar al cliente.
+    - El menú 🤖 ahora te pregunta entre 2 nada más: Envía · Recibe.
+    - Fix del sync de la nube: había un campo inválido que hacía
+      que NUNCA subiera (aunque las reglas estuvieran publicadas).
+  • FASE C: actualizar_reglas.js v3.2 agrega la colección dt_sync —
+    es la que hace que tus viajes, gastos y ajustes de inDrive se
+    vean en CUALQUIER cel con tu misma cuenta de RiderTrack.
+  • v3.2 FIX: la v3.1 fallaba al publicar con "Error 400" (mandaba
+    el cuerpo del PATCH en formato plano — ahora va ENVUELTO como
+    el CLI oficial de Firebase) y la v3 crasheaba con "projectId
+    is not defined". Si algo falla, te deja reglas-nuevas-
+    completas.txt listo para pegar en la consola.
 
 ═════════════════════════════════════════════════════════
 INSTALACIÓN (5 pasos, 2 minutos)
@@ -27,7 +34,7 @@ INSTALACIÓN (5 pasos, 2 minutos)
     (~/bot-whatsapp, donde está index.js):
 
       drivertrack_bot.js      ← parche v1.1 (reemplaza el viejo)
-      actualizar_reglas.js    ← reglas v3.1 (agrega dt_sync + fix del 404)
+      actualizar_reglas.js    ← reglas v3.2 (dt_sync + FIX del 400 del PATCH)
       instalar_drivertrack.js ← instalador (mismo de siempre)
 
     (si descomprimís el zip adentro de ~/bot-whatsapp, fijate
@@ -52,10 +59,9 @@ INSTALACIÓN (5 pasos, 2 minutos)
 ═════════════════════════════════════════════════════════
 APK
 ═════════════════════════════════════════════════════════
- Instalá el APK v0.9.0 (GitHub Actions lo compila solo al
- hacer push). Sin APK nuevo no vas a ver la dirección A/B,
- los teléfonos de envía/recibe, las plantillas editables ni
- el panel de libre en Stats/Caja/Mapa del trabajo.
+ Instalá el APK v0.9.1 (GitHub Actions lo compila solo al
+ hacer push). Sin APK nuevo no vas a ver el formulario con
+ Aceptar, los 2 teléfonos ni las llamadas A/B.
 
 ═════════════════════════════════════════════════════════
 PRUEBA COMPLETA (2 minutos)

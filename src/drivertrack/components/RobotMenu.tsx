@@ -86,16 +86,18 @@ export default function RobotMenu({
   const quien = viaje.cliente.trim() || 'el cliente';
   const conImagen = (t: string) => tiposConImagen?.includes(t) ?? false;
 
-  // ── FASE C: ¿a quién le mandamos el aviso? Si el viaje tiene los
-  // teléfonos de quien ENVÍA / quien RECIBE, aparecen como opciones;
-  // si no, se comporta como siempre (el cliente del viaje).
+  // ── FASE C.2: ¿a quién le mandamos el aviso? SOLO DOS opciones:
+  // quien ENVÍA (el celular viejo del cliente cuenta como quien
+  // envía) y quien RECIBE. Si hay uno solo (o son el mismo número),
+  // ni se pregunta — va directo.
+  const telEnvia = (viaje.celularEnvia ?? '').trim() || viaje.celular.trim();
+  const telRecibe = (viaje.celularRecibe ?? '').trim();
   const telefonos = [
-    { label: 'Cliente', num: viaje.celular.trim() },
-    { label: 'Envía 📤', num: (viaje.celularEnvia ?? '').trim() },
-    { label: 'Recibe 📥', num: (viaje.celularRecibe ?? '').trim() },
-  ].filter(t => t.num.length > 0);
+    { label: 'Envía 📤', num: telEnvia },
+    { label: 'Recibe 📥', num: telRecibe },
+  ].filter(t => t.num.length > 0 && t.num !== (t.label === 'Recibe 📥' ? telEnvia : telRecibe));
   const [telIdx, setTelIdx] = useState(0);
-  const telElegido = telefonos[telIdx]?.num ?? viaje.celular.trim();
+  const telElegido = telefonos[telIdx]?.num ?? telEnvia;
 
   function elegir(tipo: TipoAviso) {
     if (tipo === 'llegando') {
@@ -142,8 +144,8 @@ export default function RobotMenu({
           </button>
         </div>
 
-        {/* FASE C: ¿a quién? — solo si el viaje tiene más de un teléfono
-            (cliente · quien envía · quien recibe) */}
+        {/* FASE C.2: ¿a quién? — Envía · Recibe (solo si el viaje tiene
+            los DOS teléfonos distintos) */}
         {telefonos.length > 1 && (
           <div className="mt-2.5" data-testid="robot-destinatarios">
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">¿A quién le aviso?</p>
@@ -212,9 +214,11 @@ export default function RobotMenu({
               </button>
               <button
                 onClick={() => {
+                  // FASE C.2: el cobro le va al que ENVÍA por defecto (o
+                  // al que recibe si es el único teléfono del viaje)
                   onCobrar(
                     { cliente: viaje.cliente, monto: viaje.tarifa, direccion: viaje.direccion },
-                    viaje.celular,
+                    telEnvia || telRecibe,
                   );
                   onCerrar();
                 }}

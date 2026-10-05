@@ -834,7 +834,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.9.0 (FASE C — plantillas editables + sync nube + panel unificado) · Lima, PE
+        DriverTrack v0.9.1 (FASE C.2 — formulario con Aceptar · 2 teléfonos · llamadas A/B) · Lima, PE
       </p>
     </div>
   );

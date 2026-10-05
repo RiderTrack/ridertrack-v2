@@ -32,7 +32,7 @@
 //        📞 LLAMAR — botón junto a Cobrar que abre el marcador.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
-import { Bot, Camera, Check, ChevronDown, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, Plus, X, Zap } from 'lucide-react';
+import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, X, Zap } from 'lucide-react';
 import { ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
 import { armarMensajeCobro, fmtSoles, linkLlamada, linkWhatsApp, normalizarCelular, vibrar } from '../utils';
@@ -40,9 +40,6 @@ import { escanearDireccion } from '../services/escanerIA';
 import { abrirNavegacion, tieneDestino, DestinoNav } from '../services/navegacion';
 import UbicarModal from './UbicarModal';
 import NavegarMenu from './NavegarMenu';
-// FASE C: el robot (avisos 🛣️⏱️🏁✅📍) también desde los recién agregados
-import RobotMenu from './RobotMenu';
-import { TipoAviso } from '../services/robotBot';
 
 // ── F-ID3.2: el BORRADOR del formulario (vive en localStorage) ──
 interface BorradorViaje {
@@ -86,8 +83,10 @@ function leerBorrador(): BorradorViaje | null {
       zona: b.zona ?? '',
       direccion: b.direccion ?? '',
       dirA: b.dirA ?? '',
+      // FASE C.2: ya no hay campo "celular del cliente" aparte — el
+      // borrador viejo lo migra al de quien ENVÍA
       celular: b.celular ?? '',
-      celularEnvia: b.celularEnvia ?? '',
+      celularEnvia: b.celularEnvia ?? b.celular ?? '',
       celularRecibe: b.celularRecibe ?? '',
       yapeNombre: b.yapeNombre ?? '',
       yapeNumero: b.yapeNumero ?? '',
@@ -123,12 +122,6 @@ interface Props {
   // F-ID5: cobro compartido — robot automático si está activo, si no WhatsApp
   onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo (spinner)
-  // FASE C: avisos del robot desde los "recién agregados" (mismo menú 🤖
-  // de la lista) — opcionales para no romper los tests viejos
-  onMandarAviso?: (viaje: Viaje, tipo: TipoAviso, minutos?: number, telefono?: string) => Promise<void> | void;
-  onPedirUbicacion?: (viaje: Viaje, telefono?: string) => Promise<void> | void;
-  /** FASE B2 (pasa through): tipos de aviso con imagen subida */
-  tiposConImagen?: string[];
 }
 
 export default function ViajeForm({
@@ -138,9 +131,6 @@ export default function ViajeForm({
   onNecesitaKey,
   onMandarCobro,
   cobroEnCurso = false,
-  onMandarAviso,
-  onPedirUbicacion,
-  tiposConImagen,
 }: Props) {
   // F-ID3.2: el formulario arranca desde el BORRADOR guardado (si
   // había algo escrito/escaneado, NO se pierde al cambiar de pestaña)
@@ -154,7 +144,9 @@ export default function ViajeForm({
   const [zona, setZona] = useState(borradorInicial?.zona ?? '');
   const [direccion, setDireccion] = useState(borradorInicial?.direccion ?? ''); // F-ID2.5: campo propio (antes vivía en notas)
   const [dirA, setDirA] = useState(borradorInicial?.dirA ?? ''); // FASE C: dirección de RECOJO (A)
-  const [celular, setCelular] = useState(borradorInicial?.celular ?? '');   // F-ID2.5: WhatsApp del cliente
+  // FASE C.2: SOLO DOS teléfonos — quien ENVÍA (el cliente principal,
+  // a él le va el cobro) y quien RECIBE. El viejo "celular del cliente"
+  // se migró al de quien envía (arriba, en leerBorrador).
   const [celularEnvia, setCelularEnvia] = useState(borradorInicial?.celularEnvia ?? ''); // FASE C: quién envía
   const [celularRecibe, setCelularRecibe] = useState(borradorInicial?.celularRecibe ?? ''); // FASE C: quién recibe
   const [yapeNombre, setYapeNombre] = useState(borradorInicial?.yapeNombre ?? ''); // F-ID2.6: "Mk" en "Mk yape 980811297"
@@ -170,11 +162,10 @@ export default function ViajeForm({
   const [navAbierto, setNavAbierto] = useState(false);
   // FASE C: mini-selector para navegar al RECOJO (A) o a un recién agregado
   const [navObjetivo, setNavObjetivo] = useState<{ destino: DestinoNav; etiqueta: string } | null>(null);
-  // FASE C: los viajes recién agregados quedan a la vista con botones
-  // (robot · navegar A · navegar B) — "agregar más" ya no te hace perder
-  // de vista el viaje anterior
-  const [recientes, setRecientes] = useState<Viaje[]>([]);
-  const [robotRecienteId, setRobotRecienteId] = useState<string | null>(null);
+  // FASE C.2: el "celular" principal del viaje = el que ENVÍA (y si solo
+  // cargaste el que recibe, ese) — así el cobro y el robot siguen
+  // andando con la data de siempre
+  const celularPrincipal = celularEnvia.trim() || celularRecibe.trim();
 
   // ── F-ID2.7: TU Yape para cobrar (se guarda 1 vez, vive en config) ──
   const [miYapeNum, setMiYapeNum] = useState('');
@@ -208,11 +199,12 @@ export default function ViajeForm({
   // cambiar de pestaña (o que Android mate la app) no pierde nada
   useEffect(() => {
     guardarBorrador({
-      origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celular,
+      origen, tarifa, comisionPct, cliente, zona, direccion, dirA,
+      celular: celularEnvia.trim() || celularRecibe.trim(), // FASE C.2: compat
       celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celular, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -288,8 +280,10 @@ export default function ViajeForm({
       // F-ID2.6: si la foto no trae teléfono pero sí yape, el celular
       // se llena con el número del yape — en Perú el yape ES el
       // celular del cliente (editable como todo el formulario)
-      if (datos.telefono) setCelular(datos.telefono);
-      else if (datos.yapeNumero) setCelular(datos.yapeNumero);
+      // F-ID2.5 + FASE C.2: el teléfono de la foto es el de QUIEN
+      // ENVÍA (el cliente que mandó el pedido)
+      if (datos.telefono) setCelularEnvia(datos.telefono);
+      else if (datos.yapeNumero) setCelularEnvia(datos.yapeNumero);
       // F-ID2.6: el yape del pedido con sus DOS campos
       if (datos.yapeNombre) setYapeNombre(datos.yapeNombre);
       if (datos.yapeNumero) setYapeNumero(datos.yapeNumero);
@@ -345,28 +339,30 @@ export default function ViajeForm({
   // con el robot activo, el bot manda el mensaje CON tu QR de Yape
   // solo; si no, abre WhatsApp como siempre (revisás y envía vos).
   function cobrar() {
-    const cel = normalizarCelular(celular);
-    if (!cel) {
-      setError('Poné el celular del cliente para mandarle el cobro');
+    // FASE C.2: el cobro le va al que ENVÍA por defecto (y si solo
+    // cargaste el que recibe, a él)
+    if (!normalizarCelular(celularPrincipal)) {
+      setError('Poné un celular (el que envía o el que recibe) para mandarle el cobro');
       return;
     }
     setError('');
     vibrar(60);
     onMandarCobro(
       { cliente, monto: parseFloat(tarifa) || 0, direccion },
-      celular,
+      celularPrincipal,
     );
   }
 
-  // F-ID3.2: 📞 llamada directa — abre el marcador del teléfono
-  function llamarCliente() {
-    const cel = normalizarCelular(celular);
-    if (!cel) {
-      setError('Poné el celular del cliente para llamarlo');
+  // F-ID3.2 + FASE C.2: 📞 llamada directa a quien ENVÍA o a quien
+  // RECIBE — cada teléfono tiene su propio botoncito al lado
+  function llamarA(quien: 'envia' | 'recibe') {
+    const crudo = quien === 'envia' ? celularEnvia : celularRecibe;
+    if (!normalizarCelular(crudo)) {
+      setError(quien === 'envia' ? 'Poné el celular de quien envía' : 'Poné el celular de quien recibe');
       return;
     }
     setError('');
-    window.open(linkLlamada(celular), '_self');
+    window.open(linkLlamada(crudo), '_self');
   }
 
   // F-ID3.3: 🧭 abre Waze/Google Maps hacia la entrega. Si no hay
@@ -387,15 +383,6 @@ export default function ViajeForm({
     if (!abrirNavegacion(destino)) setNavObjetivo({ destino, etiqueta: dirA.trim() });
   }
 
-  // FASE C: 🧭 navegar a A o B de un viaje recién agregado
-  function navegarReciente(v: Viaje, tramo: 'A' | 'B') {
-    const destino: DestinoNav =
-      tramo === 'A' ? (v.coordenadasA ?? { direccion: (v.dirA ?? '').trim() }) : (v.coordenadas ?? { direccion: v.direccion.trim() });
-    if (!tieneDestino(destino)) return;
-    const etiqueta = tramo === 'A' ? (v.dirA ?? '').trim() : v.direccion.trim();
-    if (!abrirNavegacion(destino)) setNavObjetivo({ destino, etiqueta });
-  }
-
   function enviar() {
     if (!puedeEnviar) {
       setError('Poné la tarifa del viaje');
@@ -414,7 +401,9 @@ export default function ViajeForm({
       zona: zona.trim(),
       direccion: direccion.trim(),
       ...(dirA.trim() ? { dirA: dirA.trim() } : {}), // FASE C: recojo (A)
-      celular: celular.trim(),
+      // FASE C.2: el "celular" principal del viaje = el que ENVÍA
+      // (o el que recibe si es el único) — cobro y robot andan igual
+      celular: celularEnvia.trim() || celularRecibe.trim(),
       ...(celularEnvia.trim() ? { celularEnvia: celularEnvia.trim() } : {}),   // FASE C
       ...(celularRecibe.trim() ? { celularRecibe: celularRecibe.trim() } : {}), // FASE C
       yapeNombre: yapeNombre.trim(),
@@ -429,15 +418,14 @@ export default function ViajeForm({
       notas: notas.trim(),
     };
     onAgregar(nuevo);
-    // FASE C: el viaje queda a la vista con sus botones (robot · A · B)
-    // — "agregar más" ya no te hace perder de vista el anterior
-    setRecientes(prev => [nuevo, ...prev].slice(0, 4));
+    // FASE C.2: el formulario se limpia para el próximo viaje — el
+    // agregado aparece ABAJO en la lista como tarjeta completa con
+    // todos sus datos y botones (resaltado ✨NUEVO + scroll a él)
     setTarifa('');
     setCliente('');
     setZona('');
     setDireccion('');
     setDirA('');
-    setCelular('');
     setCelularEnvia('');
     setCelularRecibe('');
     setYapeNombre('');
@@ -455,76 +443,6 @@ export default function ViajeForm({
         <Zap size={16} className="text-amber-400" />
         <h2 className="text-sm font-bold text-slate-100">Viaje rápido</h2>
       </div>
-
-      {/* ── FASE C: ✅ recién agregados — el viaje anterior queda a la
-          vista con sus botones (🤖 avisar · 🧭 A · 🧭 B) para que
-          "agregar más viajes" no te haga perderlo de vista ── */}
-      {recientes.length > 0 && (
-        <div
-          className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2.5"
-          data-testid="recientes-agregados"
-        >
-          <p className="px-1 text-[10px] font-black uppercase tracking-wide text-emerald-400/90">
-            ✓ Recién agregados ({recientes.length})
-          </p>
-          <div className="mt-1.5 space-y-1.5">
-            {recientes.map(v => (
-              <div
-                key={v.id}
-                className="flex items-center gap-2 rounded-lg bg-slate-900/70 px-2.5 py-2"
-                data-testid="reciente-viaje"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-bold text-slate-200">
-                    {v.hora} · {v.cliente || v.zona || 'Viaje'}{' '}
-                    <span className="font-black text-emerald-400">+S/ {v.neto.toFixed(2)}</span>
-                  </p>
-                  {(v.dirA || v.direccion) && (
-                    <p className="truncate text-[10px] text-slate-400">
-                      {v.dirA ? `A: ${v.dirA} → ` : ''}B: {v.direccion || '—'}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {(v.celular.trim() || v.celularEnvia?.trim() || v.celularRecibe?.trim()) && onMandarAviso && (
-                    <button
-                      onClick={() => setRobotRecienteId(v.id)}
-                      className="rounded-lg bg-violet-500/15 p-2 text-violet-300 transition-colors hover:bg-violet-500/25"
-                      aria-label="Avisos del robot para este viaje"
-                      title="🤖 Avisar: voy en camino · ya llegué · entregado…"
-                      data-testid="boton-robot-reciente"
-                    >
-                      <ChevronDown size={15} />
-                    </button>
-                  )}
-                  {(v.dirA ?? '').trim() && (
-                    <button
-                      onClick={() => navegarReciente(v, 'A')}
-                      className="rounded-lg bg-amber-500/15 p-2 text-amber-300 transition-colors hover:bg-amber-500/25"
-                      aria-label="Navegar al recojo (A)"
-                      title="🧭 Navegar al RECOJO (A)"
-                      data-testid="boton-nav-a-reciente"
-                    >
-                      <span className="text-[10px] font-black">A</span>
-                    </button>
-                  )}
-                  {(v.direccion.trim() || v.coordenadas) && (
-                    <button
-                      onClick={() => navegarReciente(v, 'B')}
-                      className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 transition-colors hover:bg-cyan-500/25"
-                      aria-label="Navegar a la entrega (B)"
-                      title="🧭 Navegar a la ENTREGA (B)"
-                      data-testid="boton-nav-b-reciente"
-                    >
-                      <span className="text-[10px] font-black">B</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── F-ID2: escáner de dirección (estilo Circuit) ── */}
       <div className="mb-3 rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-3">
@@ -786,79 +704,76 @@ export default function ViajeForm({
         </button>
       )}
 
-      {/* F-ID2.5: celular + botones 📞 llamar y 💬 Cobrar lado a lado */}
-      <div className="mt-2 flex gap-2">
-        <input
-          value={celular}
-          onChange={e => setCelular(e.target.value)}
-          inputMode="tel"
-          placeholder="📱 Celular del cliente"
-          className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
-          data-testid="input-celular"
-        />
-        {/* F-ID3.2: 📞 llamada directa al cliente */}
-        <button
-          onClick={llamarCliente}
-          disabled={escaneando || !celular.trim()}
-          className="flex shrink-0 items-center rounded-xl bg-sky-500/20 px-3 text-sky-300 transition-all active:scale-[0.98] disabled:opacity-40"
-          title="Llamar al cliente"
-          aria-label="Llamar al cliente"
-          data-testid="boton-llamar"
-        >
-          <Phone size={16} />
-        </button>
-        {/* F-ID5: 💬 Cobrar manual / 🤖 Cobrar automático por el robot */}
-        <button
-          onClick={cobrar}
-          disabled={escaneando || cobroEnCurso}
-          className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-black transition-all active:scale-[0.98] disabled:opacity-50 ${
-            config.robotActivo ? 'bg-violet-500 text-white' : 'bg-[#25D366] text-slate-950'
-          }`}
-          data-testid="boton-whatsapp"
-        >
-          {cobroEnCurso ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : config.robotActivo ? (
-            <Bot size={16} />
-          ) : (
-            <MessageCircle size={16} />
-          )}
-          {cobroEnCurso ? 'Mandando…' : 'Cobrar'}
-        </button>
+      {/* ── FASE C.2: DOS teléfonos — quien ENVÍA (A, el cliente
+          principal: a él le va el cobro) y quien RECIBE (B). Cada
+          uno con su botoncito 📞 al lado. ── */}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="flex min-w-0 gap-1">
+          <input
+            value={celularEnvia}
+            onChange={e => setCelularEnvia(e.target.value)}
+            inputMode="tel"
+            placeholder="📤 Cel. ENVÍA"
+            className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+            data-testid="input-celular-envia"
+          />
+          <button
+            onClick={() => llamarA('envia')}
+            disabled={escaneando || !celularEnvia.trim()}
+            className="flex shrink-0 items-center rounded-xl bg-sky-500/20 px-2.5 text-sky-300 transition-all active:scale-[0.98] disabled:opacity-40"
+            title="Llamar a quien ENVÍA"
+            aria-label="Llamar a quien envía"
+            data-testid="boton-llamar-envia"
+          >
+            <Phone size={16} />
+          </button>
+        </div>
+        <div className="flex min-w-0 gap-1">
+          <input
+            value={celularRecibe}
+            onChange={e => setCelularRecibe(e.target.value)}
+            inputMode="tel"
+            placeholder="📥 Cel. RECIBE"
+            className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
+            data-testid="input-celular-recibe"
+          />
+          <button
+            onClick={() => llamarA('recibe')}
+            disabled={escaneando || !celularRecibe.trim()}
+            className="flex shrink-0 items-center rounded-xl bg-sky-500/20 px-2.5 text-sky-300 transition-all active:scale-[0.98] disabled:opacity-40"
+            title="Llamar a quien RECIBE"
+            aria-label="Llamar a quien recibe"
+            data-testid="boton-llamar-recibe"
+          >
+            <Phone size={16} />
+          </button>
+        </div>
       </div>
-      {celular.trim() && (
+
+      {/* 💬/🤖 Cobrar — al que ENVÍA por defecto (si solo cargaste el
+          que recibe, a él) — mismo flujo compartido de siempre */}
+      <button
+        onClick={cobrar}
+        disabled={escaneando || cobroEnCurso || !celularPrincipal}
+        className={`mt-2 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition-all active:scale-[0.98] disabled:opacity-50 ${
+          config.robotActivo ? 'bg-violet-500 text-white' : 'bg-[#25D366] text-slate-950'
+        }`}
+        data-testid="boton-whatsapp"
+      >
+        {cobroEnCurso ? (
+          <Loader2 size={16} className="animate-spin" />
+        ) : config.robotActivo ? (
+          <Bot size={16} />
+        ) : (
+          <MessageCircle size={16} />
+        )}
+        {cobroEnCurso ? 'Mandando…' : config.robotActivo ? 'Cobrar con el robot 🤖' : 'Cobrar por WhatsApp'}
+      </button>
+      {celularPrincipal && (
         <p className="mt-1 text-[10px] text-slate-500" data-testid="nota-cobro">
           {config.robotActivo
-            ? '🤖 El robot le manda el cobro SOLO al cliente, con tu QR de Yape adentro · si no responde, abre WhatsApp'
-            : '💬 El botón Cobrar abre el WhatsApp del cliente con el mensaje de pago listo · 📞 el teléfono lo llama directo'}
-        </p>
-      )}
-
-      {/* ── FASE C: teléfonos de QUIEN ENVÍA y QUIEN RECIBE — para
-          delivery con dos personas: avisar al que espera el paquete
-          y cobrar al que lo mandó. Opcionales: si no van, todo sigue
-          como siempre (un solo cliente). ── */}
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <input
-          value={celularEnvia}
-          onChange={e => setCelularEnvia(e.target.value)}
-          inputMode="tel"
-          placeholder="📤 Cel. de quien ENVÍA"
-          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
-          data-testid="input-celular-envia"
-        />
-        <input
-          value={celularRecibe}
-          onChange={e => setCelularRecibe(e.target.value)}
-          inputMode="tel"
-          placeholder="📥 Cel. de quien RECIBE"
-          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-slate-400"
-          data-testid="input-celular-recibe"
-        />
-      </div>
-      {(celularEnvia.trim() || celularRecibe.trim()) && (
-        <p className="mt-1 text-[10px] text-slate-500">
-          📤📤 En el menú 🤖 elegís a quién avisar (cliente · quien envía · quien recibe) — el cobro sigue yendo al cliente de arriba
+            ? '🤖 El robot le manda el cobro al que ENVÍA, con tu QR de Yape adentro · en el menú 🤖 del viaje elegís a quién avisar'
+            : '💬 Cobrar abre el WhatsApp del que envía con el mensaje listo · 📞 cada celular tiene su botón de llamada al lado'}
         </p>
       )}
 
@@ -997,7 +912,7 @@ export default function ViajeForm({
         }`}
       >
         <span className="inline-flex items-center gap-2">
-          <Plus size={16} /> Agregar viaje
+          <Check size={17} /> Aceptar viaje
         </span>
       </button>
 
@@ -1023,7 +938,7 @@ export default function ViajeForm({
         />
       )}
 
-      {/* FASE C: mini-selector para el RECOJO (A) o los recién agregados */}
+      {/* FASE C: mini-selector para el RECOJO (A) */}
       {navObjetivo && (
         <NavegarMenu
           destino={navObjetivo.destino}
@@ -1031,25 +946,6 @@ export default function ViajeForm({
           onCerrar={() => setNavObjetivo(null)}
         />
       )}
-
-      {/* FASE C: menú del robot 🤖 para un viaje recién agregado */}
-      {robotRecienteId &&
-        onMandarAviso &&
-        (() => {
-          const v = recientes.find(x => x.id === robotRecienteId);
-          if (!v) return null;
-          return (
-            <RobotMenu
-              viaje={v}
-              robotActivo={config.robotActivo}
-              onCerrar={() => setRobotRecienteId(null)}
-              onAviso={onMandarAviso}
-              onPedirUbicacion={onPedirUbicacion ?? (() => Promise.resolve())}
-              onCobrar={onMandarCobro}
-              tiposConImagen={tiposConImagen}
-            />
-          );
-        })()}
     </div>
   );
 }

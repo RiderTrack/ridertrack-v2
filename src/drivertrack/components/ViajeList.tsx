@@ -16,7 +16,7 @@
 // Maps (junto al 📍 de GPS) + mini-selector de app.
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bot, ChevronDown, Compass, Loader2, MessageCircle, Navigation, Phone, Square, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
 import { fmtSoles, linkLlamada } from '../utils';
@@ -44,6 +44,9 @@ interface Props {
   onPedirUbicacion?: (viaje: Viaje, telefono?: string) => Promise<void> | void;
   /** FASE B2: tipos de aviso con imagen subida (badge 🖼️ en el menú del robot) */
   tiposConImagen?: string[];
+  /** FASE C.2: id del viaje recién agregado — se resalta (✨ NUEVO)
+   *  y la lista se desliza hasta él para verlo completo con sus botones */
+  destacadoId?: string | null;
 }
 
 export default function ViajeList({
@@ -59,12 +62,22 @@ export default function ViajeList({
   onMandarAviso,
   onPedirUbicacion,
   tiposConImagen,
+  destacadoId,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // F-ID3.3: qué viaje tiene abierto el mini-selector Waze/Google
   const [navViajeId, setNavViajeId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
   const [robotViajeId, setRobotViajeId] = useState<string | null>(null);
+
+  // FASE C.2: al agregar un viaje, la lista se desliza solita hasta su
+  // tarjeta para verla completa (direcciones, teléfonos y botones)
+  useEffect(() => {
+    if (!destacadoId) return;
+    const el = document.getElementById(`viaje-${destacadoId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destacadoId]);
 
   /** 🧭 abrir Waze/Google hacia la entrega de ESTE viaje */
   function navegarViaje(v: Viaje) {
@@ -90,20 +103,46 @@ export default function ViajeList({
     );
   }
 
-  const ordenados = [...viajes].sort((a, b) => (a.hora < b.hora ? 1 : -1));
+  // FASE C.2: el más reciente primero también cuando la hora empata
+  // (el id arranca con Date.now() → el recién agregado queda arriba)
+  const ordenados = [...viajes].sort((a, b) =>
+    a.hora < b.hora ? 1 : a.hora > b.hora ? -1 : a.id < b.id ? 1 : -1,
+  );
 
   return (
     <div className="space-y-2">
-      {ordenados.map(v => (
+      {ordenados.map(v => {
+        // FASE C.2: teléfonos del viaje — quien ENVÍA (el celular viejo
+        // del cliente cuenta como quien envía) y quien RECIBE
+        const telEnvia = (v.celularEnvia ?? '').trim() || v.celular.trim();
+        const telRecibe = (v.celularRecibe ?? '').trim();
+        const telCobro = telEnvia || telRecibe; // cobro/aviso por defecto
+        const dosNumeros = telEnvia && telRecibe && telEnvia !== telRecibe;
+        const esNuevo = destacadoId === v.id;
+        return (
         <div
           key={v.id}
-          className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 p-3"
+          id={`viaje-${v.id}`}
+          className={`flex items-center gap-3 rounded-xl border bg-slate-800/60 p-3 scroll-mt-24 ${
+            esNuevo
+              ? 'border-emerald-500/70 ring-2 ring-emerald-500/40'
+              : 'border-slate-700'
+          }`}
+          data-testid="tarjeta-viaje"
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="rounded-md bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-slate-300">
                 {v.hora}
               </span>
+              {esNuevo && (
+                <span
+                  className="rounded-md bg-emerald-500 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-950"
+                  data-testid="badge-nuevo"
+                >
+                  ✨ Nuevo
+                </span>
+              )}
               <span className="text-xs font-semibold text-emerald-300">{nombreOrigen(v.origen)}</span>
               {(v.cliente || v.zona) && (
                 <span className="truncate text-xs text-slate-400">
@@ -132,13 +171,17 @@ export default function ViajeList({
                 </p>
               )
             )}
-            {(v.celularEnvia?.trim() || v.celularRecibe?.trim()) && (
+            {(v.celularEnvia?.trim() || v.celularRecibe?.trim()) ? (
               <p className="mt-1 truncate text-[10px] leading-snug text-slate-500">
                 {v.celularEnvia?.trim() ? `📤 envía ${v.celularEnvia.trim()}` : ''}
                 {v.celularEnvia?.trim() && v.celularRecibe?.trim() ? ' · ' : ''}
                 {v.celularRecibe?.trim() ? `📥 recibe ${v.celularRecibe.trim()}` : ''}
               </p>
-            )}
+            ) : v.celular.trim() ? (
+              <p className="mt-1 truncate text-[10px] leading-snug text-slate-500" title={v.celular}>
+                📞 {v.celular}
+              </p>
+            ) : null}
             {(v.yapeNombre || v.yapeNumero) && (
               <p
                 className="mt-1 truncate text-[10px] leading-snug text-purple-300/80"
@@ -214,25 +257,43 @@ export default function ViajeList({
                 </button>
               )}
             </div>
-            {v.celular.trim() && (
+            {/* FASE C.2: 📞 llamar — un botón por teléfono: A (quien
+                envía / el cliente) y B (quien recibe) cuando son dos */}
+            {telCobro && (
               <div className="flex items-center gap-1">
-                {/* F-ID3.2: 📞 llamar directo — abre el marcador con +51 */}
-                <button
-                  onClick={() => window.open(linkLlamada(v.celular), '_self')}
-                  className="rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
-                  aria-label="Llamar al cliente"
-                  title="Llamar al cliente"
-                  data-testid="boton-llamar-lista"
-                >
-                  <Phone size={16} />
-                </button>
+                {telEnvia && (
+                  <button
+                    onClick={() => window.open(linkLlamada(telEnvia), '_self')}
+                    className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
+                    aria-label={dosNumeros ? 'Llamar a quien envía (A)' : 'Llamar al cliente'}
+                    title={dosNumeros ? 'Llamar a quien ENVÍA (A)' : 'Llamar al cliente'}
+                    data-testid="boton-llamar-lista"
+                  >
+                    <Phone size={15} />
+                    {dosNumeros && <span className="text-[8px] font-black leading-none">A</span>}
+                  </button>
+                )}
+                {telRecibe && dosNumeros && (
+                  <button
+                    onClick={() => window.open(linkLlamada(telRecibe), '_self')}
+                    className="flex flex-col items-center rounded-lg bg-sky-500/15 p-2 text-sky-400 transition-colors hover:bg-sky-500/25"
+                    aria-label="Llamar a quien recibe (B)"
+                    title="Llamar a quien RECIBE (B)"
+                    data-testid="boton-llamar-recibe-lista"
+                  >
+                    <Phone size={15} />
+                    <span className="text-[8px] font-black leading-none">B</span>
+                  </button>
+                )}
                 <button
                   onClick={() =>
                     // F-ID2.8 + F-ID5: MISMO mensaje del botón Cobrar de
-                    // arriba; con el robot activo lo manda el bot SOLO
+                    // arriba; con el robot activo lo manda el bot SOLO.
+                    // FASE C.2: le va al que ENVÍA (o al que recibe si
+                    // es el único teléfono del viaje)
                     onMandarCobro(
                       { cliente: v.cliente, monto: v.tarifa, direccion: v.direccion },
-                      v.celular,
+                      telCobro,
                     )
                   }
                   disabled={cobroEnCurso}
@@ -241,7 +302,7 @@ export default function ViajeList({
                       ? 'bg-violet-500/15 text-violet-300 hover:bg-violet-500/25'
                       : 'bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25'
                   }`}
-                  aria-label="Mandar mensaje de cobro al cliente"
+                  aria-label="Mandar mensaje de cobro"
                   title={config.robotActivo ? 'Mandar el cobro por el robot (con tu QR)' : 'Mandar el cobro por WhatsApp'}
                   data-testid="boton-whatsapp-lista"
                 >
@@ -298,7 +359,8 @@ export default function ViajeList({
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* F-ID3.3: mini-selector Waze / Google Maps del viaje elegido */}
       {navViajeId &&

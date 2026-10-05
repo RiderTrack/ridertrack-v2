@@ -5,6 +5,12 @@
 //            v3.1 — FIX del 404 al publicar (la API NO tiene PUT:
 //            ahora usa PATCH como el CLI oficial de Firebase) y FIX
 //            del crash del Plan B ("projectId is not defined")
+//            v3.2 — FIX del 400 del PATCH: el cuerpo va ENVUELTO en
+//            "release" → { release: { name, rulesetName } }, que es
+//            EXACTAMENTE lo que manda el CLI oficial (leído de su
+//            código fuente: firebase-tools/src/gcp/rules.ts →
+//            updateRelease). Además ahora cada fallo imprime el
+//            detalle completo de la respuesta para diagnosticar.
 // ═══════════════════════════════════════════════════════════
 // ¿POR QUÉ EXISTE ESTE SCRIPT? Las reglas de Firestore VIVAS (las
 // de la consola de Firebase) no incluyen las colecciones nuevas
@@ -171,27 +177,53 @@ async function main() {
   console.log('📦 Ruleset nuevo: ' + nuevoRuleset.name);
 
   // 6. Publicar (release) — el release "cloud.firestore" YA existe, así
-  //    que hay que APUNTARLO al ruleset nuevo. ⚠️ Esta API NO acepta PUT
-  //    (responde 404 con una página HTML — el bug de la v3): se usa
-  //    PATCH, igual que el CLI oficial de Firebase. POST va de respaldo
-  //    por si el release no existiera.
+  //    que hay que APUNTARLO al ruleset nuevo.
+  //    ⚠️ v3: PUT → 404 (la API no tiene PUT).
+  //    ⚠️ v3.1: PATCH con cuerpo plano { name, rulesetName } → 400.
+  //    ✅ v3.2: PATCH con el cuerpo ENVUELTO:
+  //          { release: { name: '...', rulesetName: '...' } }
+  //    que es EXACTAMENTE lo que manda el CLI oficial de Firebase
+  //    (firebase-tools → src/gcp/rules.ts → updateRelease). El POST
+  //    de respaldo es el createRelease del CLI (plano) por si el
+  //    release no existiera — ojo que necesita otro permiso.
   const releaseName = 'projects/' + projectId + '/releases/cloud.firestore';
   const intentos = [
-    ['PATCH', BASE + '/releases/cloud.firestore'],
-    ['PATCH', BASE + '/releases/cloud.firestore?updateMask=rulesetName'],
-    ['POST', BASE + '/releases'],
+    // [etiqueta, metodo, url, cuerpo] — en orden de preferencia
+    [
+      'PATCH (formato del CLI oficial)',
+      'PATCH',
+      BASE + '/releases/cloud.firestore',
+      { release: { name: releaseName, rulesetName: nuevoRuleset.name } },
+    ],
+    [
+      'PATCH plano (por las dudas)',
+      'PATCH',
+      BASE + '/releases/cloud.firestore',
+      { name: releaseName, rulesetName: nuevoRuleset.name },
+    ],
+    [
+      'POST crear release (createRelease del CLI)',
+      'POST',
+      BASE + '/releases',
+      { name: releaseName, rulesetName: nuevoRuleset.name },
+    ],
   ];
   let publicado = false;
   let detalleFalla = '';
-  for (const [metodo, url] of intentos) {
+  for (const [etiqueta, metodo, url, cuerpo] of intentos) {
     const res = await fetch(url, {
       method: metodo,
       headers: HEADERS,
-      body: JSON.stringify({ name: releaseName, rulesetName: nuevoRuleset.name }),
+      body: JSON.stringify(cuerpo),
     });
-    if (res.ok) { publicado = true; break; }
-    detalleFalla = metodo + ' ' + url + ' → ' + res.status + ' ' + (await res.text()).slice(0, 200);
-    console.log('   ⚠️ ' + metodo + ' falló (' + res.status + '), probando de otra forma…');
+    if (res.ok) {
+      console.log('   ✅ ' + etiqueta + ' funcionó');
+      publicado = true;
+      break;
+    }
+    const cuerpoError = (await res.text()).slice(0, 300).replace(/\s+/g, ' ');
+    detalleFalla = etiqueta + ' → ' + res.status + ' ' + cuerpoError;
+    console.log('   ⚠️ ' + etiqueta + ' falló (' + res.status + '): ' + cuerpoError.slice(0, 160));
   }
   if (!publicado) throw new Error(detalleFalla);
   console.log('🚀 Reglas publicadas ✓');
