@@ -8,6 +8,8 @@ import { ChevronLeft, ChevronRight, Download, MessageCircle, Minus, QrCode, Tras
 import { ConfigDT, emojiGasto, Gasto, nombreOrigen, nombreGasto, TIPOS_GASTO, TipoGasto, Viaje } from '../types';
 import { fechaBonita, fechaHoy, horaAhora, resumenDia, totalGastosDia } from '../storage';
 import { armarMensajeCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
+// FASE K: saldo de la recarga semanal (banner comisión prepagada)
+import { estadoSaldo } from '../services/recarga';
 import ViajeList from './ViajeList';
 
 interface Props {
@@ -129,6 +131,55 @@ export default function CajaView({
 
   return (
     <div className="space-y-3">
+      {/* ═══ FASE K: 🟣 banner comisión prepagada — cada carrera inDrive
+          entra COMPLETA + cómo va el saldo de la recarga ═══ */}
+      {config.recarga?.activa && (
+        (() => {
+          const saldo = estadoSaldo(viajes, config.recarga!);
+          const pct = saldo ? Math.round(saldo.pctUsado * 100) : 0;
+          return (
+            <div
+              className="rounded-2xl border border-violet-500/40 bg-violet-500/10 p-3"
+              data-testid="banner-prepago"
+            >
+              <p className="text-xs font-bold text-violet-200">
+                🟣 Comisión prepagada — cada carrera inDrive entra COMPLETA
+              </p>
+              {saldo ? (
+                <>
+                  <p className="mt-1 text-[11px] leading-snug text-slate-300">
+                    Recarga <b className="text-slate-100">S/ {saldo.monto.toFixed(2)}</b> · usaste{' '}
+                    <b className="text-slate-100">S/ {saldo.usado.toFixed(2)}</b> ({pct}%) ·{' '}
+                    <b className={saldo.saldo < 0 || saldo.casiAgotada ? 'text-amber-300' : 'text-emerald-400'}>
+                      queda S/ {saldo.saldo.toFixed(2)}
+                    </b>
+                  </p>
+                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className={`h-full rounded-full ${
+                        saldo.saldo < 0 ? 'bg-red-500' : saldo.casiAgotada ? 'bg-amber-400' : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(100, pct)}%` }}
+                    />
+                  </div>
+                  {(saldo.saldo < 0 || saldo.casiAgotada) && (
+                    <p className="mt-1 text-[10px] font-bold text-amber-300">
+                      ⚠️ {saldo.saldo < 0 ? 'Te pasaste — inDrive ya te pide recarga' : 'Queda poco — recargá de nuevo pronto'}
+                      · Ajustes → inDrive → 🎯 Recarga semanal
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-1 text-[11px] leading-snug text-slate-400">
+                  Todavía no registraste la recarga — hacelo en <b className="text-slate-200">Ajustes → inDrive → 🎯
+                  Recarga semanal</b> y la app te dice cuánto te queda.
+                </p>
+              )}
+            </div>
+          );
+        })()
+      )}
+
       {/* Navegador de fecha */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-800/60 p-2">
         <button

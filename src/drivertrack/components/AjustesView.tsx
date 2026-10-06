@@ -22,8 +22,10 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { ConfigDT, ORIGENES } from '../types';
-import { CONFIG_DEFECTO, guardarConfig } from '../storage';
+import { ConfigDT, Gasto, ORIGENES, TipoGasto } from '../types';
+import { CONFIG_DEFECTO, cargarGastos, cargarViajes, fechaHoy, guardarConfig, guardarGastos, horaAhora } from '../storage';
+// FASE K: 🎯 recarga semanal — calculadora + saldo consumido
+import { calcularRecarga, estadoSaldo } from '../services/recarga';
 import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
@@ -121,6 +123,45 @@ export default function AjustesView({
   // FASE H: 📷 el mensaje que va CON la foto de la entrega — el
   // original vive acá (se puede retocar por foto en el momento)
   const [mensajeFoto, setMensajeFoto] = useState(config.mensajeFoto ?? '');
+
+  // ═══ FASE K: 🎯 Recarga semanal (comisión prepagada) ═══
+  // Estados planos para los inputs; la primera vez heredan la meta
+  // del día y el % de inDrive que ya tenés configurados.
+  const [recargaActiva, setRecargaActiva] = useState(config.recarga?.activa === true);
+  const [recargaMeta, setRecargaMeta] = useState(
+    String(config.recarga?.metaDiaria || config.metaDiaria || 0),
+  );
+  const [recargaPct, setRecargaPct] = useState(
+    String(config.recarga?.pct || config.comisiones?.indrive || 0),
+  );
+  const [recargaDias, setRecargaDias] = useState(config.recarga?.dias || 7);
+  const [recargaMonto, setRecargaMonto] = useState(config.recarga?.monto || 0);
+  const [recargaFecha, setRecargaFecha] = useState(config.recarga?.fecha || '');
+  // "Ya recargué": monto a mano + si anotarla como gasto de hoy
+  const [confirmandoRecarga, setConfirmandoRecarga] = useState(false);
+  const [montoRecargaTxt, setMontoRecargaTxt] = useState('');
+  const [anotarGastoRecarga, setAnotarGastoRecarga] = useState(true);
+
+  // Viajes para el SALDO consumido de la recarga (se refrescan si
+  // cambia algo en la nube o volvés a entrar a Ajustes)
+  const [viajesSaldo, setViajesSaldo] = useState<Viaje[]>(() => cargarViajes());
+  useEffect(() => {
+    const alSync = () => setViajesSaldo(cargarViajes());
+    window.addEventListener('dt:sync-remoto', alSync);
+    return () => window.removeEventListener('dt:sync-remoto', alSync);
+  }, []);
+
+  /** El objeto RecargaSemanal con lo que hay en pantalla ahora */
+  function recargaActual(over?: { monto: number; fecha: string }) {
+    return {
+      activa: recargaActiva,
+      metaDiaria: parseFloat(recargaMeta.replace(',', '.')) || 0,
+      pct: parseFloat(recargaPct.replace(',', '.')) || 0,
+      dias: Math.round(Number(recargaDias) || 7),
+      monto: over ? over.monto : recargaMonto,
+      fecha: over ? over.fecha : recargaFecha,
+    };
+  }
 
   // 🧪 FASE B: probás el robot de verdad — te manda un mensaje a TU
   // WhatsApp (miCelular). Si llega, todo el circuito funciona.
@@ -236,6 +277,8 @@ export default function AjustesView({
       // FASE H: el mensaje de la foto — si quedó igual al original
       // se guarda vacío (usa el default de fábrica en cada envío)
       mensajeFoto: mensajeFoto.trim() === MENSAJE_FOTO_DEF.trim() ? '' : mensajeFoto.trim(),
+      // FASE K: 🎯 recarga semanal (comisión prepagada)
+      recarga: recargaActual(),
       // FASE B: la URL y el token del viejo puente localhost quedan
       // jubilados — se conservan los defaults en la config para que
       // los backups viejos sigan importando sin romper nada.
@@ -257,7 +300,51 @@ export default function AjustesView({
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas, mensajeFoto]);
+  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas, mensajeFoto, recargaActiva, recargaMeta, recargaPct, recargaDias, recargaMonto, recargaFecha]);
+
+  // FASE K: ✅ "Ya recargué" — registra el monto+fecha y (opcional)
+  // lo anota como gasto 📶 Recarga de HOY en la Caja (así el "En mano"
+  // queda con la verdad: la comisión prepagada ya salió del bolsillo)
+  function registrarRecarga() {
+    const monto = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
+    if (monto <= 0) {
+      onToast('Poné cuánto recargaste 💡');
+      return;
+    }
+    const fecha = `${fechaHoy()} ${horaAhora()}`;
+    const m = +monto.toFixed(2);
+    setRecargaMonto(m);
+    setRecargaFecha(fecha);
+    setConfirmandoRecarga(false);
+    setMontoRecargaTxt('');
+
+    // 1) la config se guarda YA con la recarga nueva (sin esperar al
+    //    autoguardado) para que el resto de la app la vea al toque
+    const c = { ...armarConfig(), recarga: recargaActual({ monto: m, fecha }) };
+    guardarConfig(c);
+    onGuardar(c);
+
+    // 2) gasto 📶 Recarga en la Caja de hoy (opcional, default ON)
+    if (anotarGastoRecarga) {
+      const gasto: Gasto = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        fecha: fechaHoy(),
+        hora: horaAhora(),
+        tipo: 'saldo' as TipoGasto,
+        monto: m,
+        nota: 'Recarga semanal inDrive (comisión prepagada)',
+      };
+      guardarGastos([...cargarGastos(), gasto]);
+    }
+
+    // 3) que la Caja y el header se enteren al toque (recargan del storage)
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    onToast(
+      anotarGastoRecarga
+        ? `✅ Recarga de S/ ${m.toFixed(2)} registrada (anotada en la Caja de hoy)`
+        : `✅ Recarga de S/ ${m.toFixed(2)} registrada`,
+    );
+  }
 
   async function probarKey() {
     setProbando(true);
@@ -284,6 +371,13 @@ export default function AjustesView({
         setGeminiKey(data.config.geminiKey ?? '');
         setClaudeKey(data.config.claudeKey ?? '');
         setRobotActivo(data.config.robotActivo === true);
+        // FASE K: la recarga también vuelve de un backup
+        setRecargaActiva(data.config.recarga?.activa === true);
+        setRecargaMeta(String(data.config.recarga?.metaDiaria || data.config.metaDiaria || 0));
+        setRecargaPct(String(data.config.recarga?.pct || data.config.comisiones?.indrive || 0));
+        setRecargaDias(data.config.recarga?.dias || 7);
+        setRecargaMonto(data.config.recarga?.monto || 0);
+        setRecargaFecha(data.config.recarga?.fecha || '');
         setMensajeFoto(data.config.mensajeFoto ?? '');
       }
     } catch {
@@ -308,6 +402,255 @@ export default function AjustesView({
           className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-lg font-black text-amber-300 outline-none focus:border-amber-400"
           data-testid="input-meta"
         />
+      </section>
+
+      {/* ═══ FASE K: 🎯 Recarga semanal — comisión prepagada ═══ */}
+      <section className="rounded-2xl border border-violet-500/40 bg-violet-500/5 p-4" data-testid="seccion-recarga">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-1.5 text-xs font-bold text-violet-300">
+            🎯 Recarga semanal (comisión prepagada)
+          </p>
+          {/* Interruptor del modo prepagada */}
+          <button
+            onClick={() => setRecargaActiva(!recargaActiva)}
+            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+              recargaActiva ? 'bg-violet-500' : 'bg-slate-700'
+            }`}
+            role="switch"
+            aria-checked={recargaActiva}
+            aria-label="Activar la comisión prepagada"
+            data-testid="recarga-toggle"
+          >
+            <span
+              className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                recargaActiva ? 'left-6' : 'left-1'
+              }`}
+            />
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-slate-400">
+          Poné <b className="text-violet-300">cuánto querés hacerte por día</b> y la app te dice{' '}
+          <b className="text-violet-300">cuánto recargar UNA vez para toda la semana</b>. Con el modo prendido, cada
+          carrera de inDrive entra <b className="text-violet-300">COMPLETA</b> (ya no te descuenta el % por viaje — la
+          comisión ya la pagaste con la recarga).
+        </p>
+
+        {/* Los 3 datos de la calculadora */}
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-violet-400/80">
+              Quiero hacer al día (S/)
+            </p>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="1"
+              min="0"
+              value={recargaMeta}
+              onChange={e => setRecargaMeta(e.target.value)}
+              placeholder="60"
+              className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-violet-200 outline-none focus:border-violet-400"
+              data-testid="recarga-meta"
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-violet-400/80">
+              % comisión inDrive
+            </p>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.5"
+              min="0"
+              max="100"
+              value={recargaPct}
+              onChange={e => setRecargaPct(e.target.value)}
+              placeholder="15"
+              className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-violet-200 outline-none focus:border-violet-400"
+              data-testid="recarga-pct"
+            />
+          </div>
+        </div>
+
+        {/* Días por semana */}
+        <div className="mt-2">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-violet-400/80">Días por semana</p>
+          <div className="flex gap-1.5">
+            {[5, 6, 7].map(d => (
+              <button
+                key={d}
+                onClick={() => setRecargaDias(d)}
+                className={`flex-1 rounded-xl border py-2 text-sm font-black transition-all active:scale-[0.97] ${
+                  recargaDias === d
+                    ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                    : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+                data-testid={`recarga-dias-${d}`}
+              >
+                {d} días
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* EL RESULTADO — cuánto recargar */}
+        {(() => {
+          const calc = calcularRecarga(
+            parseFloat(recargaMeta.replace(',', '.')) || 0,
+            parseFloat(recargaPct.replace(',', '.')) || 0,
+            recargaDias,
+          );
+          const hayDatos = calc.recargaSugerida > 0;
+          return (
+            <div
+              className="mt-3 rounded-xl border border-violet-500/30 bg-slate-950/60 p-3 text-center"
+              data-testid="recarga-resultado"
+            >
+              {hayDatos ? (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    Recargá esto y tenés la semana cubierta
+                  </p>
+                  <p className="mt-0.5 text-3xl font-black text-violet-200" data-testid="recarga-sugerida">
+                    S/ {calc.recargaSugerida.toFixed(2)}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                    Comisión S/ {calc.comisionDia.toFixed(2)} por día × {recargaDias} días · facturás{' '}
+                    <b className="text-slate-300">S/ {calc.brutoSemana.toFixed(2)}</b> en la semana y en el bolsillo
+                    quedan <b className="text-emerald-400">S/ {calc.bolsilloReal.toFixed(2)}</b>
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] text-slate-500">
+                  Poné tu meta diaria y tu % de comisión arriba 👆
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Estado de la recarga registrada: cuánto llevás consumido */}
+        {(() => {
+          const saldo = estadoSaldo(viajesSaldo, recargaActual());
+          if (!saldo) {
+            return (
+              <button
+                onClick={() => {
+                  const calc = calcularRecarga(
+                    parseFloat(recargaMeta.replace(',', '.')) || 0,
+                    parseFloat(recargaPct.replace(',', '.')) || 0,
+                    recargaDias,
+                  );
+                  setMontoRecargaTxt(calc.recargaSugerida > 0 ? calc.recargaSugerida.toFixed(2) : '');
+                  setConfirmandoRecarga(true);
+                }}
+                className="mt-2 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 py-2.5 text-xs font-black text-emerald-300 transition-all active:scale-[0.99] hover:bg-emerald-500/20"
+                data-testid="recarga-ya-recargue"
+              >
+                ✅ Ya recargué (registrarla acá)
+              </button>
+            );
+          }
+          const pct = Math.round(saldo.pctUsado * 100);
+          return (
+            <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950/60 p-3" data-testid="recarga-saldo">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-bold text-slate-200">
+                  Recargaste S/ {saldo.monto.toFixed(2)}
+                  <span className="ml-1 font-medium text-slate-500">({recargaFecha})</span>
+                </p>
+                <p
+                  className={`text-[11px] font-black ${
+                    saldo.saldo < 0 || saldo.casiAgotada ? 'text-amber-300' : 'text-emerald-400'
+                  }`}
+                  data-testid="recarga-saldo-restante"
+                >
+                  queda S/ {saldo.saldo.toFixed(2)}
+                </p>
+              </div>
+              {/* Barra de consumo */}
+              <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    saldo.saldo < 0 ? 'bg-red-500' : saldo.casiAgotada ? 'bg-amber-400' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(100, pct)}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-400">
+                Tus viajes inDrive consumieron <b className="text-slate-300">S/ {saldo.usado.toFixed(2)}</b> de comisión
+                ({pct}% de la recarga)
+                {saldo.saldo < 0
+                  ? ' — ⚠️ te pasaste: inDrive ya te está pidiendo recarga'
+                  : saldo.casiAgotada
+                    ? ' — ⚠️ queda poco: recargá de nuevo cuando llegue a 0'
+                    : ''}
+              </p>
+              <button
+                onClick={() => {
+                  const calc = calcularRecarga(
+                    parseFloat(recargaMeta.replace(',', '.')) || 0,
+                    parseFloat(recargaPct.replace(',', '.')) || 0,
+                    recargaDias,
+                  );
+                  setMontoRecargaTxt(calc.recargaSugerida > 0 ? calc.recargaSugerida.toFixed(2) : '');
+                  setConfirmandoRecarga(true);
+                }}
+                className="mt-2 w-full rounded-xl border border-violet-500/40 bg-violet-500/10 py-2 text-[11px] font-black text-violet-300 transition-all active:scale-[0.99] hover:bg-violet-500/20"
+                data-testid="recarga-nueva"
+              >
+                🔁 Nueva recarga
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* Confirmar la recarga: monto + anotar como gasto */}
+        {confirmandoRecarga && (
+          <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3" data-testid="recarga-confirmar">
+            <p className="text-[11px] font-bold text-emerald-300">¿Cuánto recargaste?</p>
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-sm font-black text-slate-400">S/</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.5"
+                min="0"
+                value={montoRecargaTxt}
+                onChange={e => setMontoRecargaTxt(e.target.value)}
+                placeholder="63.00"
+                autoFocus
+                className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-emerald-200 outline-none focus:border-emerald-400"
+                data-testid="recarga-monto-input"
+              />
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-[10px] text-slate-300">
+              <input
+                type="checkbox"
+                checked={anotarGastoRecarga}
+                onChange={e => setAnotarGastoRecarga(e.target.checked)}
+                className="h-3.5 w-3.5 accent-emerald-500"
+                data-testid="recarga-anotar-gasto"
+              />
+              Anotarla como gasto 📶 Recarga de HOY en la Caja (recomendado — así el "En mano" queda con la verdad)
+            </label>
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => setConfirmandoRecarga(false)}
+                className="flex-1 rounded-xl bg-slate-800 py-2 text-[11px] font-bold text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={registrarRecarga}
+                className="flex-1 rounded-xl bg-emerald-600 py-2 text-[11px] font-black text-white transition-all active:scale-[0.98] hover:bg-emerald-500"
+                data-testid="recarga-guardar"
+              >
+                ✅ Guardar recarga
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Escáner IA (F-ID2 → F-ID2.5) */}
@@ -900,7 +1243,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.0 (FASE J — 📷 foto de entrega AUTOMÁTICA: sacás la foto, apretás "🤖 Enviar solo" y el cliente la recibe solo, sin abrir WhatsApp — igual que el cobro con QR; la app escucha el resultado real del bot y te avisa: enviado ✓ / no pudo / bot apagado, en cuyo caso queda encolada y sale apenas encienda; el envío manual 📎 sigue de respaldo · junto con la FASE I: escáner v4 con dirección A/B sin confusiones + observación 📦 del pedido) · Lima, PE
+        DriverTrack v0.10.1 (FASE K — 🎯 recarga semanal: poné cuánto querés hacerte por día y la app te dice cuánto recargar UNA vez para toda la semana (meta × % comisión × días); con el modo comisión prepagada prendido cada carrera inDrive entra COMPLETA — sin descuento del % — y la barra de saldo te dice cuánto queda de la recarga en los Viajes, la Caja y Ajustes · junto con la FASE J: 📷 foto de entrega AUTOMÁTICA: sacás la foto, apretás "🤖 Enviar solo" y el cliente la recibe solo, sin abrir WhatsApp — igual que el cobro con QR; la app escucha el resultado real del bot y te avisa: enviado ✓ / no pudo / bot apagado, en cuyo caso queda encolada y sale apenas encienda; el envío manual 📎 sigue de respaldo · junto con la FASE I: escáner v4 con dirección A/B sin confusiones + observación 📦 del pedido) · Lima, PE
       </p>
     </div>
   );

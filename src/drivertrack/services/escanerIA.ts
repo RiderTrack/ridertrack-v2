@@ -499,7 +499,8 @@ function normalizarDir(s: string): string {
 }
 
 /** La red de seguridad completa: corrige cliente/dirección confundidos. */
-function sanearDatos(d: DatosEscaneados): DatosEscaneados {
+/** FASE K: exportada para los tests (test-sync/test-recarga.mjs). */
+export function sanearDatos(d: DatosEscaneados): DatosEscaneados {
   // 1. La IA puso un código de calle ("C.1") o un trozo de dirección
   //    en "cliente" → se muda a la dirección (al INICIO, como en el
   //    ejemplo real: "C.1 Barrio XV Popular …")

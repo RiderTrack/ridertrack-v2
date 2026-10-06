@@ -83,6 +83,39 @@ export interface Billetera {
   qrBase64: string;    // imagen del QR comprimida (JPEG base64)
 }
 
+// ═══ FASE K: 🎯 Recarga semanal (comisión prepagada) ═══
+// En inDrive el cliente le paga DIRECTO al conductor (efectivo/yape):
+// la comisión no sale de esa plata, sale del SALDO inDrive que se
+// recarga. En vez de recargar todos los días, se recarga UNA vez por
+// semana el monto calculado → y la app deja de descontar el % en cada
+// carrera: la tarifa completa entra como ganancia (la comisión ya está
+// pagada por adelantado con la recarga).
+export interface RecargaSemanal {
+  /** true = modo COMISIÓN PREPAGADA: los viajes inDrive nuevos se guardan
+   *  con comisión 0 (la tarifa completa es tuya). */
+  activa: boolean;
+  /** ¿Cuánto querés hacerte por día? (S/ de tarifa) — para el cálculo. */
+  metaDiaria: number;
+  /** % de comisión de inDrive que usa la calculadora (default: el de Ajustes). */
+  pct: number;
+  /** Días que vas a trabajar por semana (5/6/7). */
+  dias: number;
+  /** Cuánto recargaste la última vez (S/) — 0 = todavía sin recarga. */
+  monto: number;
+  /** Cuándo recargaste: 'YYYY-MM-DD HH:MM' (hora Lima) — desde acá se
+   *  cuenta la comisión acumulada de tus viajes inDrive. */
+  fecha: string;
+}
+
+export const RECARGA_DEFECTO: RecargaSemanal = {
+  activa: false,
+  metaDiaria: 0,
+  pct: 0,
+  dias: 7,
+  monto: 0,
+  fecha: '',
+};
+
 export interface ConfigDT {
   metaDiaria: number;                       // S/ objetivo del día
   comisiones: Record<OrigenViaje, number>;  // % default por origen
@@ -103,6 +136,9 @@ export interface ConfigDT {
    * 📷 Foto de entrega). Etiquetas {cliente} {direccion} {hora}
    * {miNombre} {firma}. Vacío → MENSAJE_FOTO_DEF de utils. */
   mensajeFoto?: string;
+  /** FASE K: 🎯 recarga semanal — comisión prepagada + calculadora.
+   *  Viaja al cel 2 con el sync de la config (objeto anidado → merge). */
+  recarga?: RecargaSemanal;
 }
 
 export interface ResumenDia {

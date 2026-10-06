@@ -3,7 +3,7 @@
 // Local-first: los datos viven en el teléfono. Backup JSON en Ajustes.
 // ═══════════════════════════════════════════════════════════
 
-import { ConfigDT, Gasto, ResumenDia, TIPOS_GASTO, TipoGasto, Viaje } from './types';
+import { ConfigDT, Gasto, RECARGA_DEFECTO, RecargaSemanal, ResumenDia, TIPOS_GASTO, TipoGasto, Viaje } from './types';
 // FASE C: ☁️ cada cambio en el storage avisa al sync de la nube
 // (si hay sesión abierta, sube con debounce; si no, no hace nada)
 import { avisarCambioDT } from './services/syncDT';
@@ -117,6 +117,25 @@ export function guardarViajes(v: Viaje[]): void {
   avisarCambioDT(); // ☁️ FASE C
 }
 
+/** FASE K: la recarga semanal viaja entera entre cels/backups — acá se
+ *  limpia lo que venga raro (texto en números, días 0…). */
+function normalizarRecarga(r?: Partial<RecargaSemanal>): RecargaSemanal {
+  const base = { ...RECARGA_DEFECTO, ...(r ?? {}) };
+  const num = (x: unknown, def = 0) => {
+    const n = typeof x === 'number' ? x : parseFloat(String(x ?? ''));
+    return Number.isFinite(n) && n >= 0 ? n : def;
+  };
+  const dias = Math.round(num(base.dias, 7));
+  return {
+    activa: base.activa === true,
+    metaDiaria: +num(base.metaDiaria).toFixed(2),
+    pct: +Math.min(num(base.pct), 100).toFixed(2),
+    dias: dias >= 1 && dias <= 7 ? dias : 7,
+    monto: +num(base.monto).toFixed(2),
+    fecha: String(base.fecha ?? ''),
+  };
+}
+
 /** F-ID2.5: completa defaults y MIGRA la key de Claude si quedó pegada en el campo de Gemini. */
 export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
   // El campo geminiKey nació como "la key de IA que sea": si el usuario
@@ -140,6 +159,7 @@ export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
     robotActivo: c.robotActivo === true,
     robotUrl: (c.robotUrl ?? '').trim() || 'http://127.0.0.1:3001',
     robotToken: (c.robotToken ?? '').trim() || 'rudy-drivertrack',
+    recarga: normalizarRecarga(c.recarga), // FASE K
   };
 }
 

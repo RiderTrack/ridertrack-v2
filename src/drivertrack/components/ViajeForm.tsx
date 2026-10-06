@@ -216,14 +216,26 @@ export default function ViajeForm({
   // Al cambiar de origen, precarga el % default de esa plataforma.
   // F-ID3.2: salvo la PRIMERA vez si vino borrador — el % del
   // borrador gana (sino siempre lo pisaría con el default).
+  // FASE K: con la COMISIÓN PREPAGADA activa, los viajes inDrive
+  // entran COMPLETOS (la comisión ya la pagaste con la recarga
+  // semanal) → el % se fuerza a 0 y el campo se bloquea.
+  const prepago = config.recarga?.activa === true && origen === 'indrive';
   const saltearPrecarga = useRef(!!borradorInicial);
   useEffect(() => {
     if (saltearPrecarga.current) {
       saltearPrecarga.current = false;
       return;
     }
-    setComisionPct(String(config.comisiones[origen] ?? 0));
-  }, [origen, config.comisiones]);
+    setComisionPct(prepago ? '0' : String(config.comisiones[origen] ?? 0));
+  }, [origen, config.comisiones, prepago]);
+
+  // FASE K: si se prende la prepagada con el form ya abierto (o
+  // venía un % del borrador), se limpia al toque — nunca se guarda
+  // una comisión que ya está pagada
+  useEffect(() => {
+    if (prepago && (parseFloat(comisionPct) || 0) > 0) setComisionPct('0');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepago]);
 
   // F-ID3.2: 🧲 el borrador se guarda SOLO en cada cambio — así
   // cambiar de pestaña (o que Android mate la app) no pierde nada
@@ -239,10 +251,12 @@ export default function ViajeForm({
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
+    // FASE K: comisión prepagada → la tarifa COMPLETA es tuya
+    if (prepago) return { comision: 0, neto: +t.toFixed(2) };
     const p = parseFloat(comisionPct) || 0;
     const c = +(t * (p / 100)).toFixed(2);
     return { comision: c, neto: +(t - c).toFixed(2) };
-  }, [tarifa, comisionPct]);
+  }, [tarifa, comisionPct, prepago]);
 
   // FASE F: 🛣️ con los DOS pines puestos, los km y minutos A→B se
   // calculan SOLOS (Google por calles, o recta de respaldo sin
@@ -450,7 +464,10 @@ export default function ViajeForm({
     }
     setError('');
     const t = parseFloat(tarifa);
-    const p = parseFloat(comisionPct) || 0;
+    // FASE K: comisión prepagada → el viaje se guarda con comisión 0
+    // (la tarifa completa es tuya; la comisión ya la pagaste con la
+    // recarga semanal de inDrive)
+    const p = prepago ? 0 : parseFloat(comisionPct) || 0;
     const c = +(t * (p / 100)).toFixed(2);
     const nuevo: Viaje = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -668,10 +685,27 @@ export default function ViajeForm({
             inputMode="decimal"
             value={comisionPct}
             onChange={e => setComisionPct(e.target.value)}
-            className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-3 text-xl font-bold text-amber-300 outline-none focus:border-amber-400"
+            disabled={prepago}
+            className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-3 text-xl font-bold text-amber-300 outline-none focus:border-amber-400 disabled:opacity-60"
           />
         </div>
       </div>
+
+      {/* FASE K: aviso del modo prepagada — la tarifa completa es tuya */}
+      {prepago && (
+        <div
+          className="mt-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 py-2"
+          data-testid="hint-prepago"
+        >
+          <p className="text-[10px] font-bold text-violet-300">
+            🟣 Comisión prepagada — cada carrera inDrive entra COMPLETA 🎉
+          </p>
+          <p className="mt-0.5 text-[9px] leading-snug text-slate-400">
+            La comisión de inDrive ya la pagaste con tu recarga semanal (Ajustes → 🎯 Recarga semanal) → este viaje no
+            te descuenta nada.
+          </p>
+        </div>
+      )}
 
       {/* Cliente + zona */}
       <div className="mt-2 grid grid-cols-2 gap-2">
