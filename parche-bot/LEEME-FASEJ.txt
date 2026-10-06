@@ -1,0 +1,77 @@
+═════════════════════════════════════════════════════════
+📷 FIX FOTO DE ENTREGA — drivertrack_bot.js v1.2 (FASE J)
+═════════════════════════════════════════════════════════
+
+QUÉ PASABA (para que sepas que no estaba loco):
+  El bot que tenés andando (v1.1) NO conoce la acción de la
+  foto de entrega. La app la mandaba bien, pero el bot la
+  ignoraba en silencio → la app esperaba 25 segundos y te
+  decía "el bot está apagado, quedó encolada" AUNQUE EL BOT
+  ESTUVIERA PRENDIDO. Por eso el QR y los avisos SÍ salían
+  y la foto NO (el bot sí conoce el QR y los avisos).
+
+  Este archivo NUEVO (v1.2) conoce la foto de entrega:
+  sacás la foto → 🤖 "Enviar solo" → el cliente la recibe
+  solo, sin abrir WhatsApp — igual que el cobro con QR.
+
+═════════════════════════════════════════════════════════
+INSTALACIÓN (3 pasos, 1 minuto)
+═════════════════════════════════════════════════════════
+
+ 1. Descomprimí ESTE zip ENCIMA de la carpeta del bot:
+
+      cd ~/bot-whatsapp
+      unzip -o ~/storage/downloads/robot-drivertrack-fasej.zip
+
+    (⚠️ si queda en una SUBCARPETA no sirve — el archivo
+     VIEJO de ~/bot-whatsapp es el que sigue corriendo.
+     Verificalo con:  head -75 drivertrack_bot.js | tail -3
+     tiene que decir "drivertrack_bot.js v1.2")
+
+ 2. Reiniciá el bot:
+
+      pm2 restart rudy-bot
+
+ 3. Verificá la versión NUEVA:
+
+      pm2 logs rudy-bot --lines 20
+
+    Tenés que ver ESTA línea (fijate que diga v1.2):
+
+      🏍️ [DT] Parche activo (drivertrack_bot.js v1.2
+      (FASE J — foto de entrega automática))
+
+    Si dice "v1.1 (FASE B2…)" → el paso 1 quedó en una
+    subcarpeta: volvé a hacer el unzip -o DESDE ~/bot-whatsapp.
+
+═════════════════════════════════════════════════════════
+LAS FOTOS QUE QUEDARON ENCOLADAS
+═════════════════════════════════════════════════════════
+ Las fotos de HOY que quedaron "encoladas" NO van a salir
+ solas después de actualizar (el bot las marca como vencidas
+ a propósito: una foto de entrega que llega horas tarde
+ confunde más de lo que ayuda). Si a algún cliente le
+ faltó la foto, mandasela a mano 📎 (la evidencia quedó
+ guardada en el viaje: Contacto → 📷 Foto de la entrega).
+
+═════════════════════════════════════════════════════════
+PRUEBA (2 minutos, sin clientes de por medio)
+═════════════════════════════════════════════════════════
+ 1. App → inDrive → agregá un viaje de PRUEBA con TU
+    propio celular como cliente.
+ 2. Tocá el viaje → Contacto → 📷 Foto de la entrega.
+ 3. 📷 Tomar foto → 🤖 "Enviar solo".
+ 4. En 1-2 segundos te tiene que llegar LA FOTO a tu
+    propio WhatsApp con el mensaje abajo. ✅
+
+ Si no llega: pm2 logs rudy-bot --lines 30 → mandale esa
+ pantalla al asistente.
+
+═════════════════════════════════════════════════════════
+EL INSTALADOR (solo si hiciera falta)
+═════════════════════════════════════════════════════════
+ instalar_drivertrack.js va de yapa por si algún día lo
+ necesitás en otro teléfono. NO hace falta correrlo ahora:
+  el parche ya está instalado en tu index.js desde la FASE B,
+  y este zip SOLO reemplaza el archivo drivertrack_bot.js
+  (mismas 2 líneas en el index.js, nada que reinstalar).
