@@ -40,7 +40,7 @@ import {
   compartirLink,
 } from '../utils/seguimientoLink';
 import { useClientes } from '../hooks/useClientes';
-import type { Cliente } from '../services/firestore';
+import { Cliente, encolarAccionBot, _botCel } from '../services/firestore';
 import { useRefrigerio, useCronoRuta, useJornada, formatearDuracion, horaDe, hoyHoraAMs } from '../utils/refrigerio';
 // ⏱️ ETA estilo Circuit (Fase 2.9): viaje entre paradas + ritmo real
 import {
@@ -97,7 +97,7 @@ function celNormalizado(cel: string | number | undefined | null): string {
 type Filtro = 'todos' | 'pendientes' | 'entregados' | 'fallidos';
 
 export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { clientes, loading, stats } = useClientes();
   const { crono, rutaMs } = useCronoRuta(user?.uid);
   const refri = useRefrigerio(user?.uid);
@@ -147,6 +147,127 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
   const [duracionProg, setDuracionProg] = useState<number>(30);
   const [inicioPanelAbierto, setInicioPanelAbierto] = useState(false);
   const [horaInicioEdit, setHoraInicioEdit] = useState<string>('');
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔎 F-L.1: LETRA GRANDE — Rudy es corto de vista y la
+  // dirección a 10px no se leía ni con el tamaño de fuente del
+  // sistema al máximo (la app usa px fijos). Tres niveles (Normal
+  // / Grande / Muy grande), se guarda en el teléfono y ARRANCA EN
+  // GRANDE. Se ajusta con el botón "Aa" del encabezado de la
+  // lista. En Grande/Muy grande la dirección además pasa a 2
+  // líneas (se lee completa, sin recortes).
+  // ═══════════════════════════════════════════════════════════
+  const TAM_KEY = 'rt_seg_tam_letra';
+  const [tamLetra, setTamLetra] = useState<number>(() => {
+    try {
+      const crudo = localStorage.getItem(TAM_KEY);
+      if (crudo === null) return 1; // primera vez → GRANDE (default)
+      const v = Number(crudo);
+      return v === 0 || v === 1 || v === 2 ? v : 1; // basura → GRANDE
+    } catch {
+      return 1;
+    }
+  });
+  const guardarTamLetra = (v: number) => {
+    setTamLetra(v);
+    try {
+      localStorage.setItem(TAM_KEY, String(v));
+    } catch {}
+  };
+  const CLASES_NOMBRE = ['text-[13px]', 'text-[15px]', 'text-[17px]'];
+  const CLASES_DIR = ['text-[10px]', 'text-[13px]', 'text-[16px]'];
+  const CLASES_DIR_PROX = ['text-[11px]', 'text-[14px]', 'text-[17px]'];
+  const CLASES_NOMBRE_PROX = ['text-base', 'text-lg', 'text-xl'];
+  // nivel 0: como siempre (una línea recortada) · 1-2: más claro y
+  // hasta 2 líneas para que la dirección se lea ENTERA
+  const claseDirFila =
+    tamLetra === 0
+      ? 'text-slate-400 truncate'
+      : 'text-slate-300 leading-snug line-clamp-2 break-words';
+  const claseDirProx =
+    tamLetra === 0
+      ? 'text-slate-400 truncate'
+      : 'text-slate-300 leading-snug line-clamp-2 break-words';
+
+  // ═══════════════════════════════════════════════════════════
+  // 🚀 F-L.2: ESTOY YENDO — igualito al "Voy en camino" de Mi
+  // Ruta (minutos rápidos + "Otro…"), con el modo a elegir y
+  // RECORDADO: 🤖 Automático (el bot lo manda solo por la misma
+  // cola de Mi Ruta) o 📎 A mano (abre tu WhatsApp con el mensaje
+  // listo, igualito a la plantilla del bot).
+  // ═══════════════════════════════════════════════════════════
+  const MODO_AVISO_KEY = 'rt_seg_modo_aviso';
+  const [modoAviso, setModoAviso] = useState<'auto' | 'manual'>(() => {
+    try {
+      return localStorage.getItem(MODO_AVISO_KEY) === 'manual' ? 'manual' : 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+  const guardarModoAviso = (m: 'auto' | 'manual') => {
+    setModoAviso(m);
+    try {
+      localStorage.setItem(MODO_AVISO_KEY, m);
+    } catch {}
+  };
+  const [yendoCliente, setYendoCliente] = useState<Cliente | null>(null);
+
+  /** El texto del aviso — igualito a la plantilla "🚚 Aviso de
+   *  llegada" del bot (avisarLlegada), así el cliente recibe lo
+   *  mismo venga por el robot o a mano */
+  const textoYendo = (c: Cliente, minutos: number) =>
+    `🚚 Hola, *${c.nombre || 'Cliente'}* 👋\n\nLe informo que estaré llegando aproximadamente en *${minutos} minutos* ⏱️\n\n📦 Pedido:\n> *${c.prod || '—'}*\n\n💰 Monto a pagar:\n*S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)}*\n\n📲 Por favor mantenerse atento(a) al teléfono para coordinar la entrega.\n\n🙌 ¡Muchas gracias!`;
+
+  /** Manda el aviso por el modo elegido (🤖 robot · 📎 wa.me) */
+  const enviarYendo = async (c: Cliente, minutos: number) => {
+    const tel = _botCel(c.cel || '');
+    if (!tel) {
+      onShowToast?.('Sin celular', `${c.nombre || 'El cliente'} no tiene celular válido`, 'warning');
+      return;
+    }
+    if (modoAviso === 'manual') {
+      window.open(
+        `https://wa.me/${tel}?text=${encodeURIComponent(textoYendo(c, minutos))}`,
+        '_blank'
+      );
+      onShowToast?.(
+        '🚀 Estoy yendo',
+        `Abrí tu WhatsApp con el mensaje para ${c.nombre} (${minutos} min)`,
+        'success'
+      );
+      return;
+    }
+    if (!user) {
+      onShowToast?.('Error', 'No hay sesión activa', 'error');
+      return;
+    }
+    try {
+      await encolarAccionBot(user.uid, {
+        tipo: 'avisar_siguiente',
+        clienteId: c.id,
+        telefono: tel,
+        nombre: c.nombre || 'Cliente',
+        prod: c.prod || '',
+        cobrar: parseFloat(String(c.cobrar || 0)),
+        dir: c.dir || '',
+        dist: c.dist || '',
+        st: c.st || 'pendiente',
+        rider: {
+          nombre: profile?.nombre || 'Rudy',
+          telefono: profile?.email || '',
+          empresa: 'MATE',
+        },
+        minutos,
+      });
+      onShowToast?.(
+        '🚀 Estoy yendo',
+        `El bot le avisa a ${c.nombre}: llego en ${minutos} min`,
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('Error', e?.message || 'No se pudo enviar', 'error');
+    }
+  };
 
   // Cargar valores programados al panel
   useEffect(() => {
@@ -837,8 +958,8 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
           </p>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-base font-black text-white truncate">{proximo.nombre || 'Cliente'}</p>
-              <p className="text-[11px] text-slate-400 truncate">
+              <p className={`${CLASES_NOMBRE_PROX[tamLetra]} font-black text-white truncate`}>{proximo.nombre || 'Cliente'}</p>
+              <p className={`${CLASES_DIR_PROX[tamLetra]} ${claseDirProx}`}>
                 📍 {proximo.dir || 'Sin dirección'}
                 {proximo.dist ? `, ${proximo.dist}` : ''}
               </p>
@@ -853,6 +974,15 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                 ~{horaDe(calculo.etas.get(String(proximo.id)) || calculo.etaFinalMs)}
               </p>
               <div className="flex gap-1.5 mt-2">
+                {/* 🚀 F-L.2: el aviso más usado — "este cliente me
+                    toca ahorita" → Estoy yendo en X min */}
+                <button
+                  onClick={() => setYendoCliente(proximo)}
+                  className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white transition-all active:scale-90 shadow-lg shadow-blue-600/30"
+                  title={`Avisar a ${proximo.nombre || 'el cliente'} que estás yendo (en X minutos)`}
+                >
+                  <Timer className="w-4.5 h-4.5" />
+                </button>
                 {celNormalizado(proximo.cel) && (
                   <>
                     <button
@@ -898,6 +1028,20 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
               </span>
             </p>
           </div>
+          {/* 🔎 F-L.1: tamaño de la letra (dirección sobre todo) —
+              un toque cicla Normal → Grande → Muy grande y se
+              guarda en el teléfono */}
+          <button
+            onClick={() => guardarTamLetra((tamLetra + 1) % 3)}
+            className={`flex-shrink-0 px-2 py-1 rounded-lg text-[11px] font-black border transition-colors active:scale-95 ${
+              tamLetra === 0
+                ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                : 'bg-indigo-600 border-indigo-500 text-white'
+            }`}
+            title="Tamaño de la letra de la ruta: Normal → Grande → Muy grande (se queda guardado)"
+          >
+            Aa{tamLetra === 1 ? '+' : tamLetra === 2 ? '++' : ''}
+          </button>
           <div className="flex gap-1 flex-shrink-0">
             {(['todos', 'pendientes', 'entregados'] as Filtro[]).map((f) => (
               <button
@@ -958,7 +1102,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                   {/* Datos */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[13px] font-bold truncate ${
+                      <span className={`${CLASES_NOMBRE[tamLetra]} font-bold truncate ${
                         fallido ? 'text-red-300' : 'text-white'
                       }`}>
                         {c.nombre || 'Cliente'}
@@ -974,7 +1118,7 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400 truncate">
+                    <p className={`${CLASES_DIR[tamLetra]} ${claseDirFila}`}>
                       📍 {c.dir || 'Sin dirección'}
                       {c.dist ? `, ${c.dist}` : ''}
                     </p>
@@ -992,8 +1136,17 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
                     </p>
                   </div>
 
-                  {/* Botones rápidos 📞 WA 🔗 (el link funciona con o sin celular) */}
+                  {/* Botones rápidos ⏱️ 📞 WA 🔗 (el link funciona con o sin celular) */}
                   <div className="flex flex-col gap-1 flex-shrink-0">
+                    {pendiente && (
+                      <button
+                        onClick={() => setYendoCliente(c)}
+                        className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white transition-all active:scale-90"
+                        title={`Avisar a ${c.nombre || 'el cliente'} que estás yendo (en X minutos)`}
+                      >
+                        <Timer className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {tel && (
                       <>
                         <button
@@ -1035,6 +1188,106 @@ export const SeguimientoView: React.FC<SeguimientoViewProps> = ({ onShowToast })
           tu ritmo real: si vas más rápido, la hora de fin va bajando solita (como en Circuit) — y si
           programas tu refrigerio 🍽️ (abajo), sus minutos se suman automáticamente cada día.
         </p>
+      )}
+
+      {/* ══════ 🚀 F-L.2: MODAL "Estoy yendo" — igualito al "Voy en
+          camino" de Mi Ruta (minutos rápidos + "Otro…"), pero con
+          el modo a elegir y RECORDADO: 🤖 Automático (el bot lo
+          manda solo por la misma cola de Mi Ruta) · 📎 A mano
+          (abre tu WhatsApp con el mensaje listo). ══════ */}
+      {yendoCliente && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setYendoCliente(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-bold text-white">🚀 Estoy yendo: {yendoCliente.nombre || 'Cliente'}</h3>
+              <button onClick={() => setYendoCliente(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">Avisale que vas en camino y en cuántos minutos llegás</p>
+
+            {/* Modo: robot o a mano (se recuerda para la próxima) */}
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <button
+                onClick={() => guardarModoAviso('auto')}
+                className={`p-2.5 rounded-xl border text-left transition-all active:scale-95 ${
+                  modoAviso === 'auto'
+                    ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                <div className="text-xs font-bold">🤖 Automático</div>
+                <div className="text-[9px] leading-snug mt-0.5">El bot le avisa solo (como Mi Ruta)</div>
+              </button>
+              <button
+                onClick={() => guardarModoAviso('manual')}
+                className={`p-2.5 rounded-xl border text-left transition-all active:scale-95 ${
+                  modoAviso === 'manual'
+                    ? 'bg-teal-600/20 border-teal-500 text-teal-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                <div className="text-xs font-bold">📎 A mano</div>
+                <div className="text-[9px] leading-snug mt-0.5">Abre tu WhatsApp con el mensaje listo</div>
+              </button>
+            </div>
+
+            {/* Minutos rápidos — al tocar YA se manda por el modo elegido */}
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              {['5', '10', '15', '20', '30', '45'].map((m) => (
+                <button
+                  key={m}
+                  onClick={async () => {
+                    await enviarYendo(yendoCliente, parseInt(m));
+                    setYendoCliente(null);
+                  }}
+                  className="py-3 rounded-xl border-2 border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-lg hover:bg-blue-500/20 transition-all active:scale-95"
+                >
+                  {m} <span className="text-xs">min</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Otro… a mano */}
+            <div className="flex gap-2 mt-3">
+              <input
+                type="number"
+                id="seg-min-input"
+                placeholder="Otro…"
+                min="1"
+                max="120"
+                className="flex-1 bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-blue-500 outline-none text-center"
+              />
+              <button
+                onClick={async () => {
+                  const input = document.getElementById('seg-min-input') as HTMLInputElement;
+                  const val = input?.value;
+                  if (val && parseInt(val) > 0) {
+                    await enviarYendo(yendoCliente, parseInt(val));
+                    setYendoCliente(null);
+                  } else {
+                    onShowToast?.('⚠️ Error', 'Ingresa un número válido', 'warning');
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95"
+              >
+                Mandar
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-500 leading-snug mt-3">
+              {modoAviso === 'auto'
+                ? '🤖 Modo automático: el bot le manda el aviso a tu cliente solo, sin abrir nada (si el bot está apagado, encendelo y el aviso sale solo).'
+                : '📎 Modo a mano: se abre TU WhatsApp con el chat del cliente y el mensaje ya escrito — solo apretás enviar.'}
+            </p>
+          </div>
+        </div>
       )}
 
       {/* ⚡ CHIP FLOTANTE de velocidad (F3.36) — siempre visible,

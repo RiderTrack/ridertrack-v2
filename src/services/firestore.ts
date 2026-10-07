@@ -1266,6 +1266,7 @@ export async function encolarAccionBot(
     rider?: any;
     enviar_imagen?: boolean;
     modo_entrega?: string;
+    minutos?: number; // F-L: 🚀 "Estoy yendo en X min" desde Seguimiento de ruta
   }
 ): Promise<void> {
   if (!db || !userId) return;
