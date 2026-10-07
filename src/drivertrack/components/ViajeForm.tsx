@@ -38,7 +38,7 @@
 //        📞 LLAMAR — botón junto a Cobrar que abre el marcador.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
-import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, X, Zap } from 'lucide-react';
+import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, Plus, X, Zap } from 'lucide-react';
 import { ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
 import { armarMensajeCobro, fmtSoles, normalizarCelular, vibrar } from '../utils';
@@ -61,6 +61,7 @@ interface BorradorViaje {
   zona: string;
   direccion: string;
   dirA: string;          // FASE C: dirección de recojo (A)
+  paradas: string[];     // FASE M: entregas EXTRA del multi-punto (C, D, E) en orden de ruta
   observacion: string;   // FASE I: comentarios del pedido — qué llevás (una bolsa, un artefacto…)
   celular: string;
   celularEnvia: string;  // FASE C: teléfono de quien envía
@@ -85,7 +86,8 @@ function leerBorrador(): BorradorViaje | null {
       (b.tarifa ?? '').trim() || (b.cliente ?? '').trim() || (b.direccion ?? '').trim() ||
       (b.celular ?? '').trim() || (b.zona ?? '').trim() || (b.yapeNombre ?? '').trim() ||
       (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || (b.dirA ?? '').trim() ||
-      (b.observacion ?? '').trim() || b.coordenadas || b.coordenadasA;
+      (b.observacion ?? '').trim() || (Array.isArray(b.paradas) && b.paradas.some(p => String(p ?? '').trim())) ||
+      b.coordenadas || b.coordenadasA;
     if (!algoEscrito) return null;
     return {
       origen: (['indrive', 'rappi', 'pedidosya', 'directo'].includes(b.origen ?? '')
@@ -97,6 +99,7 @@ function leerBorrador(): BorradorViaje | null {
       zona: b.zona ?? '',
       direccion: b.direccion ?? '',
       dirA: b.dirA ?? '',
+      paradas: (Array.isArray(b.paradas) ? b.paradas : []).map(p => String(p ?? '')).filter(p => p.trim()).slice(0, 3), // FASE M
       observacion: b.observacion ?? '', // FASE I: qué llevás (se llena con el escaneo)
       // FASE C.2: ya no hay campo "celular del cliente" aparte — el
       // borrador viejo lo migra al de quien ENVÍA
@@ -160,6 +163,10 @@ export default function ViajeForm({
   const [zona, setZona] = useState(borradorInicial?.zona ?? '');
   const [direccion, setDireccion] = useState(borradorInicial?.direccion ?? ''); // F-ID2.5: campo propio (antes vivía en notas)
   const [dirA, setDirA] = useState(borradorInicial?.dirA ?? ''); // FASE C: dirección de RECOJO (A)
+  // FASE M: entregas EXTRA del multi-punto (C, D, E) — el pedido de
+  // un solo cliente con varios puntos de entrega. Se llenan con el
+  // escáner (paradas) o a mano con el botón "+ Parada".
+  const [paradas, setParadas] = useState<string[]>(borradorInicial?.paradas ?? []);
   // FASE I: observación del pedido — QUÉ llevás ("una bolsa", "un
   // artefacto") — la lee el escáner de los Comentarios del pedido
   const [observacion, setObservacion] = useState(borradorInicial?.observacion ?? '');
@@ -245,9 +252,10 @@ export default function ViajeForm({
       celular: celularEnvia.trim() || celularRecibe.trim(), // FASE C.2: compat
       celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
       coordenadasA, // FASE E: pin del recojo sobrevive cambios de pestaña
+      paradas, // FASE M: las paradas del multi-punto también sobreviven
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA, paradas]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -353,6 +361,12 @@ export default function ViajeForm({
       // Con yaHabiaScan, un re-scan LIMPIA la A si la foto no trae
       // recojo (no queda la dirección vieja equivocada pegada).
       if (datos.direccionA || yaHabiaScan) setDirA(datos.direccionA);
+      // FASE M: las PARADAS del multi-punto (C, D…) — el escáner v5 las
+      // lee cuando el pedido tiene más de una entrega. Con yaHabiaScan,
+      // un re-scan las REEMPLAZA (no queda pegada la que ya no va).
+      if ((datos.paradas && datos.paradas.length > 0) || yaHabiaScan) {
+        setParadas(datos.paradas ?? []);
+      }
       // F-ID2.5: dirección y celular a sus PROPIOS campos (antes
       // terminaban aplastados dentro de notas)
       if (datos.direccion || yaHabiaScan) setDireccion(datos.direccion);
@@ -478,6 +492,8 @@ export default function ViajeForm({
       zona: zona.trim(),
       direccion: direccion.trim(),
       ...(dirA.trim() ? { dirA: dirA.trim() } : {}), // FASE C: recojo (A)
+      // FASE M: entregas EXTRA del multi-punto (C, D, E) en orden de ruta
+      ...(paradas.some(p => p.trim()) ? { paradas: paradas.map(p => p.trim()).filter(Boolean).slice(0, 3) } : {}),
       ...(observacion.trim() ? { observacion: observacion.trim() } : {}), // FASE I: qué llevás
       // FASE C.2: el "celular" principal del viaje = el que ENVÍA
       // (o el que recibe si es el único) — cobro y robot andan igual
@@ -510,6 +526,7 @@ export default function ViajeForm({
     setZona('');
     setDireccion('');
     setDirA('');
+    setParadas([]); // FASE M
     setObservacion(''); // FASE I
     setCelularEnvia('');
     setCelularRecibe('');
@@ -856,6 +873,48 @@ export default function ViajeForm({
           <span className="text-[9px] font-medium text-sky-400/70">
             {coordenadas ? 'con el pin exacto 📍' : 'con la dirección 🧭'}
           </span>
+        </button>
+      )}
+
+      {/* FASE M: 🅾️ PARADAS del multi-punto — entregas EXTRA después de
+          la B (el pedido de un solo cliente con varios puntos). El
+          escáner v5 las llena solo cuando la captura tiene más de una
+          entrega; a mano se agregan con "+ Parada" (hasta 3: C, D, E). */}
+      {paradas.map((p, i) => (
+        <div key={`parada-${i}`} className="mt-2 flex items-center gap-2">
+          <span className="shrink-0 rounded-lg bg-violet-500/15 px-2 py-2 text-[11px] font-black text-violet-300">
+            🅾️ {String.fromCharCode(67 + i)}
+          </span>
+          <input
+            value={p}
+            onChange={e => {
+              const nuevas = [...paradas];
+              nuevas[i] = e.target.value;
+              setParadas(nuevas);
+            }}
+            placeholder={`Parada ${String.fromCharCode(67 + i)} — entrega extra`}
+            className="min-w-0 flex-1 rounded-xl border border-violet-500/30 bg-slate-900 px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-violet-400"
+            data-testid={`input-parada-${i}`}
+          />
+          <button
+            onClick={() => setParadas(paradas.filter((_, j) => j !== i))}
+            className="shrink-0 rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
+            aria-label={`Quitar parada ${String.fromCharCode(67 + i)}`}
+            title="Quitar esta parada"
+            data-testid={`quitar-parada-${i}`}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ))}
+      {paradas.length < 3 && (
+        <button
+          onClick={() => setParadas([...paradas, ''])}
+          className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-violet-500/40 bg-violet-500/5 px-3 py-2 text-[11px] font-black text-violet-300 transition-all active:scale-[0.98] hover:bg-violet-500/15"
+          title="Agregar una entrega extra al pedido (multi-punto)"
+          data-testid="boton-agregar-parada"
+        >
+          <Plus size={14} /> + Parada {paradas.length > 0 ? 'otra' : '(¿el pedido tiene otra entrega?)'}
         </button>
       )}
 

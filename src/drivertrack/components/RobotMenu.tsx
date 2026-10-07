@@ -96,7 +96,14 @@ export default function RobotMenu({
     { label: 'Envía 📤', num: telEnvia },
     { label: 'Recibe 📥', num: telRecibe },
   ].filter(t => t.num.length > 0 && t.num !== (t.label === 'Recibe 📥' ? telEnvia : telRecibe));
-  const [telIdx, setTelIdx] = useState(0);
+  // FASE M (fix comprobante): el default es quien RECIBE si existe —
+  // el MISMO destino al que va la FOTO de la entrega. Antes el
+  // selector arrancaba en "Envía" y el cobro iba SIEMPRE al que
+  // envía aunque arriba hubieras elegido "Recibe" → la foto le
+  // llegaba a uno y el comprobante al chat del otro pedido.
+  const [telIdx, setTelIdx] = useState(() =>
+    telRecibe && telRecibe !== telEnvia ? telefonos.findIndex(t => t.num === telRecibe) : 0,
+  );
   const telElegido = telefonos[telIdx]?.num ?? telEnvia;
 
   function elegir(tipo: TipoAviso) {
@@ -145,10 +152,11 @@ export default function RobotMenu({
         </div>
 
         {/* FASE C.2: ¿a quién? — Envía · Recibe (solo si el viaje tiene
-            los DOS teléfonos distintos) */}
+            los DOS teléfonos distintos). FASE M: aplica a los avisos Y
+            al cobro (mismo destinatario que la foto de entrega). */}
         {telefonos.length > 1 && (
           <div className="mt-2.5" data-testid="robot-destinatarios">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">¿A quién le aviso?</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">¿A quién le aviso y le cobro?</p>
             <div className="mt-1 flex flex-wrap gap-1.5">
               {telefonos.map((t, i) => (
                 <button
@@ -214,11 +222,13 @@ export default function RobotMenu({
               </button>
               <button
                 onClick={() => {
-                  // FASE C.2: el cobro le va al que ENVÍA por defecto (o
-                  // al que recibe si es el único teléfono del viaje)
+                  // FASE M (fix comprobante): el cobro le va al
+                  // DESTINATARIO ELEGIDO arriba (antes ignoraba el
+                  // selector y mandaba SIEMPRE al que envía → la foto
+                  // llegaba a uno y el comprobante al chat del otro)
                   onCobrar(
                     { cliente: viaje.cliente, monto: viaje.tarifa, direccion: viaje.direccion },
-                    telEnvia || telRecibe,
+                    telElegido || telEnvia || telRecibe,
                   );
                   onCerrar();
                 }}
@@ -229,7 +239,9 @@ export default function RobotMenu({
                 <span className="min-w-0">
                   <span className="block text-xs font-black">Cobrar este viaje</span>
                   <span className="block text-[10px] font-medium opacity-70">
-                    mensaje + tu QR de Yape 💜 (S/ {viaje.tarifa.toFixed(2)})
+                    {telefonos.length > 1
+                      ? `a ${telefonos[telIdx]?.label ?? 'quien recibe'} · mensaje + tu QR 💜 (S/ ${viaje.tarifa.toFixed(2)})`
+                      : `mensaje + tu QR de Yape 💜 (S/ ${viaje.tarifa.toFixed(2)})`}
                   </span>
                 </span>
               </button>

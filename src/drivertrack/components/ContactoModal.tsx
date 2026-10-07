@@ -13,6 +13,7 @@
 // (ViajeForm, sin cobro ni avisos — esos ya tienen su botón ahí).
 // Patrón visual del RobotMenu (FASE B): hoja de abajo, blur, pop.
 // ═══════════════════════════════════════════════════════════
+import { useState } from 'react';
 import { Bot, Camera, Loader2, MessageCircle, Phone, Send, X } from 'lucide-react';
 import { linkLlamada, normalizarCelular, vibrar } from '../utils';
 import IconoWhatsApp from './IconoWhatsApp';
@@ -30,8 +31,13 @@ export interface Contacto {
 interface Props {
   contactos: Contacto[];
   onCerrar: () => void;
-  /** fila ancha: mandar el mensaje de COBRO (robot con QR o manual) */
-  onCobrar?: () => void;
+  /** fila ancha: mandar el mensaje de COBRO (robot con QR o manual).
+   *  FASE M (fix comprobante): recibe el NÚMERO elegido — cuando el
+   *  viaje tiene DOS teléfonos, la fila muestra chips 📤/📥 para
+   *  elegir a quién (default: quien RECIBE, el mismo destino de la
+   *  📷 foto de entrega — antes iba SIEMPRE al que envía y el
+   *  comprobante terminaba en el chat del otro pedido). */
+  onCobrar?: (numero: string) => void;
   /** hay un cobro del robot en vuelo → spinner en la fila */
   cobrando?: boolean;
   /** robot activo → la fila de cobro va violeta; si no, verde WhatsApp */
@@ -57,6 +63,13 @@ export default function ContactoModal({
 }: Props) {
   // solo los que de verdad tienen número cargado
   const conNumero = contactos.filter(c => normalizarCelular(c.numero.trim()));
+  // FASE M: a quién le va el COBRO — con dos números se elige con
+  // chips; default = quien RECIBE (id 'b'), el mismo destino de la
+  // foto de entrega. Con un solo número ni se pregunta.
+  const [cobroIdx, setCobroIdx] = useState(() =>
+    conNumero.length > 1 ? Math.max(0, conNumero.findIndex(c => c.id === 'b')) : 0,
+  );
+  const cobroDestino = conNumero[cobroIdx] ?? conNumero[0];
 
   return (
     <div
@@ -135,32 +148,58 @@ export default function ContactoModal({
         {(onCobrar || onFoto || onAvisos) && (
           <div className="mt-2 space-y-2">
             {onCobrar && (
-              <button
-                onClick={() => onCobrar()}
-                disabled={cobrando}
-                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-50 ${
+              <div
+                className={`rounded-xl border transition-all ${
                   cobroRobot
-                    ? 'border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20'
-                    : 'border-[#25D366]/40 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20'
+                    ? 'border-violet-500/40 bg-violet-500/10'
+                    : 'border-[#25D366]/40 bg-[#25D366]/10'
                 }`}
                 data-testid="contacto-cobro"
               >
-                {cobrando ? (
-                  <Loader2 size={20} className="shrink-0 animate-spin" />
-                ) : cobroRobot ? (
-                  <Bot size={20} className="shrink-0" />
-                ) : (
-                  <MessageCircle size={20} className="shrink-0" />
+                {/* FASE M: chips 📤/📥 — a quién le mandás el cobro */}
+                {conNumero.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">
+                    <span className="text-[9px] font-black uppercase tracking-wide text-slate-500">¿A quién?</span>
+                    {conNumero.map((c, i) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setCobroIdx(i)}
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-black transition-all active:scale-[0.97] ${
+                          i === cobroIdx
+                            ? 'bg-slate-200 text-slate-900'
+                            : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                        data-testid={`contacto-cobro-dest-${c.id}`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
-                <span className="min-w-0">
-                  <span className="block text-xs font-black">Mandar el cobro</span>
-                  <span className="block text-[10px] font-medium opacity-70">
-                    {cobroRobot
-                      ? `el robot le manda el mensaje con tu QR${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`
-                      : `mensaje listo por WhatsApp${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`}
+                <button
+                  onClick={() => cobroDestino && onCobrar(cobroDestino.numero.trim())}
+                  disabled={cobrando || !cobroDestino}
+                  className="flex w-full items-center gap-3 px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-50"
+                >
+                  {cobrando ? (
+                    <Loader2 size={20} className="shrink-0 animate-spin" />
+                  ) : cobroRobot ? (
+                    <Bot size={20} className="shrink-0" />
+                  ) : (
+                    <MessageCircle size={20} className="shrink-0" />
+                  )}
+                  <span className="min-w-0">
+                    <span className="block text-xs font-black">Mandar el cobro</span>
+                    <span className="block text-[10px] font-medium opacity-70">
+                      {conNumero.length > 1 && cobroDestino
+                        ? `${cobroDestino.label} · ${cobroDestino.numero.trim()}`
+                        : cobroRobot
+                          ? `el robot le manda el mensaje con tu QR${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`
+                          : `mensaje listo por WhatsApp${montoCobro != null ? ` (S/ ${montoCobro.toFixed(2)})` : ''}`}
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+              </div>
             )}
             {onFoto && (
               <button

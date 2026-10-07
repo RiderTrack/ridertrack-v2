@@ -294,6 +294,27 @@ check('la evidencia local SOBREVIVE a lo que bajó de la nube',
 check('sin push eterno: la foto local NO obliga a re-subir (0 pushes)',
   T.setDocCalls.length === 0, `→ pushes: ${T.setDocCalls.length}`);
 
+// ═══════════ TEST 10: FASE M — las PARADAS del multi-punto viajan al cel 2 ═══════════
+console.log('\n▶ TEST 10 — FASE M: 🅾️ viaje con paradas (multi-punto) sube a la nube INTACTO');
+await reset({
+  dt_viajes_v1: [{
+    id: 'multi1', fecha: '2026-10-05', tarifa: 20, comision: 3, neto: 17, origen: 'indrive',
+    cliente: 'Rosa', direccionA: 'Av. Sucre 1450 — San Miguel',
+    direccion: 'C.1 Mz B Lt 5, Barrio XV',
+    paradas: ['Jr. Los Álamos 245, SMP', 'Av. La Marina 3100'], // FASE M: C y D
+  }],
+});
+T.snapActual = { data: () => ({ viajes: [], gastos: [], actualizadoEn: 0, dispositivo: 'cel2' }) };
+iniciarSyncDT('rudy');
+await esperarPush();
+check('el push lleva las paradas tal cual (C y D del multi-punto)',
+  T.setDocCalls.length === 1 &&
+  JSON.stringify(T.setDocCalls[0].viajes[0]?.paradas) ===
+    JSON.stringify(['Jr. Los Álamos 245, SMP', 'Av. La Marina 3100']),
+  `→ pushes: ${T.setDocCalls.length}`);
+check('las paradas sobreviven en el localStorage local (el sync no las muta)',
+  JSON.stringify(lsViajes()[0]?.paradas) === JSON.stringify(['Jr. Los Álamos 245, SMP', 'Av. La Marina 3100']));
+
 // ═══════════ resumen ═══════════
 console.log(`\n══════════════════════════════════`);
 console.log(`RESULTADO: ${pass} ✓ / ${fail} ✗`);

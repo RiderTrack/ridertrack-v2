@@ -78,6 +78,7 @@ export interface DatosEscaneados {
   cliente: string;
   direccionA: string; // FASE I: dirección de RECOJO (A) — "Recoger en" en inDrive
   direccion: string; // dirección de ENTREGA (B)
+  paradas: string[]; // FASE M: entregas EXTRA del multi-punto (C, D…) en orden, después de la B
   zona: string;
   referencia: string;
   observacion: string; // FASE I: comentarios del pedido — qué lleva el cliente (una bolsa, un artefacto…)
@@ -157,6 +158,7 @@ REGLAS DE ORO DE LAS DIRECCIONES:
 2. Si muestra DOS direcciones → identificá cuál es el RECOJO por su etiqueta ("Recoger en", tienda, origen) y cuál la ENTREGA ("Entregar en", "Destino", el cliente). Si el pedido es de delivery, la ENTREGA es la del CLIENTE que recibe (la que va con el nombre del destinatario o la referencia de su casa).
 3. NUNCA copies la misma dirección en los dos campos. Si no podés distinguir cuál es el recojo, dejá "direccionA" en "" y poné la de entrega en "direccion".
 4. En los pueblos jóvenes, el pedido del cliente (la entrega B) suele llevar códigos tipo "C.1 Mz B Lt 5"; el recojo (A) suele ser una tienda, local o dirección de avenida.
+5. MULTI-PUNTO (FASE M): si el pedido tiene MÁS DE UNA ENTREGA ("Entregar en" aparece 2+ veces, o hay "paradas", "parada 2", "punto de entrega" extra), la PRIMERA entrega va en "direccion" (B) y las demás van en "paradas" EN ORDEN DE RUTA (C, D, E). "paradas" es un ARRAY de strings []. Si no hay entregas extra, devolve "paradas": []. NUNCA pongas el recojo (A) en paradas.
 
 - cliente: el NOMBRE DE PERSONA del cliente (quién recibe o pide). Ej: "Mk", "María Fernández", "Kevin Rojas". NUNCA pongas acá códigos de dirección ("C.1", "C-1", "Casa 2", "Mz B", "Lote 5", "#123", "Cliente 3") ni barrios/zonas. OJO: si el único nombre de persona aparece junto al yape (ej: "Mk yape 987654321"), ese ES el cliente. Si la foto no tiene ningún nombre de persona, devuelve "".
 - zona: el distrito o zona DE LA ENTREGA (ej: San Miguel, La Perla, Cercado, SMP). Solo el nombre, sin "Distrito de".
@@ -173,8 +175,8 @@ Barrio XV Popular de Intereses Social Proyecto
 Mk yape 980811297
 16
 La respuesta correcta es:
-{"cliente":"Mk","direccionA":"","direccion":"C.1 Barrio XV Popular de Intereses Social Proyecto","zona":"","referencia":"","observacion":"","telefono":"","yapeNombre":"Mk","yapeNumero":"980811297","tarifa":"16"}
-Fíjate: "C.1" es la CALLE → va al INICIO de la direccion; "Mk" es la PERSONA → va en cliente (y en yapeNombre).
+{"cliente":"Mk","direccionA":"","direccion":"C.1 Barrio XV Popular de Intereses Social Proyecto","paradas":[],"zona":"","referencia":"","observacion":"","telefono":"","yapeNombre":"Mk","yapeNumero":"980811297","tarifa":"16"}
+Fíjate: "C.1" es la CALLE → va al INICIO de la direccion; "Mk" es la PERSONA → va en cliente (y en yapeNombre). Sin entregas extra → "paradas": [].
 
 EJEMPLO 2 (captura de inDrive con las DOS direcciones + comentario) — la foto dice:
 Recoger en
@@ -183,13 +185,24 @@ Entregar en
 C.1 Mz B Lt 5, Barrio XV
 Comentarios: Llevo una bolsa con un artefacto pequeño
 La respuesta correcta es:
-{"cliente":"","direccionA":"Av. Sucre 1450 — San Miguel","direccion":"C.1 Mz B Lt 5, Barrio XV","zona":"","referencia":"","observacion":"Llevo una bolsa con un artefacto pequeño","telefono":"","yapeNombre":"","yapeNumero":"","tarifa":""}
+{"cliente":"","direccionA":"Av. Sucre 1450 — San Miguel","direccion":"C.1 Mz B Lt 5, Barrio XV","paradas":[],"zona":"","referencia":"","observacion":"Llevo una bolsa con un artefacto pequeño","telefono":"","yapeNombre":"","yapeNumero":"","tarifa":""}
 Fíjate: el recojo va en direccionA (etiqueta "Recoger en"), la entrega en direccion (etiqueta "Entregar en"), y el comentario de QUÉ se lleva va en observacion.
+
+EJEMPLO 3 (MULTI-PUNTO — un solo pedido con varias entregas) — la foto dice:
+Recoger en
+Av. Sucre 1450 — San Miguel
+Entregar en
+C.1 Mz B Lt 5, Barrio XV
+Entregar en
+Jr. Los Álamos 245, SMP
+La respuesta correcta es:
+{"cliente":"","direccionA":"Av. Sucre 1450 — San Miguel","direccion":"C.1 Mz B Lt 5, Barrio XV","paradas":["Jr. Los Álamos 245, SMP"],"zona":"","referencia":"","observacion":"","telefono":"","yapeNombre":"","yapeNumero":"","tarifa":""}
+Fíjate: la PRIMERA entrega va en "direccion" (B), la SEGUNDA va en "paradas" (C) — el recojo JAMÁS va en paradas.
 
 REGLAS DE ORO:
 - Copia el texto EXACTO de la foto. No corrijas ortografía. NO INVENTES NADA. No repitas palabras pegadas (si la foto dice "Barrio XV", es "Barrio XV", no "Barrio Barrio XV").
-- Si un dato no aparece en la foto, devuelve "" (cadena vacía).
-- Responde SOLO el JSON, con EXACTAMENTE estas claves: cliente, direccionA, direccion, zona, referencia, observacion, telefono, yapeNombre, yapeNumero, tarifa.`;
+- Si un dato no aparece en la foto, devuelve "" (cadena vacía), y "paradas" como [] si no hay entregas extra.
+- Responde SOLO el JSON, con EXACTAMENTE estas claves: cliente, direccionA, direccion, paradas, zona, referencia, observacion, telefono, yapeNombre, yapeNumero, tarifa.`;
 
 // Claude no tiene responseSchema: se le exige el JSON por el prompt
 const PROMPT_CLAUDE_EXTRA = `
@@ -500,40 +513,91 @@ function normalizarDir(s: string): string {
 
 /** La red de seguridad completa: corrige cliente/dirección confundidos. */
 /** FASE K: exportada para los tests (test-sync/test-recarga.mjs). */
-export function sanearDatos(d: DatosEscaneados): DatosEscaneados {
+/** FASE M: acepta "paradas" CRUDA (string/array/lo que sea que la IA
+ *  haya mandado) — la sanea adentro con sanearParadas. */
+type DatosEscaneadosCrudos = Omit<DatosEscaneados, 'paradas'> & { paradas?: unknown };
+export function sanearDatos(d: DatosEscaneadosCrudos): DatosEscaneados {
+  const limpio = { ...d } as DatosEscaneadosCrudos;
+  // ── FASE M: PARADAS del multi-punto — saneo completo ──
+  // 0. La IA mandó cualquier cosa rara (string, objeto, números) →
+  //    array limpio; se recortan espacios y vacíos; máximo 3
+  //    (C, D, E — con A y B son 5 puntos, más que suficiente)
+  const paradasLimpias = sanearParadas(limpio.paradas, limpio.direccionA, limpio.direccion);
   // 1. La IA puso un código de calle ("C.1") o un trozo de dirección
   //    en "cliente" → se muda a la dirección (al INICIO, como en el
   //    ejemplo real: "C.1 Barrio XV Popular …")
-  if (d.cliente && (pareceCodigoDireccion(d.cliente) || pareceTrozoDireccion(d.cliente))) {
-    d.direccion = d.direccion ? `${d.cliente} ${d.direccion}`.trim() : d.cliente;
-    d.cliente = '';
+  if (limpio.cliente && (pareceCodigoDireccion(limpio.cliente) || pareceTrozoDireccion(limpio.cliente))) {
+    limpio.direccion = limpio.direccion ? `${limpio.cliente} ${limpio.direccion}`.trim() : limpio.cliente;
+    limpio.cliente = '';
   }
   // 2. Quedó sin nombre pero el pedido trae nombre de yape → ese es
   //    el cliente ("Mk yape 980811297" → cliente "Mk")
-  if (!d.cliente && d.yapeNombre) d.cliente = d.yapeNombre;
+  if (!limpio.cliente && limpio.yapeNombre) limpio.cliente = limpio.yapeNombre;
   // 3. Palabras pegadas repetidas en dirección/zona
-  d.direccion = sinPalabrasRepetidas(d.direccion);
-  d.direccionA = sinPalabrasRepetidas(d.direccionA);
-  d.zona = sinPalabrasRepetidas(d.zona);
+  limpio.direccion = sinPalabrasRepetidas(limpio.direccion);
+  limpio.direccionA = sinPalabrasRepetidas(limpio.direccionA);
+  limpio.zona = sinPalabrasRepetidas(limpio.zona);
   // 4. El número de yape queda limpio: solo dígitos
-  d.yapeNumero = d.yapeNumero.replace(/[^0-9]/g, '');
+  limpio.yapeNumero = limpio.yapeNumero.replace(/[^0-9]/g, '');
   // ── FASE I: guarda anti-confusión A/B ──
   // 5. La IA copió la MISMA dirección en A y en B (con o sin
   //    mayúsculas/tildes/puntos de diferencia) → la A se borra:
   //    era la entrega duplicada, no un recojo real
-  if (d.direccionA && d.direccion && normalizarDir(d.direccionA) === normalizarDir(d.direccion)) {
-    d.direccionA = '';
+  if (limpio.direccionA && limpio.direccion && normalizarDir(limpio.direccionA) === normalizarDir(limpio.direccion)) {
+    limpio.direccionA = '';
   }
   // 6. La IA llenó la A pero dejó la B vacía → ese único lugar es
   //    la ENTREGA (la B es la que importa para el cobro y la
   //    navegación): se muda
-  if (!d.direccion && d.direccionA) {
-    d.direccion = d.direccionA;
-    d.direccionA = '';
+  if (!limpio.direccion && limpio.direccionA) {
+    limpio.direccion = limpio.direccionA;
+    limpio.direccionA = '';
   }
   // 7. La observación queda prolija (sin palabras pegadas repetidas)
-  d.observacion = sinPalabrasRepetidas(d.observacion);
-  return d;
+  limpio.observacion = sinPalabrasRepetidas(limpio.observacion);
+  const saneado = limpio as DatosEscaneados;
+  saneado.paradas = paradasLimpias;
+  return saneado;
+}
+
+/**
+ * FASE M: sanea las PARADAS del multi-punto:
+ *  · defiende contra respuestas raras de la IA (string suelto,
+ *    objetos, números → array limpio; undefined → [])
+ *  · recorta espacios y saca vacías
+ *  · saca la que duplique al RECOJO (A) o a la ENTREGA (B) —
+ *    normalizando como siempre ("C.1" == "c-1" == "C1")
+ *  · saca repetidas entre sí (misma parada dos veces)
+ *  · máximo 3 (C, D, E)
+ */
+export function sanearParadas(
+  crudo: unknown,
+  dirA: string,
+  dirB: string,
+): string[] {
+  let lista: unknown[] = [];
+  if (Array.isArray(crudo)) lista = crudo;
+  else if (typeof crudo === 'string' && crudo.trim()) lista = [crudo]; // IA que mandó string en vez de array
+  const normA = normalizarDir(dirA);
+  const normB = normalizarDir(dirB);
+  const vistas = new Set<string>();
+  const limpias: string[] = [];
+  for (const p of lista) {
+    if (typeof p !== 'string') continue;
+    const parada = sinPalabrasRepetidas(p).trim();
+    if (!parada) continue;
+    const n = normalizarDir(parada);
+    if (!n) continue;
+    // duplicó la A (recojo) o la B (entrega) → no es parada real
+    if (normA && n === normA) continue;
+    if (normB && n === normB) continue;
+    // repetida entre las paradas → una sola vez
+    if (vistas.has(n)) continue;
+    vistas.add(n);
+    limpias.push(parada);
+    if (limpias.length >= 3) break;
+  }
+  return limpias;
 }
 
 /** F-ID2.5: errores de CUENTA — con estos, la key está muerta HOY
@@ -590,6 +654,7 @@ export async function escanearDireccion(
         cliente: (d.cliente ?? '').trim(),
         direccionA: (d.direccionA ?? '').trim(), // FASE I: recojo (A)
         direccion: (d.direccion ?? '').trim(),
+        paradas: (d.paradas ?? []) as unknown, // FASE M: multi-punto (lo sanea sanearDatos)
         zona: (d.zona ?? '').trim(),
         referencia: (d.referencia ?? '').trim(),
         observacion: (d.observacion ?? '').trim(), // FASE I: qué lleva
@@ -602,6 +667,7 @@ export async function escanearDireccion(
         !datos.cliente &&
         !datos.direccionA &&
         !datos.direccion &&
+        !datos.paradas.length &&
         !datos.zona &&
         !datos.referencia &&
         !datos.observacion &&
@@ -690,6 +756,7 @@ export async function probarKeyIA(
 // ═══════════════════════════════════════════════════════════
 export const __escanerTests = {
   sanearDatos,
+  sanearParadas,
   parsearJsonTexto,
   pareceCodigoDireccion,
   pareceTrozoDireccion,

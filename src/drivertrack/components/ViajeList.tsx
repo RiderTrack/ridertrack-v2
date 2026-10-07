@@ -124,8 +124,8 @@ export default function ViajeList({
   // muestra el ✓ Copiada en la tarjeta
   const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
 
-  /** 📋 FASE E: tocar la dirección la copia (A o B por separado) */
-  async function copiarDireccion(viajeId: string, cual: 'a' | 'b', texto: string) {
+  /** 📋 FASE E: tocar la dirección la copia (A, B o paradas C…) */
+  async function copiarDireccion(viajeId: string, cual: string, texto: string) {
     const limpio = texto.trim();
     if (!limpio) return;
     const ok = await copiarTexto(limpio);
@@ -232,10 +232,10 @@ export default function ViajeList({
                 (A y B por separado — ✓ Copiada como feedback). Al lado
                 siguen los botones A/B para navegar. */}
             {v.dirA?.trim() ? (
-              <div className="mt-1 flex items-center gap-1 text-[10px] leading-snug text-slate-400">
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] leading-snug text-slate-400">
                 <button
                   onClick={() => copiarDireccion(v.id, 'a', v.dirA || '')}
-                  className="min-w-0 truncate rounded px-0.5 py-0.5 text-left transition-colors hover:text-amber-300"
+                  className="min-w-0 max-w-full truncate rounded px-0.5 py-0.5 text-left transition-colors hover:text-amber-300"
                   title="Tocá para copiar la dirección del recojo (A)"
                   data-testid="boton-copiar-a"
                 >
@@ -248,7 +248,7 @@ export default function ViajeList({
                 <span className="shrink-0 text-slate-600">→</span>
                 <button
                   onClick={() => copiarDireccion(v.id, 'b', v.direccion || '')}
-                  className="min-w-0 truncate rounded px-0.5 py-0.5 text-left text-slate-500 transition-colors hover:text-sky-300"
+                  className="min-w-0 max-w-full truncate rounded px-0.5 py-0.5 text-left text-slate-500 transition-colors hover:text-sky-300"
                   title="Tocá para copiar la dirección de entrega (B)"
                   data-testid="boton-copiar-b"
                 >
@@ -258,6 +258,29 @@ export default function ViajeList({
                     <>📍 {v.direccion || '—'}</>
                   )}
                 </button>
+                {/* FASE M: 🅾️ las PARADAS del multi-punto (C, D, E) —
+                    copiables igual que A y B, en orden de ruta */}
+                {(v.paradas ?? []).map((p, i) =>
+                  p.trim() ? (
+                    <span key={`${v.id}-c${i}`} className="flex min-w-0 max-w-full items-center gap-1">
+                      <span className="shrink-0 text-slate-600">→</span>
+                      <button
+                        onClick={() => copiarDireccion(v.id, `c${i}`, p)}
+                        className="min-w-0 max-w-full truncate rounded px-0.5 py-0.5 text-left text-violet-300/90 transition-colors hover:text-violet-200"
+                        title={`Tocá para copiar la parada ${String.fromCharCode(67 + i)}`}
+                        data-testid="boton-copiar-c"
+                      >
+                        {copiadoKey === `${v.id}-c${i}` ? (
+                          <span className="font-bold text-emerald-400">
+                            ✓ Copiada 🅾️ {String.fromCharCode(67 + i)}
+                          </span>
+                        ) : (
+                          <>🅾️ {String.fromCharCode(67 + i)} {p.trim()}</>
+                        )}
+                      </button>
+                    </span>
+                  ) : null,
+                )}
               </div>
             ) : (
               v.direccion && (
@@ -275,6 +298,34 @@ export default function ViajeList({
                 </button>
               )
             )}
+            {/* FASE M: paradas del multi-punto cuando NO hay recojo (A)
+                cargado — mismas copiables violeta que la fila de arriba */}
+            {!v.dirA?.trim() &&
+              (v.paradas ?? []).some(p => p.trim()) && (
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] leading-snug">
+                  {(v.paradas ?? []).map((p, i) =>
+                    p.trim() ? (
+                      <span key={`${v.id}-s${i}`} className="flex min-w-0 max-w-full items-center gap-1">
+                        <span className="shrink-0 text-slate-600">→</span>
+                        <button
+                          onClick={() => copiarDireccion(v.id, `c${i}`, p)}
+                          className="min-w-0 max-w-full truncate rounded px-0.5 py-0.5 text-left text-violet-300/90 transition-colors hover:text-violet-200"
+                          title={`Tocá para copiar la parada ${String.fromCharCode(67 + i)}`}
+                          data-testid="boton-copiar-c"
+                        >
+                          {copiadoKey === `${v.id}-c${i}` ? (
+                            <span className="font-bold text-emerald-400">
+                              ✓ Copiada 🅾️ {String.fromCharCode(67 + i)}
+                            </span>
+                          ) : (
+                            <>🅾️ {String.fromCharCode(67 + i)} {p.trim()}</>
+                          )}
+                        </button>
+                      </span>
+                    ) : null,
+                  )}
+                </div>
+              )}
             {/* FASE I: 📦 OBSERVACIÓN del pedido — qué llevás ("una
                 bolsa", "un artefacto"). La llena el escáner leyendo
                 los Comentarios del pedido; ámbar para verla ANTES de
@@ -502,15 +553,20 @@ export default function ViajeList({
             <ContactoModal
               contactos={contactos}
               onCerrar={() => setContactoViajeId(null)}
-              onCobrar={() => {
+              onCobrar={
                 // F-ID2.8 + F-ID5: MISMO mensaje del botón Cobrar de
                 // siempre; con el robot activo lo manda el bot SOLO.
-                onMandarCobro(
-                  { cliente: v.cliente, monto: v.tarifa, direccion: v.direccion },
-                  telE || telR,
-                );
-                setContactoViajeId(null);
-              }}
+                // FASE M (fix comprobante): el ContactoModal le pasa
+                // el NÚMERO elegido con los chips (default: quien
+                // RECIBE — antes iba siempre al que envía).
+                numero => {
+                  onMandarCobro(
+                    { cliente: v.cliente, monto: v.tarifa, direccion: v.direccion },
+                    numero,
+                  );
+                  setContactoViajeId(null);
+                }
+              }
               cobrando={cobroEnCurso}
               cobroRobot={config.robotActivo}
               montoCobro={v.tarifa}

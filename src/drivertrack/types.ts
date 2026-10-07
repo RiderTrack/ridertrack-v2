@@ -21,6 +21,9 @@ export interface Viaje {
   direccion: string;   // F-ID2.5: dirección de ENTREGA propia (antes vivía perdida en notas)
                          // FASE C: es la dirección B (entrega); la A (recojo) va en dirA
   dirA?: string;       // FASE C: dirección de RECOJO (A) — de dónde salís a buscar el pedido
+  paradas?: string[];  // FASE M: entregas EXTRA (multi-punto) en orden de ruta, DESPUÉS de la B
+                        // ("un pedido con tres puntos de un solo cliente": A → B → C → D)
+                        // la escanea el escáner v5 o se cargan a mano en el formulario
   observacion?: string; // FASE I: comentarios del pedido escaneados — QUÉ llevás (una bolsa, un artefacto…)
                          // se muestra en la tarjeta del viaje para verlo antes de pasar a buscar
   celular: string;     // F-ID2.5: WhatsApp del cliente → botón de cobro

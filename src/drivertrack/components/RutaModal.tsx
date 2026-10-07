@@ -12,7 +12,7 @@
 // La tarjeta queda con UN solo botón 🛣️ Ruta (antes: A + B + GPS).
 // Patrón visual del ContactoModal (FASE G): hoja de abajo, blur, pop.
 // ═══════════════════════════════════════════════════════════
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Check, Copy, Navigation, Route, Square, X } from 'lucide-react';
 import type { Viaje } from '../types';
 import { vibrar } from '../utils';
@@ -70,7 +70,7 @@ function BloqueDireccion({
   titulo: string;
   direccion: string;
   destino: { lat?: number; lng?: number; direccion?: string };
-  color: 'amber' | 'sky';
+  color: 'amber' | 'sky' | 'violet';
   testid: string;
   onNavegar: (destino: { lat?: number; lng?: number; direccion?: string }) => void;
 }) {
@@ -83,11 +83,18 @@ function BloqueDireccion({
           chip: 'text-amber-300',
           nav: 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25',
         }
-      : {
-          borde: 'border-sky-500/30',
-          chip: 'text-sky-300',
-          nav: 'border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25',
-        };
+      : color === 'violet'
+        ? {
+            // FASE M: las PARADAS del multi-punto (C, D, E)
+            borde: 'border-violet-500/30',
+            chip: 'text-violet-300',
+            nav: 'border-violet-500/40 bg-violet-500/15 text-violet-300 hover:bg-violet-500/25',
+          }
+        : {
+            borde: 'border-sky-500/30',
+            chip: 'text-sky-300',
+            nav: 'border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25',
+          };
 
   async function copiar() {
     const ok = await copiarTexto(direccion.trim());
@@ -143,11 +150,14 @@ export default function RutaModal({ viaje, onCerrar, grabando = false, onIniciar
   const dirB = (viaje.direccion ?? '').trim();
   const destinoA = viaje.coordenadasA ?? { direccion: dirA };
   const destinoB = viaje.coordenadas ?? { direccion: dirB };
+  // FASE M: las PARADAS del multi-punto (C, D, E) — se navegan por
+  // dirección de texto (los pines del mapa son solo de A y B)
+  const paradas = (viaje.paradas ?? []).map(p => p.trim()).filter(Boolean).slice(0, 3);
 
   // mini-selector Waze/Google cuando la preferencia es "Preguntar"
-  const [navPara, setNavPara] = useState<'a' | 'b' | null>(null);
+  const [navPara, setNavPara] = useState<'a' | 'b' | number | null>(null);
 
-  function navegar(destino: { lat?: number; lng?: number; direccion?: string }, cual: 'a' | 'b') {
+  function navegar(destino: { lat?: number; lng?: number; direccion?: string }, cual: 'a' | 'b' | number) {
     if (!tieneDestino(destino)) return;
     if (!abrirNavegacion(destino)) setNavPara(cual);
   }
@@ -223,6 +233,21 @@ export default function RutaModal({ viaje, onCerrar, grabando = false, onIniciar
             testid="ruta-bloque-b"
             onNavegar={d => navegar(d, 'b')}
           />
+          {/* FASE M: 🅾️ las PARADAS del multi-punto — un bloque por
+              entrega extra, en orden de ruta (C, D, E) */}
+          {paradas.map((p, i) => (
+            <Fragment key={`parada-${i}`}>
+              <BloqueDireccion
+                emoji="🅾️"
+                titulo={`Parada (${String.fromCharCode(67 + i)})`}
+                direccion={p}
+                destino={{ direccion: p }}
+                color="violet"
+                testid={`ruta-bloque-c${i}`}
+                onNavegar={d => navegar(d, i)}
+              />
+            </Fragment>
+          ))}
         </div>
 
         {/* 📍 GPS: grabar los km del viaje */}
@@ -277,6 +302,13 @@ export default function RutaModal({ viaje, onCerrar, grabando = false, onIniciar
     )}
     {navPara === 'b' && (
       <NavegarMenu destino={destinoB} etiqueta={dirB} onCerrar={() => setNavPara(null)} />
+    )}
+    {typeof navPara === 'number' && paradas[navPara] && (
+      <NavegarMenu
+        destino={{ direccion: paradas[navPara] }}
+        etiqueta={paradas[navPara]}
+        onCerrar={() => setNavPara(null)}
+      />
     )}
     </>
   );

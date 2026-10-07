@@ -344,7 +344,11 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     });
     setCobroEnCurso(false);
     if (r.ok) {
-      mostrarToast('✓ Cobro en camino — el cliente lo recibe ya 💜');
+      // FASE M: el toast te dice a QUÉ NÚMERO salió — si el viaje
+      // tiene dos teléfonos (envía/recibe), ves al toque si el
+      // comprobante le llegó a la persona que querías
+      const ult = cel.slice(-4);
+      mostrarToast(`✓ Cobro en camino (al …${ult}) — el cliente lo recibe ya 💜`);
       vibrar(120);
       return;
     }

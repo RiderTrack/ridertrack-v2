@@ -48,8 +48,8 @@ check('regla: NUNCA copiar la misma dirección en los dos campos',
   PROMPT.includes('NUNCA copies la misma dirección'));
 check('el ejemplo de inDrive con las dos direcciones está incluido',
   PROMPT.includes('EJEMPLO 2') && PROMPT.includes('Av. Sucre 1450'));
-check('las claves del JSON incluyen direccionA y observacion',
-  PROMPT.includes('cliente, direccionA, direccion, zona, referencia, observacion, telefono'));
+check('las claves del JSON incluyen direccionA, paradas y observacion',
+  PROMPT.includes('cliente, direccionA, direccion, paradas, zona, referencia, observacion, telefono'));
 check('distingue referencia (lugar) de observacion (qué lleva)',
   PROMPT.includes('cómo RECONOCER la casa') && PROMPT.includes('QUÉ lleva o envía'));
 
