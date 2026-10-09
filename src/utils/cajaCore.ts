@@ -355,40 +355,14 @@ export function calcularCuadreEntrega(e: {
 }
 
 /**
- * FASE O — mensaje directo para el WhatsApp del jefe. Igual que
- * armarMensajeCierre pero pensado para el que recibe la plata:
- * lo que va en EFECTIVO y lo que va por YAPE, con el contexto.
+ * FASE O (redefinida en P) — mensaje directo para el WhatsApp del
+ * jefe: ahora es la plantilla por defecto aplicada al cierre (ver
+ * PLANTILLA_CUADRE_DEFECTO). SIN "sobran/faltan" y SIN el split
+ * según la app — solo lo que entregás en efectivo y lo que
+ * depositás por Yape, calculado desde lo que CONTASTE.
  */
 export function armarMensajeCuadreJefe(cierre: CierreCaja, riderNombre?: string): string {
-  const q = calcularCuadreEntrega(cierre);
-  const L: string[] = [];
-  const quien = riderNombre?.trim() || 'Rider';
-  const mon = (n: number) => `S/ ${Math.max(0, n).toFixed(2)}`;
-  const cobrado = cierre.efectivoCobrado + cierre.digitalRider + cierre.empresa;
-  const gastos = cierre.gastosEfectivo + cierre.gastosDigital;
-
-  L.push(`💰 *CUADRE DEL DÍA — ${quien}*`);
-  L.push(`📅 ${fechaCorta(cierre.fecha)}`);
-  L.push('');
-  L.push(`💵 *Cobrado del día: ${mon(cobrado)}*`);
-  L.push(`· según la app: ${mon(cierre.efectivoCobrado)} en efectivo + ${mon(cierre.digitalRider)} en yape`);
-  if (cierre.empresa > 0) L.push(`· la empresa cobra directo: ${mon(cierre.empresa)} (no pasa por mis manos)`);
-  if (gastos > 0) L.push(`· gastos de la ruta: ${mon(gastos)} (${cierre.gastos.length}) — ya descontados`);
-  L.push('');
-  L.push(`🤲 *Te entrego en efectivo: ${mon(q.efectivo)}*`);
-  L.push(`📲 *El resto te lo deposito por Yape: ${mon(q.yape)}*`);
-  if (Math.abs(cierre.diferencia) > 0.01) {
-    if (cierre.diferencia < 0) {
-      L.push(`ℹ️ Me quedó menos efectivo que lo previsto (−S/ ${Math.abs(cierre.diferencia).toFixed(2)}) — la diferencia la cubre el Yape`);
-    } else {
-      L.push(`ℹ️ Me quedó más efectivo que lo previsto (+S/ ${cierre.diferencia.toFixed(2)})`);
-    }
-  }
-  if (cierre.nota?.trim()) {
-    L.push('');
-    L.push(`📝 ${cierre.nota.trim()}`);
-  }
-  return L.join('\n');
+  return aplicarPlantillaCuadre(PLANTILLA_CUADRE_DEFECTO, cierre, riderNombre);
 }
 
 /** FASE O — normaliza el WhatsApp del jefe: solo dígitos; 9 dígitos → 51 (Perú) */
@@ -397,6 +371,116 @@ export function normalizarCelJefe(texto: string): string {
   if (!d) return '';
   if (d.length === 9) return '51' + d;
   return d;
+}
+
+// ── Plantillas del cuadre (FASE P) ─────────────────────────
+
+/** Una plantilla guardada del mensaje al jefe (FASE P) */
+export interface PlantillaCuadre {
+  id: string;
+  /** nombre corto ("Corto", "Con gastos"…) */
+  nombre: string;
+  /** texto con variables {efectivo} {yape} {total}… */
+  texto: string;
+  /** ms epoch de creación/edición */
+  at: number;
+}
+
+/** id de plantilla aleatorio (prefijo anti-colisión) */
+export function nuevoPlantillaId(): string {
+  return `pl${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/**
+ * FASE P — la plantilla por defecto del mensaje al jefe. LIMPIA:
+ * sin "sobran/faltan" ni el split según la app (pedido de Rudy:
+ * si la app calculó 150 pero contaste 270, el mensaje dice
+ * directamente "te entrego 270" — sin comparaciones que confundan
+ * al jefe). Los números salen de lo que CONTASTE.
+ */
+export const PLANTILLA_CUADRE_DEFECTO = [
+  '💰 *CUADRE DEL DÍA — {nombre}*',
+  '📅 {fecha}',
+  '',
+  '💵 *Cobrado del día: {cobrado}*',
+  '{empresa}',
+  '{gastos}',
+  '',
+  '🤲 *Te entrego en efectivo: {efectivo}*',
+  '📲 *El resto te lo deposito por Yape: {yape}*',
+  '',
+  '📄 *Recibe en total: {total}*',
+  '{nota}',
+].join('\n');
+
+/** Variables disponibles para las plantillas (para los chips de la UI) */
+export const VARIABLES_CUADRE: { clave: string; ej: string }[] = [
+  { clave: 'nombre', ej: 'Rudy' },
+  { clave: 'fecha', ej: '8 oct' },
+  { clave: 'entregas', ej: '12' },
+  { clave: 'cobrado', ej: 'S/ 1182.37' },
+  { clave: 'efectivo', ej: 'S/ 300.00' },
+  { clave: 'yape', ej: 'S/ 882.37' },
+  { clave: 'total', ej: 'S/ 1182.37' },
+  { clave: 'gastos', ej: '· gastos de la ruta: S/ 20.00 (2) — ya descontados (vacío si no hay)' },
+  { clave: 'empresa', ej: '· la empresa cobra directo: S/ 80.00 (vacío si no hay)' },
+  { clave: 'nota', ej: '📝 tu nota del cierre (vacío si no hay)' },
+];
+
+/**
+ * FASE P — aplica una plantilla al cierre: reemplaza las
+ * variables {efectivo} {yape} {total}… por los números REALES del
+ * día (calculados desde lo que contaste). Las variables
+ * desconocidas quedan literal. Las líneas que quedan vacías
+ * (gastos/empresa/nota cuando no hay) se colapsan.
+ */
+export function aplicarPlantillaCuadre(texto: string, cierre: CierreCaja, riderNombre?: string): string {
+  const q = calcularCuadreEntrega(cierre);
+  const mon = (n: number) => `S/ ${Math.max(0, n).toFixed(2)}`;
+  const gastos = cierre.gastosEfectivo + cierre.gastosDigital;
+  const mapa: Record<string, string> = {
+    nombre: riderNombre?.trim() || 'Rider',
+    fecha: fechaCorta(cierre.fecha),
+    entregas: String(cierre.entregas),
+    cobrado: mon(cierre.efectivoCobrado + cierre.digitalRider + cierre.empresa),
+    efectivo: mon(q.efectivo),
+    yape: mon(q.yape),
+    total: mon(q.total),
+    gastos: gastos > 0 ? `· gastos de la ruta: ${mon(gastos)} (${cierre.gastos.length}) — ya descontados` : '',
+    empresa: cierre.empresa > 0 ? `· la empresa cobra directo: ${mon(cierre.empresa)} (no pasa por mis manos)` : '',
+    nota: cierre.nota?.trim() ? `📝 ${cierre.nota.trim()}` : '',
+  };
+  const reemplazo = (texto || '').replace(/\{(\w+)\}/g, (m, k: string) => (k in mapa ? mapa[k] : m));
+  // líneas: trim individual + colapsar vacías múltiples (variables vacías)
+  return reemplazo
+    .split('\n')
+    .map((l) => l.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** máximo de plantillas guardadas */
+export const MAX_PLANTILLAS_CUADRE = 10;
+
+/**
+ * FASE P — saneo defensivo de las plantillas guardadas (viene de
+ * localStorage / JSON que puede venir roto): filtra basura, corta
+ * nombres/textos largos y respeta el máximo.
+ */
+export function normalizarPlantillasCuadre(bruto: unknown): PlantillaCuadre[] {
+  if (!Array.isArray(bruto)) return [];
+  const fuera: PlantillaCuadre[] = [];
+  for (const p of bruto) {
+    if (!p || typeof p !== 'object') continue;
+    const nombre = String((p as Record<string, unknown>).nombre || '').trim().slice(0, 40);
+    const texto = String((p as Record<string, unknown>).texto || '').slice(0, 4000);
+    if (!nombre || !texto.trim()) continue;
+    const id = String((p as Record<string, unknown>).id || '') || nuevoPlantillaId();
+    const at = Number((p as Record<string, unknown>).at) || Date.now();
+    fuera.push({ id, nombre, texto, at });
+  }
+  return fuera.slice(0, MAX_PLANTILLAS_CUADRE);
 }
 
 // ── Fusiones local vs remoto ──────────────────────────────

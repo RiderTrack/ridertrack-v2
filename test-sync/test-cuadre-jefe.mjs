@@ -1,12 +1,16 @@
 // ═══════════════════════════════════════════════════════════
-// 📲 TEST cuadre del jefe — FASE O
+// 📲 TEST cuadre del jefe — FASE O + FASE P
 // Corre con: node test-sync/test-cuadre-jefe.mjs
 // (puro — sin Firebase, sin React, igual que cajaCore)
 // ═══════════════════════════════════════════════════════════
 import {
   armarMensajeCuadreJefe,
+  aplicarPlantillaCuadre,
   calcularCuadreEntrega,
   normalizarCelJefe,
+  normalizarPlantillasCuadre,
+  PLANTILLA_CUADRE_DEFECTO,
+  VARIABLES_CUADRE,
 } from '../src/utils/cajaCore.ts';
 
 let ok = 0, fail = 0;
@@ -36,7 +40,7 @@ function cierre(e) {
   };
 }
 
-console.log('📲 TEST cuadre del jefe (FASE O)\n');
+console.log('📲 TEST cuadre del jefe (FASE O + P)\n');
 
 // ── 1. calcularCuadreEntrega ──────────────────────────────
 console.log('1) calcularCuadreEntrega');
@@ -66,8 +70,8 @@ check('sobró: yape clamp 0', sobro.yape === 0 && sobro.efectivo === 800);
 const decimales = calcularCuadreEntrega({ contado: 300.5, fondoInicial: 20, netoDelDia: 700.25 });
 check('decimales: 280.50 efectivo + 419.75 yape', Math.abs(decimales.efectivo - 280.5) < 1e-9 && Math.abs(decimales.yape - 419.75) < 1e-9);
 
-// ── 2. armarMensajeCuadreJefe: ejemplo literal ────────────
-console.log('2) armarMensajeCuadreJefe — día de Rudy');
+// ── 2. armarMensajeCuadreJefe: ejemplo literal (FASE P: LIMPIO) ──
+console.log('2) armarMensajeCuadreJefe — día de Rudy (mensaje LIMPIO)');
 // día de Rudy: 400 efectivo + 300 yape, contó 300 (le quedaron 100 menos: llegaron por yape)
 const cierreRudy = cierre({
   efectivoCobrado: 400, digitalRider: 300, empresa: 0,
@@ -79,12 +83,15 @@ console.log('--- mensaje ---');
 console.log(msg);
 console.log('---------------');
 check('título CUADRE DEL DÍA — Rudy', msg.includes('💰 *CUADRE DEL DÍA — Rudy*'));
+check('fecha 9 oct', msg.includes('📅 9 oct'));
 check('cobrado del día S/ 700.00', msg.includes('💵 *Cobrado del día: S/ 700.00*'));
-check('según la app: 400 efectivo + 300 yape', msg.includes('· según la app: S/ 400.00 en efectivo + S/ 300.00 en yape'));
+check('FASE P: SIN "según la app"', !msg.includes('según la app'));
+check('FASE P: SIN "sobran"', !msg.includes('sobran'));
+check('FASE P: SIN "faltan"', !msg.includes('faltan'));
+check('FASE P: SIN línea ℹ️', !msg.includes('ℹ️'));
 check('te entrego en efectivo S/ 300.00', msg.includes('🤲 *Te entrego en efectivo: S/ 300.00*'));
 check('el resto por yape S/ 400.00', msg.includes('📲 *El resto te lo deposito por Yape: S/ 400.00*'));
-check('línea de diferencia la cubre el Yape', msg.includes('la diferencia la cubre el Yape'));
-check('dif con signo −S/ 100.00', msg.includes('−S/ 100.00'));
+check('FASE P: recibe en total S/ 700.00', msg.includes('📄 *Recibe en total: S/ 700.00*'));
 check('sin empresa (0) → sin línea POS', !msg.includes('la empresa cobra directo'));
 check('sin gastos → sin línea gastos', !msg.includes('gastos de la ruta'));
 check('sin nota → sin línea 📝', !msg.includes('📝'));
@@ -111,14 +118,13 @@ check('nota al final', msgFull.includes('📝 el cliente 7 pagó con billetes mo
 // cuadre con fondo 50 y neto 650: efectivo = 360−50 = 310; yape = 650−310 = 340
 check('cuadre full: efectivo 310 (contado 360 − fondo 50)', msgFull.includes('🤲 *Te entrego en efectivo: S/ 310.00*'));
 check('cuadre full: yape 340 (650 − 310)', msgFull.includes('📲 *El resto te lo deposito por Yape: S/ 340.00*'));
+check('cuadre full: total 650', msgFull.includes('📄 *Recibe en total: S/ 650.00*'));
+check('FASE P: full SIN ℹ️ aunque la diferencia sea −50', !msgFull.includes('ℹ️') && !msgFull.includes('la cubre el Yape'));
 
-const cuadra = cierre({ efectivoCobrado: 400, digitalRider: 300, esperado: 400, contado: 400, diferencia: 0, netoDelDia: 700 });
-const msgCuadra = armarMensajeCuadreJefe(cuadra);
-check('cuadra exacto → SIN línea ℹ️', !msgCuadra.includes('ℹ️'));
-
+// le sobró efectivo: el mensaje NO lo menciona como problema
 const sobraMsg = cierre({ efectivoCobrado: 400, digitalRider: 300, esperado: 400, contado: 450, diferencia: 50, netoDelDia: 700 });
 const msgSobra = armarMensajeCuadreJefe(sobraMsg);
-check('sobró → línea +S/ con "más efectivo"', msgSobra.includes('ℹ️ Me quedó más efectivo que lo previsto (+S/ 50.00)'));
+check('sobró → SIN "me quedó más efectivo"', !msgSobra.includes('me quedó más efectivo'));
 check('sobró → yape 250 (700 − 450)', msgSobra.includes('📲 *El resto te lo deposito por Yape: S/ 250.00*'));
 
 // día vacío (0 clientes): todo en 0, no crashea
@@ -137,10 +143,62 @@ check('vacío → vacío', normalizarCelJefe('') === '');
 check('solo basura → vacío', normalizarCelJefe('---') === '');
 check('8 dígitos se queda como está', normalizarCelJefe('98765432') === '98765432');
 
+// ── 5. FASE P: aplicarPlantillaCuadre ────────────────────
+console.log('5) aplicarPlantillaCuadre (plantillas propias)');
+// el caso que pidió Rudy: "la app calculó 150 pero me quedé con 270 — que
+// diga que tengo 270, no los 150 que calculé"
+const dia270 = cierre({ efectivoCobrado: 150, digitalRider: 850, contado: 270, netoDelDia: 1000, entregas: 12 });
+const corta = aplicarPlantillaCuadre('Jefe: tengo {efectivo} en efectivo y te deposito {yape} por Yape. Total {total}.', dia270, 'Rudy');
+check('plantilla corta: efectivo 270 (lo contado, NO los 150 de la app)', corta.includes('tengo S/ 270.00 en efectivo'));
+check('plantilla corta: yape 730', corta.includes('S/ 730.00 por Yape'));
+check('plantilla corta: total 1000', corta.includes('Total S/ 1000.00.'));
+check('plantilla corta: sin rastro de 150.00', !corta.includes('150.00'));
+// variables desconocidas quedan literal
+check('variable desconocida queda literal', aplicarPlantillaCuadre('hola {foo} {efectivo}', dia270).includes('{foo}'));
+check('variable desconocida: la conocida sí se reemplaza', aplicarPlantillaCuadra_ok(aplicarPlantillaCuadre('hola {foo} {efectivo}', dia270), dia270));
+// líneas vacías se colapsan (gastos/nota/empresa vacíos)
+const colapso = aplicarPlantillaCuadre('X\n{gastos}\n{nota}\n{empresa}\nY', dia270);
+check('líneas de variables vacías se colapsan', colapso === 'X\n\nY', JSON.stringify(colapso));
+// nombre por defecto Rider
+check('sin nombre → Rider', aplicarPlantillaCuadre('de {nombre}', dia270).includes('de Rider'));
+check('con nombre → el nombre', aplicarPlantillaCuadre('de {nombre}', dia270, 'Rudy').includes('de Rudy'));
+// TODAS las variables de la UI se reemplazan en la plantilla default
+const todas = aplicarPlantillaCuadre(
+  VARIABLES_CUADRE.map((v) => `{${v.clave}}`).join('\n'),
+  { ...dia270, empresa: 80, gastosEfectivo: 20, gastosDigital: 0, gastos: [{ id: 'g1', ts: 1, categoria: 'gasolina', concepto: '', monto: 20, pago: 'efectivo' }], nota: 'prueba' },
+  'Rudy'
+);
+check('todas las variables de VARIABLES_CUADRE se reemplazan', !todas.includes('{'), todas);
+// plantilla default = mensaje del jefe
+check('default ≡ armarMensajeCuadreJefe', aplicarPlantillaCuadre(PLANTILLA_CUADRE_DEFECTO, cierreRudy, 'Rudy') === armarMensajeCuadreJefe(cierreRudy, 'Rudy'));
+check('default no tiene "según la app"', !PLANTILLA_CUADRE_DEFECTO.includes('según la app'));
+
+// ── 6. FASE P: normalizarPlantillasCuadre ────────────────
+console.log('6) normalizarPlantillasCuadre (saneo de localStorage)');
+check('null → []', normalizarPlantillasCuadre(null).length === 0);
+check('JSON roto (string) → []', normalizarPlantillasCuadre('{"a":1}').length === 0);
+check('filtra nulls y objetos sin nombre/texto', normalizarPlantillasCuadre([null, 5, { nombre: '', texto: 'x' }, { nombre: 'x', texto: '' }, { nombre: 'ok', texto: 'hola {total}' }]).length === 1);
+const una = normalizarPlantillasCuadre([{ nombre: '  Corto  ', texto: 'tengo {efectivo}' }]);
+check('recorta espacios del nombre', una[0]?.nombre === 'Corto');
+const largas = normalizarPlantillasCuadre(
+  Array.from({ length: 15 }, (_, i) => ({ nombre: `p${i}`, texto: 'x' }))
+);
+check('máximo 10 plantillas', largas.length === 10);
+const conId = normalizarPlantillasCuadre([{ id: 'pl_fijo', nombre: 'A', texto: 'B', at: 123 }]);
+check('conserva id y at', conId[0]?.id === 'pl_fijo' && conId[0]?.at === 123);
+const sinId = normalizarPlantillasCuadre([{ nombre: 'A', texto: 'B' }]);
+check('sin id → genera uno (pl…)', String(sinId[0]?.id || '').startsWith('pl'));
+
 // ── resumen ──────────────────────────────────────────────
 console.log(`\n📊 ${ok} ✓ · ${fail} ✗`);
 if (fail > 0) {
-  console.log('❌ FASE O: hay tests fallando');
+  console.log('❌ FASE P: hay tests fallando');
   process.exit(1);
 }
-console.log('✅ FASE O: cuadre del jefe OK');
+console.log('✅ FASE O + P: cuadre del jefe OK');
+
+// helper: la línea con {foo} también debe tener {efectivo} reemplazado
+function aplicarPlantillaCuadra_ok(out, c) {
+  const q = calcularCuadreEntrega(c);
+  return out.includes(`S/ ${q.efectivo.toFixed(2)}`);
+}

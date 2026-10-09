@@ -17,7 +17,7 @@
 // solo viven fondo, gastos y cierres (usuarios/{uid}.caja).
 // ═══════════════════════════════════════════════════════════
 
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Wallet, Plus, Trash2, Lock, Unlock, Send, RefreshCw, ChevronDown, ChevronUp, Coins } from 'lucide-react';
 import {
   arrancarCaja,
@@ -39,9 +39,13 @@ import { enviarAGrupoMate } from '../utils/chatBaileys';
 import {
   CATEGORIAS_GASTO,
   Gasto,
+  MAX_PLANTILLAS_CUADRE,
+  PlantillaCuadre,
+  PLANTILLA_CUADRE_DEFECTO,
   ResumenCaja,
+  VARIABLES_CUADRE,
   armarMensajeCierre,
-  armarMensajeCuadreJefe,
+  aplicarPlantillaCuadre,
   calcularCuadreEntrega,
   categoriaInfo,
   etiquetaDiferencia,
@@ -49,6 +53,8 @@ import {
   formatearSoles,
   horaCorta,
   normalizarCelJefe,
+  normalizarPlantillasCuadre,
+  nuevoPlantillaId,
   resumenCajaDia,
 } from '../utils/cajaCore';
 
@@ -223,6 +229,20 @@ function leerJefe(): string {
   try { return localStorage.getItem(JEFE_KEY) || ''; } catch { return ''; }
 }
 
+// ── FASE P: plantillas del mensaje al jefe (localStorage) ──
+const PLANTILLAS_KEY = 'rt_plantillas_cuadre_v1';
+const PLANTILLA_ACTIVA_KEY = 'rt_plantilla_cuadre_activa';
+
+function leerPlantillas(): PlantillaCuadre[] {
+  try {
+    return normalizarPlantillasCuadre(JSON.parse(localStorage.getItem(PLANTILLAS_KEY) || '[]'));
+  } catch { return []; }
+}
+
+function leerPlantillaActiva(): string {
+  try { return localStorage.getItem(PLANTILLA_ACTIVA_KEY) || 'auto'; } catch { return 'auto'; }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 💰 GESTOR COMPLETO (vive en el modal del menú ☰)
 // ═══════════════════════════════════════════════════════════
@@ -251,6 +271,20 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   const cuadreHoy = cierreHoy ? calcularCuadreEntrega(cierreHoy) : null;
   const [jefe, setJefe] = useState(leerJefe);
   const [jefeEdit, setJefeEdit] = useState(() => !leerJefe());
+
+  // ── FASE P: plantillas + editor del mensaje al jefe ──
+  const [plantillas, setPlantillas] = useState<PlantillaCuadre[]>(leerPlantillas);
+  const [plantillaId, setPlantillaId] = useState<string>(leerPlantillaActiva);
+  const [editandoMsg, setEditandoMsg] = useState(false);
+  const [textoEdit, setTextoEdit] = useState('');
+  const [pidiendoNombre, setPidiendoNombre] = useState(false);
+  const [nombrePlantilla, setNombrePlantilla] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const plantillaActiva = plantillaId !== 'auto' ? plantillas.find((p) => p.id === plantillaId) : undefined;
+  const textoActivo = plantillaActiva?.texto ?? PLANTILLA_CUADRE_DEFECTO;
+  const mensajeJefe = cierreHoy ? aplicarPlantillaCuadre(textoActivo, cierreHoy, riderName) : '';
+  const previewEditando = cierreHoy ? aplicarPlantillaCuadre(textoEdit, cierreHoy, riderName) : '';
 
   const fondoEfectivo = fondoInput != null ? parsearSoles(fondoInput) : caja.fondo;
 
@@ -354,7 +388,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     onShowToast?.('✓ Jefe guardado', `El cuadre irá a +${tel}`, 'success');
   };
 
-  const mandarAlJefe = () => {
+  const mandarAlJefe = (texto?: string) => {
     if (!cierreHoy) return;
     const tel = normalizarCelJefe(jefe);
     if (!tel) {
@@ -362,9 +396,90 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
       onShowToast?.('Falta el número', 'Escribe el WhatsApp de tu jefe (ej: 987654321)', 'warning');
       return;
     }
-    const texto = armarMensajeCuadreJefe(cierreHoy, riderName);
-    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank');
+    // FASE P: usa la plantilla activa (o el texto del editor si viene)
+    const textoFinal = aplicarPlantillaCuadre(texto ?? textoActivo, cierreHoy, riderName);
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(textoFinal)}`, '_blank');
+    setEditandoMsg(false);
     onShowToast?.('📲 Cuadre listo', 'Se abrió tu WhatsApp con el mensaje — dale enviar', 'success');
+  };
+
+  // ── FASE P: plantillas del mensaje ──
+  const elegirPlantilla = (id: string) => {
+    setPlantillaId(id);
+    setEditandoMsg(false);
+    try { localStorage.setItem(PLANTILLA_ACTIVA_KEY, id); } catch { /* sin storage: en memoria */ }
+  };
+
+  const abrirEditorMsg = () => {
+    setTextoEdit(textoActivo);
+    setNombrePlantilla(plantillaActiva?.nombre ?? '');
+    setPidiendoNombre(false);
+    setEditandoMsg(true);
+  };
+
+  /** pega {variable} donde está el cursor del editor */
+  const insertarVariable = (clave: string) => {
+    const token = `{${clave}}`;
+    const ta = textareaRef.current;
+    if (!ta) {
+      setTextoEdit((t) => t + token);
+      return;
+    }
+    const ini = ta.selectionStart ?? textoEdit.length;
+    const fin = ta.selectionEnd ?? textoEdit.length;
+    setTextoEdit(textoEdit.slice(0, ini) + token + textoEdit.slice(fin));
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(ini + token.length, ini + token.length);
+    });
+  };
+
+  const confirmarGuardarPlantilla = () => {
+    const nombre = nombrePlantilla.trim();
+    if (!nombre) {
+      onShowToast?.('Ponle un nombre', 'Ej: "Corto" o "Con gastos"', 'warning');
+      return;
+    }
+    // mismo nombre (no distingue mayúsculas) → actualiza; si no → crea
+    const idx = plantillas.findIndex((p) => p.nombre.toLowerCase() === nombre.toLowerCase());
+    let nuevas: PlantillaCuadre[];
+    let idActiva: string;
+    if (idx >= 0) {
+      nuevas = [...plantillas];
+      nuevas[idx] = { ...nuevas[idx], nombre, texto: textoEdit, at: Date.now() };
+      idActiva = nuevas[idx].id;
+    } else {
+      if (plantillas.length >= MAX_PLANTILLAS_CUADRE) {
+        onShowToast?.('Llegaste al límite', `Máximo ${MAX_PLANTILLAS_CUADRE} plantillas — borra una primero`, 'warning');
+        return;
+      }
+      const nueva: PlantillaCuadre = { id: nuevoPlantillaId(), nombre, texto: textoEdit, at: Date.now() };
+      nuevas = [...plantillas, nueva];
+      idActiva = nueva.id;
+    }
+    setPlantillas(nuevas);
+    setPlantillaId(idActiva);
+    try {
+      localStorage.setItem(PLANTILLAS_KEY, JSON.stringify(nuevas));
+      localStorage.setItem(PLANTILLA_ACTIVA_KEY, idActiva);
+    } catch { /* sin storage: en memoria */ }
+    setPidiendoNombre(false);
+    setEditandoMsg(false);
+    onShowToast?.('💾 Plantilla guardada', `"${nombre}" queda lista para los próximos días`, 'success');
+  };
+
+  const borrarPlantillaActiva = () => {
+    if (!plantillaActiva) return;
+    if (!confirm(`¿Borrar la plantilla "${plantillaActiva.nombre}"?`)) return;
+    const nuevas = plantillas.filter((p) => p.id !== plantillaActiva.id);
+    setPlantillas(nuevas);
+    setPlantillaId('auto');
+    try {
+      localStorage.setItem(PLANTILLAS_KEY, JSON.stringify(nuevas));
+      localStorage.setItem(PLANTILLA_ACTIVA_KEY, 'auto');
+    } catch { /* sin storage: en memoria */ }
+    setEditandoMsg(false);
+    onShowToast?.('🗑 Plantilla borrada', 'Vuelve el mensaje automático de la app', 'info');
   };
 
   // ── render helpers ──
@@ -589,6 +704,12 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               </div>
             );
           })()}
+          {/* FASE P: aclaración — la diferencia compara SOLO el efectivo anotado */}
+          {Math.abs(cierreHoy!.diferencia) > 0.01 && (
+            <p className="text-[9px] text-slate-600 leading-tight">
+              ⚖️ compara solo lo anotado como EFECTIVO — lo del Yape nunca pasó por tu bolsillo. Para tu jefe va lo que CONTASTE (abajo 👇).
+            </p>
+          )}
           {fila('🏷️', 'Neto del día (− gastos)', formatearSoles(cierreHoy!.netoDelDia), 'text-emerald-300')}
           {cierreHoy!.nota && <p className="text-[10px] text-slate-500 mt-1 italic">📝 {cierreHoy!.nota}</p>}
           {cuadreHoy && (
@@ -617,7 +738,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               <Unlock className="w-4 h-4" /> Reabrir
             </button>
           </div>
-          {/* ── FASE O: WhatsApp directo al jefe ── */}
+          {/* ── FASE O/P: WhatsApp directo al jefe + plantillas ── */}
           <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-slate-950/60 p-2.5">
             {jefe && !jefeEdit ? (
               <>
@@ -631,15 +752,149 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
                     ✏️ editar
                   </button>
                 </div>
-                <button
-                  onClick={mandarAlJefe}
-                  className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                >
-                  📲 Mandar el cuadre al jefe
-                </button>
-                <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
-                  Se abre tu WhatsApp con el mensaje listo (efectivo + yape). Va directo — el robot no participa.
-                </p>
+
+                {/* FASE P: preview — así le llega al jefe */}
+                <div className="rounded-xl bg-slate-900/80 border border-slate-700/60 p-2.5 mb-2">
+                  <p className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1">💬 Así le llega a tu jefe</p>
+                  <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                    <pre className="text-[11px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">{mensajeJefe}</pre>
+                  </div>
+                </div>
+
+                {/* FASE P: chips de plantillas */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  <button
+                    onClick={() => elegirPlantilla('auto')}
+                    className={btnChip(!plantillaActiva)}
+                    title="El mensaje que arma la app con los números de hoy"
+                  >
+                    🤖 Automática
+                  </button>
+                  {plantillas.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => elegirPlantilla(p.id)}
+                      className={btnChip(plantillaId === p.id)}
+                      title="Tu plantilla guardada"
+                    >
+                      📝 {p.nombre}
+                    </button>
+                  ))}
+                </div>
+
+                {!editandoMsg ? (
+                  <>
+                    <button
+                      onClick={() => mandarAlJefe()}
+                      className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      📲 Mandar el cuadre al jefe
+                    </button>
+                    <button
+                      onClick={abrirEditorMsg}
+                      className="w-full mt-1.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-[0.98]"
+                    >
+                      ✏️ Ver / editar el mensaje
+                    </button>
+                    <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
+                      Se abre tu WhatsApp con el mensaje listo. Se arma con lo que CONTASTE — sin líos de "sobran/faltan". Va directo, el robot no participa.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {/* FASE P: editor del mensaje */}
+                    <textarea
+                      ref={textareaRef}
+                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500 leading-relaxed custom-scrollbar"
+                      rows={8}
+                      value={textoEdit}
+                      onChange={(e) => setTextoEdit(e.target.value)}
+                      placeholder="Escribe tu mensaje para el jefe…"
+                    />
+                    <p className="text-[9px] text-slate-600 leading-tight mt-1 mb-1.5">
+                      Tocá una variable y se pega donde está el cursor — se llena sola con los números de HOY:
+                    </p>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {VARIABLES_CUADRE.map((v) => (
+                        <button
+                          key={v.clave}
+                          onClick={() => insertarVariable(v.clave)}
+                          className="px-2 py-1 rounded-lg bg-violet-500/15 border border-violet-500/40 text-violet-300 text-[10px] font-bold hover:bg-violet-500/30 transition-colors active:scale-95"
+                          title={v.ej}
+                        >
+                          {'{'}{v.clave}{'}'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="rounded-xl bg-slate-900/80 border border-slate-700/60 p-2.5 mb-2">
+                      <p className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1">👀 Así queda con los números de hoy</p>
+                      <div className="max-h-36 overflow-y-auto custom-scrollbar">
+                        <pre className="text-[11px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">{previewEditando}</pre>
+                      </div>
+                    </div>
+
+                    {pidiendoNombre ? (
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <input
+                          className={`${inputTexto} flex-1 min-w-0 py-2`}
+                          placeholder="nombre (ej: Corto)"
+                          value={nombrePlantilla}
+                          onChange={(e) => setNombrePlantilla(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') confirmarGuardarPlantilla();
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          onClick={confirmarGuardarPlantilla}
+                          className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex-shrink-0"
+                        >
+                          ✓ guardar
+                        </button>
+                        <button
+                          onClick={() => setPidiendoNombre(false)}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-400 text-sm font-bold transition-colors flex-shrink-0"
+                        >
+                          ✖
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5 flex-wrap">
+                        <button
+                          onClick={() => mandarAlJefe(textoEdit)}
+                          className="flex-1 min-w-32 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all active:scale-[0.98]"
+                        >
+                          📲 Enviar así
+                        </button>
+                        <button
+                          onClick={() => {
+                            setNombrePlantilla(plantillaActiva?.nombre ?? '');
+                            setPidiendoNombre(true);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-colors"
+                          title="Guardar este texto para reusarlo los próximos días"
+                        >
+                          💾 Guardar plantilla
+                        </button>
+                        {plantillaActiva && (
+                          <button
+                            onClick={borrarPlantillaActiva}
+                            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-red-900/50 border border-slate-600 text-slate-400 hover:text-red-300 text-xs font-bold transition-colors"
+                            title={`Borrar la plantilla "${plantillaActiva.nombre}"`}
+                          >
+                            🗑
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setEditandoMsg(false)}
+                          className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-400 text-xs font-bold transition-colors"
+                        >
+                          ✖
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             ) : (
               <div className="flex items-center gap-1.5">
