@@ -2,6 +2,15 @@
 // ═══════════════════════════════════════════════════════════
 // 🔐 actualizar_reglas_backups.js — FASE N: FIX DEL BACKUP EN
 //            LA NUBE (backups_v2 + backups v1 + historial_rutas)
+//            v1.1 — FIX del bug de la v1.0: el reemplazo del
+//            historial se calculaba sobre el texto ORIGINAL y al
+//            aplicarlo PISABA los 2 bloques de backups recién
+//            insertados → se publicaban las reglas A MEDIAS (solo
+//            el historial) y el script igual terminaba diciendo
+//            "¡LISTO!". Ahora: primero el reemplazo, después las
+//            inserciones (sobre el MISMO texto evolutivo), la
+//            verificación es por-marca y si algo falta lo dice con
+//            ❌ y código de salida 1 (nada de "¡LISTO!" trampa).
 //            v1.0 — Basado en actualizar_reglas.js v3.3 (el mismo
 //            que ya publicaste OK para acciones_dt/imagenes_dt/
 //            dt_sync): misma API, mismo formato de publish que
@@ -47,16 +56,10 @@ const path = require('path');
 const CARPETA = __dirname;
 const SA_PATH = path.join(CARPETA, 'serviceAccount.json');
 
-const VERSION = 'v1.0 (FASE N)';
+const VERSION = 'v1.1 (FASE N — fix del publicar a medias)';
 
 let projectId = '';
 let contenidoParchado = '';
-
-if (!fs.existsSync(SA_PATH)) {
-  console.error('❌ No encuentro serviceAccount.json en ' + CARPETA);
-  console.error('   (Tiene que estar en la carpeta del bot — es el que ya usa rudy-bot)');
-  process.exit(1);
-}
 
 // ── Bloque 1: backups_v2 (la pantalla ☁️ Backups + el backup del cierre) ──
 // Los bloques vienen en DOS sabores: con helpers (isAuth/isAdmin, si tus
@@ -148,10 +151,82 @@ function lines_es_cierre(linea, indent) {
   return new RegExp('^' + indent.replace(/ /g, '\\ ') + '\\}\\s*$').test(linea) || linea === indent + '}';
 }
 
+/** ¿Existe el bloque match /historial_rutas/... en el texto? */
+function tieneBloqueHistorial(texto) {
+  return texto.split('\n').some((l) => /^\s*match\s+\/historial_rutas\//.test(l));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🩹 DETECTAR + APLICAR los 3 cambios — FUNCIÓN PURA (sin red).
+// La usa main() y también la validación automática (FASEN_TEST),
+// así el test corre el código REAL y no una copia.
+// ⚡ v1.1 FIX: la v1.0 calculaba el reemplazo del historial sobre
+// el texto ORIGINAL y luego asignaba `nuevo = r.bloque` — PISANDO
+// los bloques insertados → reglas publicadas A MEDIAS. Ahora el
+// reemplazo guarda el BLOQUE y se aplica ENCIMA del texto que va
+// evolucionando (primero reemplazos, después inserciones).
+// ═══════════════════════════════════════════════════════════
+function construirReglasNuevas(contenido, helpers) {
+  const cambios = [];
+  const yaEstan = [];
+
+  if (!/match\s+\/backups_v2\//.test(contenido)) {
+    cambios.push({ tipo: 'insertar', nombre: 'backups_v2 (el backup del cierre + la pantalla ☁️ Backups)', bloque: BLOQUE_BACKUPS_V2(helpers) });
+  } else {
+    yaEstan.push('backups_v2');
+  }
+
+  if (!/match\s+\/usuarios\/\{userId\}\/backups\//.test(contenido)) {
+    cambios.push({ tipo: 'insertar', nombre: 'usuarios/{uid}/backups (el backup v1 del cierre)', bloque: BLOQUE_USUARIOS_BACKUPS(helpers) });
+  } else {
+    yaEstan.push('usuarios/{uid}/backups');
+  }
+
+  if (!/allow\s+list\s*:/.test(contenido)) {
+    if (tieneBloqueHistorial(contenido)) {
+      cambios.push({ tipo: 'reemplazo', nombre: 'historial_rutas → get/list (que 📜 Historial/📊 Estadísticas/💰 Caja puedan LISTAR)', bloque: BLOQUE_HISTORIAL(helpers) });
+    } else {
+      cambios.push({ tipo: 'insertar', nombre: 'historial_rutas get/list (bloque nuevo, no encontré el viejo para reemplazar)', bloque: BLOQUE_HISTORIAL(helpers) });
+    }
+  } else {
+    yaEstan.push('historial_rutas (get/list)');
+  }
+
+  if (cambios.length === 0) return { nuevo: contenido, cambios, yaEstan };
+
+  // Aplicar en orden seguro: PRIMERO los reemplazos (tocan la zona
+  // del historial, a mitad del archivo), DESPUÉS las inserciones
+  // (van justo antes del deny-all, al final) — todo sobre el MISMO
+  // texto evolutivo, así ningún cambio pisa a otro.
+  let nuevo = contenido;
+  for (const r of cambios.filter((c) => c.tipo === 'reemplazo')) {
+    const aplicado = reemplazarBloqueHistorial(nuevo, r.bloque);
+    if (aplicado !== null) nuevo = aplicado;
+  }
+
+  const aInsertar = cambios.filter((c) => c.tipo === 'insertar').map((c) => c.bloque).join('\n');
+  if (aInsertar) {
+    const anclaDeny = nuevo.search(/match\s*\/\{document=\*\*\}/);
+    if (anclaDeny !== -1) {
+      const inicioLinea = nuevo.lastIndexOf('\n', anclaDeny) + 1;
+      nuevo = nuevo.slice(0, inicioLinea) + aInsertar + '\n' + nuevo.slice(inicioLinea);
+    } else {
+      nuevo = nuevo.trimEnd() + '\n\n' + aInsertar;
+    }
+  }
+  return { nuevo, cambios, yaEstan };
+}
+
 async function main() {
   // 🪪 CARTEL DE VERSIÓN — si esta línea no aparece arriba de todo,
   // estás corriendo un archivo VIEJO de otra carpeta.
   console.log('📋 actualizar_reglas_backups.js ' + VERSION);
+
+  if (!fs.existsSync(SA_PATH)) {
+    console.error('❌ No encuentro serviceAccount.json en ' + CARPETA);
+    console.error('   (Tiene que estar en la carpeta del bot — es el que ya usa rudy-bot)');
+    process.exit(1);
+  }
 
   // 1. Token OAuth del serviceAccount (firebase-admin ya está instalado)
   const { cert } = require('firebase-admin/app');
@@ -192,33 +267,14 @@ async function main() {
   const helpers = /function\s+isAuth\s*\(/.test(contenido) && /function\s+isAdmin\s*\(/.test(contenido) && /function\s+isOwner\s*\(/.test(contenido);
   console.log('   helpers isAuth/isAdmin/isOwner: ' + (helpers ? 'SÍ (uso los bloques con helpers)' : 'NO (uso bloques inline)'));
 
-  // 3. ¿Qué falta? (idempotente, uno por uno)
-  const cambios = [];
-
-  if (!/match\s+\/backups_v2\//.test(contenido)) {
-    cambios.push({ tipo: 'insertar', nombre: 'backups_v2 (el backup del cierre + la pantalla ☁️ Backups)', bloque: BLOQUE_BACKUPS_V2(helpers) });
-  } else {
-    console.log('✅ backups_v2 ya está en las reglas vivas');
-  }
-
-  if (!/match\s+\/usuarios\/\{userId\}\/backups\//.test(contenido)) {
-    cambios.push({ tipo: 'insertar', nombre: 'usuarios/{uid}/backups (el backup v1 del cierre)', bloque: BLOQUE_USUARIOS_BACKUPS(helpers) });
-  } else {
-    console.log('✅ usuarios/{uid}/backups ya está en las reglas vivas');
-  }
-
-  if (!/allow\s+list\s*:/.test(contenido)) {
-    const reemplazo = reemplazarBloqueHistorial(contenido, BLOQUE_HISTORIAL(helpers));
-    if (reemplazo) {
-      cambios.push({ tipo: 'reemplazo', nombre: 'historial_rutas → get/list (que 📜 Historial/📊 Estadísticas/💰 Caja puedan LISTAR)', bloque: reemplazo });
-    } else {
-      // no encontré el bloque → lo inserto standalone ( Firestore une
-      // bloques del mismo path con OR: el viejo sigue, el nuevo agrega)
-      cambios.push({ tipo: 'insertar', nombre: 'historial_rutas get/list (bloque nuevo, no encontré el viejo para reemplazar)', bloque: BLOQUE_HISTORIAL(helpers) });
-    }
-  } else {
-    console.log('✅ historial_rutas ya tiene el split get/list');
-  }
+  // 3+4. Detectar y aplicar los 3 cambios — FUNCIÓN PURA (v1.1):
+  //    la usa main() y también la validación automática (FASEN_TEST),
+  //    así se testea el código REAL y no una copia. ⚡ El FIX v1.1
+  //    vive adentro: la v1.0 insertaba los bloques de backups y
+  //    DESPUÉS pisaba todo con el reemplazo del historial calculado
+  //    sobre el texto original → reglas publicadas A MEDIAS.
+  const { nuevo, cambios, yaEstan } = construirReglasNuevas(contenido, helpers);
+  yaEstan.forEach((n) => console.log('✅ ' + n + ' ya está en las reglas vivas'));
 
   if (cambios.length === 0) {
     console.log('');
@@ -227,25 +283,6 @@ async function main() {
     return;
   }
   cambios.forEach((c) => console.log('🩹 ' + c.tipo.toUpperCase() + ': ' + c.nombre));
-
-  // 4. Aplicar los cambios al texto
-  let nuevo = contenido;
-  const aInsertar = cambios.filter((c) => c.tipo === 'insertar').map((c) => c.bloque).join('\n');
-  if (aInsertar) {
-    const anclaDeny = nuevo.search(/match\s*\/\{document=\*\*\}/);
-    if (anclaDeny !== -1) {
-      const inicioLinea = nuevo.lastIndexOf('\n', anclaDeny) + 1;
-      nuevo = nuevo.slice(0, inicioLinea) + aInsertar + '\n' + nuevo.slice(inicioLinea);
-    } else {
-      nuevo = nuevo.trimEnd() + '\n\n' + aInsertar;
-    }
-    console.log('🩹 Insertando ' + cambios.filter((c) => c.tipo === 'insertar').length + ' bloque(s) (antes del deny-all)…');
-  }
-  const reemplazos = cambios.filter((c) => c.tipo === 'reemplazo');
-  for (const r of reemplazos) {
-    nuevo = r.bloque;
-    console.log('🔁 Reemplazando el bloque historial_rutas…');
-  }
   contenidoParchado = nuevo; // por si el publish falla → plan B con reglas completas
 
   // 5. Crear el ruleset nuevo (la API valida la SINTAXIS acá: si algo
@@ -292,8 +329,12 @@ async function main() {
   if (!publicado) throw new Error(detalleFalla);
   console.log('🚀 Reglas publicadas ✓');
 
-  // 7. Verificación: bajar de nuevo y confirmar los 3 cambios
+  // 7. Verificación: bajar de nuevo y confirmar los 3 cambios —
+  //    ⚡ v1.1: POR-MARCA y honesta. La v1.0 imprimía "✅ ¡LISTO!"
+  //    aunque esta verificación hubiera fallado (así nadie se enteró
+  //    del publicar a medias). Ahora: si falta algo → ❌ + exit 1.
   let verificados = false;
+  let detalleVer = '';
   for (let intento = 1; intento <= 3 && !verificados; intento++) {
     const verRes = await fetch(BASE + '/releases/cloud.firestore', { headers: HEADERS });
     if (!verRes.ok) throw new Error('verificar (GET release): ' + verRes.status);
@@ -302,22 +343,29 @@ async function main() {
     if (!verRs.ok) throw new Error('verificar (GET ruleset): ' + verRs.status);
     const verRuleset = await verRs.json();
     const verContent = (verRuleset.source && verRuleset.source.files && verRuleset.source.files[0].content) || '';
-    verificados = /match\s+\/backups_v2\//.test(verContent)
-      && /match\s+\/usuarios\/\{userId\}\/backups\//.test(verContent)
-      && /allow\s+list\s*:/.test(verContent);
+    const mV2 = /match\s+\/backups_v2\//.test(verContent);
+    const mUB = /match\s+\/usuarios\/\{userId\}\/backups\//.test(verContent);
+    const mHL = /allow\s+list\s*:/.test(verContent);
+    verificados = mV2 && mUB && mHL;
+    detalleVer = 'backups_v2 ' + (mV2 ? '✓' : '✗ FALTA') + ' · usuarios/{uid}/backups ' + (mUB ? '✓' : '✗ FALTA') + ' · historial get/list ' + (mHL ? '✓' : '✗ FALTA');
     if (!verificados && intento < 3) {
-      console.log('   ⏳ todavía no veo el cambio… espero 2s y vuelvo a verificar');
+      console.log('   ⏳ [' + detalleVer + '] — espero 2s y vuelvo a verificar');
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
   if (!verificados) {
-    console.log('⚠️ No pude verificar automáticamente, pero el publish respondió OK.');
-    console.log('   (A veces demora un par de minutos en propagar — abrí la consola de');
-    console.log('    Firebase → Firestore → Reglas y fijate que aparezca backups_v2.)');
+    console.log('');
+    console.log('❌ ' + detalleVer);
+    console.log('❌ El publish respondió OK pero al RE-BAJAR las reglas NO están');
+    console.log('   los 3 cambios. NO pruebes la app todavía — mandale una captura');
+    console.log('   de este mensaje al dev (y de Firestore → Reglas en la consola');
+    console.log('   de Firebase) para ver qué pasó.');
+    process.exit(1);
   }
+  console.log('   ✅ Verificado → ' + detalleVer);
 
   console.log('');
-  console.log('✅ ¡LISTO! Las reglas vivas ahora permiten los backups y el historial.');
+  console.log('✅ REGLAS PUBLICADAS Y VERIFICADAS (FASE N completo)');
   console.log('');
   console.log('PRUEBA (desde el teléfono, con internet):');
   console.log('   1. RiderTrack V2 → ☁️ Backups → tiene que APARECER tu historial');
@@ -329,7 +377,28 @@ async function main() {
   console.log('      SIN el ⚠️ de "avísame para revisarlo".');
 }
 
-main().catch((e) => {
+// ── Modo VALIDACIÓN (sin red — lo usa el test automático antes de
+//    entregar esta fase; en Termux no cambia NADA porque FASEN_TEST
+//    no está definido):
+//      FASEN_TEST=1 node actualizar_reglas_backups.js < reglas.txt
+//    Escribe las reglas nuevas por stdout (o "NADA" si no hay
+//    cambios) y el detalle de los cambios por stderr. ──
+if (process.env.FASEN_TEST) {
+  let entrada = '';
+  process.stdin.on('data', (d) => (entrada += d));
+  process.stdin.on('end', () => {
+    const helpers = /function\s+isAuth\s*\(/.test(entrada) && /function\s+isAdmin\s*\(/.test(entrada) && /function\s+isOwner\s*\(/.test(entrada);
+    const { nuevo, cambios } = construirReglasNuevas(entrada, helpers);
+    if (cambios.length === 0) {
+      console.log('NADA');
+      process.exit(0);
+    }
+    for (const c of cambios) console.error('🩹 ' + c.tipo.toUpperCase() + ': ' + c.nombre);
+    process.stdout.write(nuevo);
+    process.exit(0);
+  });
+} else {
+  main().catch((e) => {
   console.error('');
   console.error('❌ No pude actualizar las reglas (' + VERSION + '): ' + e.message);
   console.error('   (Tranquilo: tus reglas vivas quedaron IGUAL que antes —');
@@ -369,4 +438,5 @@ main().catch((e) => {
     console.error('5. Publicar (botón azul) — listo.');
   }
   process.exit(1);
-});
+  });
+}

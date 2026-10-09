@@ -1,8 +1,24 @@
 ═════════════════════════════════════════════════════════════
- FASE N — FIX DEL BACKUP EN LA NUBE (v0.10.4)
+ FASE N v2 — FIX DEL BACKUP EN LA NUBE (v0.10.4)
+ (este zip trae el script v1.1 — arregla el publicar a medias
+  del v1.0 que ya corriste)
 ═════════════════════════════════════════════════════════════
 
-¿QUÉ ESTABA PASANDO?
+⚠️ SI YA CORRISTE EL ZIP ANTERIOR (v1.0): no pasa nada grave —
+quedaron las reglas A MEDIAS (el historial sí, los backups no).
+Corré ESTE zip encima y se completa. No hay que desinstalar ni
+reiniciar nada — solo correr el script de nuevo (1 minuto).
+
+¿QUÉ PASÓ CON EL SCRIPT ANTERIOR?
+Tenía un bug mío (del dev): insertaba los 2 bloques de permisos
+de los backups y DESPUÉS, al reemplazar el bloque del historial,
+los PISABA sin querer. Resultado: publicó las reglas a medias y
+encima terminaba diciendo "✅ ¡LISTO!" aunque su propia
+verificación interna había fallado. Este v1.1 arregla las dos
+cosas: ya no pisa nada, y si algo no queda, lo dice con ❌
+grande en vez de un ¡LISTO! trampa.
+
+¿QUÉ ESTABA PASANDO (el problema de fondo)?
 Cuando tocabas "🏁 FINALIZAR Y GUARDAR RUTA", el historial SÍ se
 guardaba (tus rutas de TODO este tiempo están ahi, tranquilidad),
 pero:
@@ -29,28 +45,34 @@ PASO 1 — PUBLICAR LAS REGLAS (lo importante):
   1. Copiá actualizar_reglas_backups.js a la carpeta del bot
      (el zip se descomprime ENCIMA de ~/bot-whatsapp):
        cd ~
-       unzip -o descargas/robot-reglas-faseN.zip -d ~/bot-whatsapp
+       unzip -o descargas/robot-reglas-faseN-v2.zip -d ~/bot-whatsapp
   2. Corrélo:
        cd ~/bot-whatsapp
        node actualizar_reglas_backups.js
   3. Arriba de TODO tiene que decir:
-       📋 actualizar_reglas_backups.js v1.0 (FASE N)
-     (si no lo dice, estás corriendo un archivo viejo de otra
-      carpeta — el zip se te descomprimió en una subcarpeta)
+       📋 actualizar_reglas_backups.js v1.1 (FASE N — fix del publicar a medias)
+     (si no lo dice, estás corriendo un archivo viejo — el zip se
+      te descomprimió en una subcarpeta)
   4. Al final tiene que decir:
        🚀 Reglas publicadas ✓
-       ✅ ¡LISTO! Las reglas vivas ahora permiten los backups…
+       ✅ Verificado → backups_v2 ✓ · usuarios/{uid}/backups ✓ · historial get/list ✓
+       ✅ REGLAS PUBLICADAS Y VERIFICADAS (FASE N completo)
+     Si en cambio sale un ❌ (aunque sea uno): NO pruebes la app —
+     mandale captura al dev de TODO lo que salió en la pantalla.
+  5. Si ya habías corrido el v1.0, vas a ver líneas "✅ ... ya está
+     en las reglas vivas" para lo que ya quedó — es normal, este
+     script completa lo que falta y no repite lo que ya está.
 
   Es el MISMO mecanismo que ya usaste para el robot de inDrive
   (actualizar_reglas.js v3.3) — mismo serviceAccount, mismo todo.
   Es IDEMPOTENTE: si lo corrés dos veces, la segunda salta todo.
 
-PASO 2 — ACTUALIZAR LA APP:
+PASO 2 — ACTUALIZAR LA APP (SOLO si todavía no instalaste el
+v0.10.4):
   Instalá el APK nuevo (RiderTrackV2-v0.10.4.apk) encima del que
-  tenés — como siempre, SIN desinstalar.
-
-  (El orden no importa: si instalás el APK primero, la app sigue
-   igual que hoy hasta que corras el PASO 1.)
+  tenés — como siempre, SIN desinstalar. Si ya lo tenés puesto
+  cuando corriste el script v1.0, NO hace falta reinstalarlo:
+  el APK es el mismo; lo que faltaba eran las reglas.
 
 ═════════════════════════════════════════════════════════════
  QUÉ VERIFICAR DESPUÉS (la prueba real)
