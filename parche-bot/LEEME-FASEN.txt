@@ -1,0 +1,91 @@
+═════════════════════════════════════════════════════════════
+ FASE N — FIX DEL BACKUP EN LA NUBE (v0.10.4)
+═════════════════════════════════════════════════════════════
+
+¿QUÉ ESTABA PASANDO?
+Cuando tocabas "🏁 FINALIZAR Y GUARDAR RUTA", el historial SÍ se
+guardaba (tus rutas de TODO este tiempo están ahi, tranquilidad),
+pero:
+  · El ☁️ backup de la nube NO subía → el toast te avisaba
+    "⚠️ el backup de la nube NO se pudo guardar, avísame para
+    revisarlo".
+  · La pantalla ☁️ Backups salía VACÍA.
+  · Y de yapa descubrimos que 📜 Historial, 📊 Estadísticas,
+    💰 Caja e 🖼️ Galería TAMBIÉN veían todo vacío — por el mismo
+    motivo (las reglas de Firestore no dejaban LEER la lista).
+
+LA CAUSA (sin tocar tu app): las REGLAS DE SEGURIDAD de Firestore
+nunca tuvieron los permisos para:
+  · backups_v2 (donde va el backup del cierre + la pantalla ☁️)
+  · usuarios/{tu-uid}/backups (el backup v1)
+  · el LISTADO del historial (la regla vieja solo dejaba leer
+    doc por doc, no la lista completa)
+
+═════════════════════════════════════════════════════════════
+ CÓMO INSTALAR (2 pasos, 2 minutos)
+═════════════════════════════════════════════════════════════
+
+PASO 1 — PUBLICAR LAS REGLAS (lo importante):
+  1. Copiá actualizar_reglas_backups.js a la carpeta del bot
+     (el zip se descomprime ENCIMA de ~/bot-whatsapp):
+       cd ~
+       unzip -o descargas/robot-reglas-faseN.zip -d ~/bot-whatsapp
+  2. Corrélo:
+       cd ~/bot-whatsapp
+       node actualizar_reglas_backups.js
+  3. Arriba de TODO tiene que decir:
+       📋 actualizar_reglas_backups.js v1.0 (FASE N)
+     (si no lo dice, estás corriendo un archivo viejo de otra
+      carpeta — el zip se te descomprimió en una subcarpeta)
+  4. Al final tiene que decir:
+       🚀 Reglas publicadas ✓
+       ✅ ¡LISTO! Las reglas vivas ahora permiten los backups…
+
+  Es el MISMO mecanismo que ya usaste para el robot de inDrive
+  (actualizar_reglas.js v3.3) — mismo serviceAccount, mismo todo.
+  Es IDEMPOTENTE: si lo corrés dos veces, la segunda salta todo.
+
+PASO 2 — ACTUALIZAR LA APP:
+  Instalá el APK nuevo (RiderTrackV2-v0.10.4.apk) encima del que
+  tenés — como siempre, SIN desinstalar.
+
+  (El orden no importa: si instalás el APK primero, la app sigue
+   igual que hoy hasta que corras el PASO 1.)
+
+═════════════════════════════════════════════════════════════
+ QUÉ VERIFICAR DESPUÉS (la prueba real)
+═════════════════════════════════════════════════════════════
+
+  1. ☁️ BACKUPS → tiene que aparecer tu historial de backups
+     (chips "auto" de cada cierre de ruta que hiciste).
+
+  2. 📜 HISTORIAL → tienen que aparecer TODAS tus rutas pasadas.
+     (Estuvieron guardadas todo este tiempo — la app no podía
+      leerlas. Es la primera vez que las vas a ver juntas.)
+
+  3. 📊 ESTADÍSTICAS → ahora van a tener datos de verdad de
+     todas tus rutas.
+
+  4. En una ruta con un par de clientes: 🏁 FINALIZAR Y GUARDAR
+     RUTA → el toast tiene que decir:
+       "Guardada en el historial + ☁️ backup automático en la nube"
+     SIN el ⚠️ de "avísame para revisarlo".
+
+  5. (Extra) ☁️ Backups → "Guardar backup" manual → aparece
+     arriba de la lista al toque.
+
+Si algo de esto no pasa, mandale foto del cartel que salga al
+dev — pero con las reglas publicadas y el APK nuevo, todo esto
+tiene que andar derecho.
+
+═════════════════════════════════════════════════════════════
+ QUÉ HAY EN ESTE ZIP
+═════════════════════════════════════════════════════════════
+  · actualizar_reglas_backups.js — publica las reglas nuevas
+    (usa el serviceAccount.json del bot, el que ya está en
+     ~/bot-whatsapp — NO lo muevas)
+  · LEEME-FASEN.txt — este archivo
+
+El APK va aparte en la release de GitHub (link del dev).
+El bot NO se toca en esta fase (usa firebase-admin, que pasa
+sobre las reglas — le da igual).

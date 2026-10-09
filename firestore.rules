@@ -50,6 +50,15 @@ service cloud.firestore {
       allow write: if isOwner(userId) || isAdmin();
     }
 
+    // ⚡ FASE N: backups de la ruta v1 (auto_{fecha} del cierre + .hist
+    // del importador) — la regla del doc padre NO cubre subcolecciones:
+    // sin este bloque el "Finalizar y guardar ruta" guardaba el
+    // historial pero el backup v1 fallaba en silencio (permission-denied).
+    match /usuarios/{userId}/backups/{backupId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
     // Ruta activa de cada rider — el rider lee/escribe la suya,
     // el bot (rudy-bot con firebase-admin) puede escribir en cualquiera
     match /ruta_activa/{userId} {
@@ -58,10 +67,20 @@ service cloud.firestore {
     }
 
     // Historial de rutas — v2 guarda con ID "{uid}_{fecha}"
-    // (no es solo el uid), por eso se valida el prefijo con regex
+    // (no es solo el uid), por eso se valida el prefijo con regex.
+    // ⚡ FASE N: el read se separa en get/list — ANTES el matches()
+    // del docId negaba TODOS los list (las reglas NO son filtros:
+    // un query de colección no puede demostrar el patrón del ID) →
+    // Historial/Estadísticas/Caja/Galería veían la lista VACÍA
+    // aunque las rutas se guardaban bien. Ahora el list exige que el
+    // query filtre where('uid','==',tu uid) (leerHistorial FASE N) y
+    // el create acepta también los v1_{id} del importador (antes
+    // denegados por el mismo matches()).
     match /historial_rutas/{docId} {
-      allow read: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin());
-      allow write: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin());
+      allow get: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin() || resource.data.uid == request.auth.uid);
+      allow list: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin() || request.resource.data.uid == request.auth.uid);
+      allow update, delete: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin() || resource.data.uid == request.auth.uid);
     }
 
     // Clientes registrados del rider
@@ -188,10 +207,23 @@ service cloud.firestore {
     // COLECCIONES DE BACKUP Y EXCELS
     // ═══════════════════════════════════════════════════════
 
-    // Backups — solo el dueño del backup
+    // Backups — solo riders autenticados
     match /backups/{backupId} {
       allow read: if isAuth();  // cualquier rider puede descargar backups compartidos
       allow write: if isAuth();
+    }
+
+    // ⚡ FASE N: Backups v2 — snapshot de rutas de la pantalla ☁️
+    // Backups: manual + auto-cierre ({uid}_{ts}) + auto-guardado vivo
+    // ({uid}_{fecha}_auto, merge). TODO doc lleva el campo uid del
+    // dueño; el list de la app filtra where('uid','==',tu uid).
+    // ANTES esta colección NO tenía regla → el deny-all la bloqueaba
+    // y el "Finalizar y guardar ruta" guardaba el historial pero NO
+    // el backup (toast ⚠️ "avísame para revisarlo").
+    match /backups_v2/{docId} {
+      allow read: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isAuth() && (request.resource.data.uid == request.auth.uid || isAdmin());
+      allow update, delete: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
     }
 
     // Excels en nube

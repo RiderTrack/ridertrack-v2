@@ -1243,7 +1243,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.3 (FASE M — 📵 FIX del comprobante: cuando un viaje tiene DOS teléfonos (quien envía y quien recibe), la foto le llegaba a uno y el COBRO se iba SIEMPRE al chat del otro ("al pedido anterior") — ahora el cobro va al MISMO destinatario que la foto (quien recibe) y lo VEIS en el botón y en el aviso "✓ Cobro en camino (al …1234)"; si querés cobrarle al otro, un toque en el chip 📤/📥 · 🅾️ MULTI-PUNTOS: los pedidos de un solo cliente con VARIAS entregas (A → B → C → D) ya no pierden la tercera dirección — el escáner la lee solo (paradas) y también podés agregarlas a mano con "+ Parada" en el formulario (hasta 3 extra); quedan en la tarjeta para copiarlas y en el botón 🛣️ Ruta para navegar a cada una · junto con la FASE L: letra grande y "Estoy yendo" en el Seguimiento · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
+        DriverTrack v0.10.4 (FASE N — ☁️ FIX del backup en la nube: al "Finalizar y guardar ruta" el historial SÍ se guardaba pero el backup NO subía (toast ⚠️ "avísame para revisarlo") y ☁️ Backups / 📜 Historial / 📊 Estadísticas veían todo VACÍO — las reglas de Firestore bloqueaban backups_v2, los backups v1 y el LIST del historial; ahora suben los 2 backups y TODO tu historial acumulado reaparece (corré una vez actualizar_reglas_backups.js en Termux y listo) · FASE M: fix del comprobante al chat equivocado + 🅾️ multi-puntos A→B→C→D · FASE L: letra grande y "Estoy yendo" en el Seguimiento · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
       </p>
     </div>
   );

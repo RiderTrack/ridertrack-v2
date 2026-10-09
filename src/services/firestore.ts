@@ -1592,7 +1592,11 @@ export async function leerHistorial(userId: string, max = 300): Promise<Registro
   if (!db || !userId) return [];
   try {
     const ref = collection(db, 'historial_rutas');
-    const q = query(ref, limit(400));
+    // ⚡ FASE N: where('uid','==',userId) — OBLIGATORIO para que las
+    // reglas dejen listar (allow list exige que el query filtre por
+    // TU uid; ANTES el list sin where era permission-denied y la
+    // lista salía VACÍA aunque las rutas se guardaban bien).
+    const q = query(ref, where('uid', '==', userId), limit(400));
     const snap = await getDocs(q);
     const registros: RegistroHistorial[] = [];
     snap.forEach((d) => {
@@ -1837,7 +1841,9 @@ export async function importarHistorialV1(userId: string): Promise<{ importadas:
   // Qué v1Id ya están importadas
   const yaImportadas = new Set<number>();
   try {
-    const snap = await getDocs(query(collection(db, 'historial_rutas'), limit(400)));
+    // ⚡ FASE N: where uid (mismo motivo que leerHistorial — el list
+    // sin filtro es denegado por las reglas nuevas)
+    const snap = await getDocs(query(collection(db, 'historial_rutas'), where('uid', '==', userId), limit(400)));
     snap.forEach((d) => {
       const data = d.data() as any;
       if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
