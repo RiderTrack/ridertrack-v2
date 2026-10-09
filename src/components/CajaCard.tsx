@@ -37,9 +37,16 @@ import { Cliente, leerHistorial, subscribeToRutaActiva } from '../services/fires
 import { hoyISO } from '../utils/stats'; // ⚡ F3.48: hoy en hora de Lima
 import { enviarAGrupoMate } from '../utils/chatBaileys';
 import {
+  ConfigPagoPedidos,
+  ResumenPagoPedidos,
+  calcularPagoPedidos,
+  cargarConfigPagoPedidos,
+} from '../utils/pagoPedidosCore'; // 🛵 FASE D/Q
+import {
   CATEGORIAS_GASTO,
   Gasto,
   MAX_PLANTILLAS_CUADRE,
+  PagoRutaCierre,
   PlantillaCuadre,
   PLANTILLA_CUADRE_DEFECTO,
   ResumenCaja,
@@ -106,6 +113,10 @@ async function asegurarCerrados(uid: string): Promise<Cliente[]> {
             mEM: '',
             hora: c.hora || '',
             nota: '',
+            // 🛵 FASE Q: la marca lejos del cliente viaja al
+            // historial (FASE D) — sin esto los pedidos cerrados
+            // contarían siempre como S/9 en la paga de la caja
+            ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
           });
         }
       }
@@ -186,9 +197,16 @@ export function useResumenCaja(uid?: string | null): {
   /** clientes de HOY (ruta viva + cerradas hoy) — F3.41: el
    *  resumen diario los cuenta para el mensaje de WhatsApp */
   clientes: Cliente[];
+  /** 🛵 FASE Q: tu paga por pedidos de HOY (S/9 normal / S/12
+   *  lejano, temporada FASE D). Con la temporada APAGADA da 0 →
+   *  la caja se ve y cuadra exactamente igual que siempre. */
+  pagoRuta: ResumenPagoPedidos;
+  /** 🛵 FASE Q: la config de la temporada (para el snapshot del cierre) */
+  cfgPago: ConfigPagoPedidos;
 } {
   const caja = useCaja();
   const { clientes, cargando } = useClientesDeHoy(uid);
+  const cfgPago = useCfgPago();
 
   // arranca el servicio al montar (una sola vez por uid)
   useEffect(() => {
@@ -202,7 +220,23 @@ export function useResumenCaja(uid?: string | null): {
   );
   const cierreHoy = useMemo(() => cierreDeHoy(caja), [caja]);
 
-  return { caja, gastosHoy, resumen, cierreHoy, cargando, clientes };
+  // 🛵 FASE Q: tu paga del día (misma cuenta que el header/Resumen)
+  const pagoRuta = useMemo(() => calcularPagoPedidos(clientes, cfgPago), [clientes, cfgPago]);
+
+  return { caja, gastosHoy, resumen, cierreHoy, cargando, clientes, pagoRuta, cfgPago };
+}
+
+/** 🛵 FASE Q: config del cobro por pedido (temporada FASE D) en
+ * vivo — mismo patrón que App/RutaView: si la cambiás en
+ * Configuración, la caja se refresca sola. */
+function useCfgPago(): ConfigPagoPedidos {
+  const [cfg, setCfg] = useState<ConfigPagoPedidos>(() => cargarConfigPagoPedidos());
+  useEffect(() => {
+    const refrescar = () => setCfg(cargarConfigPagoPedidos());
+    window.addEventListener('pago-pedidos:changed', refrescar);
+    return () => window.removeEventListener('pago-pedidos:changed', refrescar);
+  }, []);
+  return cfg;
 }
 
 // ── Estilos compartidos ───────────────────────────────────
@@ -254,7 +288,7 @@ interface CajaCardProps {
 }
 
 export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast }) => {
-  const { caja, gastosHoy, resumen, cierreHoy, cargando } = useResumenCaja(uid);
+  const { caja, gastosHoy, resumen, cierreHoy, cargando, pagoRuta, cfgPago } = useResumenCaja(uid);
   const cerrada = !!cierreHoy;
 
   const [fondoInput, setFondoInput] = useState<string | null>(null); // null = usa el guardado
@@ -336,13 +370,29 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     }
     setGuardando(true);
     try {
-      const cierre = await cerrarCaja(uid, { contado, resumen, nota: notaCierre });
+      // 🛵 FASE Q: congela tu paga del día DENTRO del cierre (con
+      // las tarifas con las que cerraste) para que el cuadre al
+      // jefe siempre descuadre lo del día — aunque después cambies
+      // la config o la ruta. Temporada OFF → sin snapshot → el
+      // cuadre queda como en la FASE O/P (sin descuento).
+      const pagoRutaSnap: PagoRutaCierre | undefined = cfgPago.activo
+        ? {
+            activo: true,
+            cantidadNormal: pagoRuta.cantidadNormal,
+            cantidadLejos: pagoRuta.cantidadLejos,
+            tarifaNormal: cfgPago.tarifaNormal,
+            tarifaLejos: cfgPago.tarifaLejos,
+            total: pagoRuta.total,
+          }
+        : undefined;
+      const cierre = await cerrarCaja(uid, { contado, resumen, nota: notaCierre, pagoRuta: pagoRutaSnap });
       const et = etiquetaDiferencia(cierre.diferencia);
       setContadoInput('');
       setNotaCierre('');
       onShowToast?.(
         Math.abs(cierre.diferencia) <= 0.01 ? '🔒 Caja cerrada' : cierre.diferencia > 0 ? '🔒 Caja cerrada — sobró plata' : '🔒 Caja cerrada — faltó plata',
-        `Contado ${formatearSoles(cierre.contado)} · ${et.texto}`,
+        `Contado ${formatearSoles(cierre.contado)} · ${et.texto}` +
+          (cierre.pagoRuta?.total ? ` · 🛵 tu paga ${formatearSoles(cierre.pagoRuta.total)} se queda contigo` : ''),
         Math.abs(cierre.diferencia) <= 0.01 ? 'success' : cierre.diferencia > 0 ? 'info' : 'warning'
       );
     } catch (e: any) {
@@ -577,6 +627,10 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
         {resumen.empresa !== 0 && fila('🏪', 'Cobra la empresa directo', formatearSoles(resumen.empresa), 'text-slate-300')}
         {fila('🧾', 'Total del día', formatearSoles(resumen.cobradoTotal), 'text-white')}
         {fila('💸', `Gastos hoy (${resumen.nGastos})`, formatearSoles(resumen.gastosEfectivo + resumen.gastosDigital), 'text-orange-300')}
+        {/* 🛵 FASE Q: tu paga por pedidos — solo con la temporada FASE D
+            activa y entregas hechas; con S/0 la caja se ve igual que siempre */}
+        {pagoRuta.total > 0 &&
+          fila('🛵', `Tu paga (${pagoRuta.entregados} pedidos)`, formatearSoles(pagoRuta.total), 'text-amber-300')}
         <div className="border-t border-slate-700/60 my-1.5" />
         {fila('🧮', 'Deberías tener en el bolsillo', formatearSoles(resumen.esperado), 'text-cyan-300 text-base')}
         <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
@@ -715,11 +769,20 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
           {cuadreHoy && (
             <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-violet-500/10 p-2.5">
               <p className="text-[10px] uppercase tracking-wider font-bold text-violet-300 mb-1">📲 Cuadre para tu jefe</p>
+              {/* 🛵 FASE Q: tu paga se descuenta ANTES de entregar */}
+              {cuadreHoy.loTuyo > 0 &&
+                fila('🛵', `Te quedás de tu ruta (${(cierreHoy!.pagoRuta?.cantidadNormal || 0) + (cierreHoy!.pagoRuta?.cantidadLejos || 0) || cierreHoy!.entregas} pedidos)`, formatearSoles(cuadreHoy.loTuyo), 'text-amber-300')}
               {fila('🤲', 'Le entregás en efectivo', formatearSoles(cuadreHoy.efectivo), 'text-emerald-300')}
               {fila('📲', 'Depositás por Yape', formatearSoles(cuadreHoy.yape), 'text-violet-300')}
+              {cuadreHoy.teDebe > 0 &&
+                fila('⚠️', 'La empresa te queda debiendo', formatearSoles(cuadreHoy.teDebe), 'text-red-300')}
               {fila('🧾', 'Recibe en total', formatearSoles(cuadreHoy.total), 'text-white')}
               <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
-                De lo que contaste ({formatearSoles(cierreHoy!.contado)}) se resta tu fondo ({formatearSoles(cierreHoy!.fondoInicial)}) — eso es tuyo. El resto sale por Yape.
+                {cuadreHoy.teDebe > 0
+                  ? `Tu paga (${formatearSoles(cuadreHoy.loTuyo)}) es más que lo que pasó por tus manos — te quedás TODO el efectivo contado (${formatearSoles(cierreHoy!.contado)}) y la empresa te completa.`
+                  : cuadreHoy.loTuyo > 0
+                    ? `De lo que contaste (${formatearSoles(cierreHoy!.contado)}) se resta tu fondo (${formatearSoles(cierreHoy!.fondoInicial)}) y tu paga de ruta (${formatearSoles(cuadreHoy.loTuyo)}) — eso es tuyo. El resto sale por Yape.`
+                    : `De lo que contaste (${formatearSoles(cierreHoy!.contado)}) se resta tu fondo (${formatearSoles(cierreHoy!.fondoInicial)}) — eso es tuyo. El resto sale por Yape.`}
               </p>
             </div>
           )}
@@ -945,15 +1008,22 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
             })()}
           </div>
           {(() => {
-            // FASE O: preview del cuadre mientras escribís el conteo
+            // FASE O/Q: preview del cuadre mientras escribís el conteo
             const contado = parsearSoles(contadoInput);
             if (contadoInput.trim() === '' || isNaN(contado)) return null;
-            const q = calcularCuadreEntrega({ contado, fondoInicial: caja.fondo, netoDelDia: resumen.netoDelDia });
+            const q = calcularCuadreEntrega({ contado, fondoInicial: caja.fondo, netoDelDia: resumen.netoDelDia, pagoRuta: pagoRuta.total });
             return (
               <p className="text-[10px] text-slate-400 leading-relaxed mt-1.5">
                 → cuadre:{' '}
                 <b className="text-emerald-300">S/ {q.efectivo.toFixed(2)} en efectivo</b> +{' '}
-                <b className="text-violet-300">S/ {q.yape.toFixed(2)} por Yape</b> para tu jefe (tu fondo se queda afuera)
+                <b className="text-violet-300">S/ {q.yape.toFixed(2)} por Yape</b> para tu jefe
+                {q.loTuyo > 0 ? (
+                  <>
+                    {' '}(tu paga <b className="text-amber-300">S/ {q.loTuyo.toFixed(2)}</b> y tu fondo se quedan afuera)
+                  </>
+                ) : (
+                  ' (tu fondo se queda afuera)'
+                )}
               </p>
             );
           })()}

@@ -189,13 +189,85 @@ check('conserva id y at', conId[0]?.id === 'pl_fijo' && conId[0]?.at === 123);
 const sinId = normalizarPlantillasCuadre([{ nombre: 'A', texto: 'B' }]);
 check('sin id → genera uno (pl…)', String(sinId[0]?.id || '').startsWith('pl'));
 
+// ── 7. FASE Q: la caja descuenta lo de tu ruta (9/12) ────
+console.log('7) FASE Q — descuento de tu paga en el cuadre');
+// EL DÍA REAL DE RUDY (prueba FASE O): contado 300, fondo 0, neto 1182.37
+// → ahora con 10 pedidos pagados (90.00 de paga): entrega 210 + yape 882.37
+const diaQ = cierre({
+  contado: 300, fondoInicial: 0, esperado: 125.72, diferencia: 174.28,
+  efectivoCobrado: 125.72, digitalRider: 1056.65, netoDelDia: 1182.37,
+  pagoRuta: { activo: true, cantidadNormal: 8, cantidadLejos: 2, tarifaNormal: 9, tarifaLejos: 12, total: 96 },
+});
+const qRudy = calcularCuadreEntrega(diaQ);
+check('día de Rudy con paga 96: loTuyo 96', qRudy.loTuyo === 96, JSON.stringify(qRudy));
+check('entrega 300−0−96 = 204 en efectivo', qRudy.efectivo === 204, JSON.stringify(qRudy));
+check('yape 1182.37−96−204 = 882.37', Math.abs(qRudy.yape - 882.37) < 0.005, JSON.stringify(qRudy));
+check('el jefe recibe 1086.37 (neto − tu paga)', Math.abs(qRudy.total - 1086.37) < 0.005, JSON.stringify(qRudy));
+check('la empresa no le debe nada', qRudy.teDebe === 0);
+// número (preview en vivo) y objeto (snapshot del cierre) → mismo resultado
+const qNum = calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 1182.37, pagoRuta: 96 });
+check('pagoRuta número ≡ objeto (preview vs cierre)', qNum.efectivo === qRudy.efectivo && qNum.yape === qRudy.yape && qNum.loTuyo === qRudy.loTuyo);
+// CIERRE VIEJO (FASE O/P, sin pagoRuta) → SIN descuento, exacto como antes
+const qViejo = calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 1182.37 });
+check('cierre viejo sin pagoRuta: entrega 300 (regresión FASE O)', qViejo.efectivo === 300 && Math.abs(qViejo.yape - 882.37) < 0.005 && qViejo.loTuyo === 0);
+// la paga sale PRIMERO de los billetes que tenés en la mano
+const billetes = calcularCuadreEntrega({ contado: 100, fondoInicial: 0, netoDelDia: 100, pagoRuta: 90 });
+check('paga 90 de 100 en billetes → entrega 10, yape 0', billetes.efectivo === 10 && billetes.yape === 0 && billetes.total === 10);
+// fondo + paga juntos
+const fondoPaga = calcularCuadreEntrega({ contado: 350, fondoInicial: 50, netoDelDia: 700, pagoRuta: 90 });
+check('fondo 50 + paga 90: entrega 350−50−90 = 210', fondoPaga.efectivo === 210 && fondoPaga.yape === 400);
+// paga cubierta por el yape digital (sin billetes en la mano)
+const todoYape = calcularCuadreEntrega({ contado: 0, fondoInicial: 0, netoDelDia: 650, pagoRuta: 90 });
+check('todo yape: entrega 0 efectivo + 560 yape', todoYape.efectivo === 0 && Math.abs(todoYape.yape - 560) < 0.005 && todoYape.teDebe === 0);
+// paga MAYOR que toda la plata del día → la empresa te completa
+const deuda = calcularCuadreEntrega({ contado: 50, fondoInicial: 0, netoDelDia: 50, pagoRuta: 90 });
+check('paga 90 > día 50: te quedás todo y te deben 40', deuda.efectivo === 0 && deuda.yape === 0 && deuda.total === 0 && deuda.teDebe === 40);
+// basura defensiva: null / texto / objeto sin total → 0 → sin descuento
+check('pagoRuta null → sin descuento', calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 700, pagoRuta: null }).efectivo === 300);
+check('pagoRuta texto → sin descuento', calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 700, pagoRuta: '90' }).efectivo === 300);
+check('pagoRuta objeto roto → sin descuento', calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 700, pagoRuta: { activo: true } }).efectivo === 300);
+check('pagoRuta negativo → sin descuento', calcularCuadreEntrega({ contado: 300, fondoInicial: 0, netoDelDia: 700, pagoRuta: -50 }).efectivo === 300);
+
+// ── 8. FASE Q: el mensaje al jefe con el descuento ──────
+console.log('8) FASE Q — mensaje al jefe con el descuento');
+const msgQ = armarMensajeCuadreJefe(diaQ, 'Rudy');
+check('mensaje con paga: línea "Mi paga de la ruta (10 pedidos): S/ 96.00 — ya descontada"', msgQ.includes('🛵 Mi paga de la ruta (10 pedidos): S/ 96.00 — ya descontada'), msgQ);
+check('mensaje con paga: entrega 204.00', msgQ.includes('Te entrego en efectivo: S/ 204.00'), msgQ);
+check('mensaje con paga: yape 882.37', msgQ.includes('por Yape: S/ 882.37'), msgQ);
+check('mensaje con paga: recibe 1086.37', msgQ.includes('Recibe en total: S/ 1086.37'), msgQ);
+check('mensaje sin deuda: no aparece "debiendo"', !msgQ.includes('debiendo'), msgQ);
+// nPedidos sale del snapshot (8 normales + 2 lejanos), no de entregas
+const soloNormal = armarMensajeCuadreJefe(cierre({ contado: 100, netoDelDia: 200, entregas: 99, pagoRuta: { activo: true, cantidadNormal: 3, cantidadLejos: 0, tarifaNormal: 9, tarifaLejos: 12, total: 27 } }));
+check('cantidad de pedidos = normales+lejos del snapshot (3, no entregas 99)', soloNormal.includes('(3 pedidos): S/ 27.00'), soloNormal);
+// con deuda → línea de la empresa
+const msgDeuda = armarMensajeCuadreJefe(cierre({ contado: 50, netoDelDia: 50, entregas: 10, pagoRuta: { activo: true, cantidadNormal: 10, cantidadLejos: 0, tarifaNormal: 9, tarifaLejos: 12, total: 90 } }), 'Rudy');
+check('mensaje con deuda: "La empresa me queda debiendo: S/ 40.00"', msgDeuda.includes('⚠️ La empresa me queda debiendo: S/ 40.00'), msgDeuda);
+check('mensaje con deuda: entrega 0', msgDeuda.includes('Te entrego en efectivo: S/ 0.00'), msgDeuda);
+// CIERRE VIEJO (sin pagoRuta): el mensaje default queda IGUAL que la FASE P
+const msgViejo = armarMensajeCuadreJefe(cierreRudy, 'Rudy');
+check('cierre viejo: sin línea de paga (regresión P)', !msgViejo.includes('Mi paga'), msgViejo);
+check('cierre viejo: sin línea de deuda (regresión P)', !msgViejo.includes('debiendo'), msgViejo);
+// variables nuevas en plantillas propias
+const propietaria = aplicarPlantillaCuadre('ruta: {loTuyo} / entrega: {efectivo} / deben: {teDebe}', diaQ, 'Rudy');
+check('plantilla propia con {loTuyo} → línea completa con S/ 96.00', propietaria.includes('ruta: 🛵') && propietaria.includes('S/ 96.00'), propietaria);
+check('plantilla propia con {teDebe} vacío → línea limpia', propietaria.includes('deben:') && !propietaria.includes('deben: S/'), propietaria);
+const VARIABLES_OK = VARIABLES_CUADRE.map((v) => v.clave);
+check('VARIABLES_CUADRE incluye loTuyo y teDebe', VARIABLES_OK.includes('loTuyo') && VARIABLES_OK.includes('teDebe'));
+// TODAS las variables siguen reemplazándose (ahora con pagoRuta presente)
+const todasQ = aplicarPlantillaCuadre(
+  VARIABLES_CUADRE.map((v) => `{${v.clave}}`).join('\n'),
+  diaQ,
+  'Rudy'
+);
+check('todas las variables se reemplazan con pagoRuta', !todasQ.includes('{'), todasQ);
+
 // ── resumen ──────────────────────────────────────────────
 console.log(`\n📊 ${ok} ✓ · ${fail} ✗`);
 if (fail > 0) {
-  console.log('❌ FASE P: hay tests fallando');
+  console.log('❌ FASE Q: hay tests fallando');
   process.exit(1);
 }
-console.log('✅ FASE O + P: cuadre del jefe OK');
+console.log('✅ FASE O + P + Q: cuadre del jefe OK');
 
 // helper: la línea con {foo} también debe tener {efectivo} reemplazado
 function aplicarPlantillaCuadra_ok(out, c) {

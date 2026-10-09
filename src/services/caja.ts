@@ -26,6 +26,7 @@ import {
   Gasto,
   MAX_CIERRES,
   MAX_DIAS_GASTO,
+  PagoRutaCierre,
   cierreDeFecha,
   fechaLocalDe,
   fusionarCierres,
@@ -304,6 +305,12 @@ export interface DatosCierre {
   /** resumen calculado con los clientes de hoy + gastos */
   resumen: ResumenCaja;
   nota?: string;
+  /** 🛵 FASE Q: tu paga por pedidos del día (S/9 normal / S/12
+   *  lejano — temporada FASE D). Se congela en el cierre para que
+   *  el cuadre al jefe la descuadre siempre con los números del
+   *  día, aunque después cambies la config. Sin esto → cuadre de
+   *  la FASE O/P (sin descuento). */
+  pagoRuta?: PagoRutaCierre;
 }
 
 /**
@@ -334,6 +341,9 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
     netoDelDia: r.netoDelDia,
     gastos: gastosDeHoy(estado),
     nota: (datos.nota || '').trim().slice(0, 200) || undefined,
+    // 🛵 FASE Q: la paga del día viaja DENTRO del cierre (a la
+    // nube por el mismo doc usuarios/{uid}.caja — sin reglas nuevas)
+    ...(datos.pagoRuta ? { pagoRuta: datos.pagoRuta } : {}),
   };
 
   // un cierre por fecha: el de hoy se reemplaza

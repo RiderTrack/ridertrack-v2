@@ -1243,7 +1243,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.6 (FASE P — ✏️ EL MENSAJE AL JEFE A TU MANERA: sale LIMPIO (solo lo que entregás en efectivo + lo que depositás por Yape, sin "sobran/faltan" ni comparaciones que confundan), lo ves ANTES de enviarlo, lo editás a mano y lo guardás como plantilla para reusar (con variables que se llenan solas con los números del día) · FASE O: 📲 cuadre con el jefe al cerrar la caja — se calcula con lo que CONTASTE y tu fondo se queda afuera · FASE N: ☁️ fix del backup en la nube (los 2 backups suben y el historial reaparece) · FASE M: fix del comprobante al chat equivocado + 🅾️ multi-puntos A→B→C→D · FASE L: letra grande y "Estoy yendo" en el Seguimiento · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
+        DriverTrack v0.10.7 (FASE Q — 🛵 LA CAJA DESCUENTA LO DE TU RUTA: al cerrar la caja, tu paga por pedidos (S/9 normal, S/12 lejanos) se queda contigo — el cuadre al jefe sale con el descuento YA HECHO y tu paga congelada dentro del cierre · FASE P: ✏️ mensaje al jefe limpio y editable con plantillas · FASE O: 📲 cuadre directo al WhatsApp del jefe con lo que CONTASTE · FASE N: ☁️ fix del backup en la nube · FASE M: fix comprobante al chat equivocado + 🅾️ multi-puntos · FASE L: letra grande + "Estoy yendo" · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
       </p>
     </div>
   );
