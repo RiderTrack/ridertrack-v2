@@ -1243,7 +1243,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.4 (FASE N — ☁️ FIX del backup en la nube: al "Finalizar y guardar ruta" el historial SÍ se guardaba pero el backup NO subía (toast ⚠️ "avísame para revisarlo") y ☁️ Backups / 📜 Historial / 📊 Estadísticas veían todo VACÍO — las reglas de Firestore bloqueaban backups_v2, los backups v1 y el LIST del historial; ahora suben los 2 backups y TODO tu historial acumulado reaparece (corré una vez actualizar_reglas_backups.js en Termux y listo) · FASE M: fix del comprobante al chat equivocado + 🅾️ multi-puntos A→B→C→D · FASE L: letra grande y "Estoy yendo" en el Seguimiento · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
+        DriverTrack v0.10.5 (FASE O — 📲 CUADRE CON EL JEFE: al cerrar la caja la app te dice cuánto le entregás en EFECTIVO y cuánto depositás por YAPE (se calcula con lo que contaste; tu fondo se queda afuera) y con un toque lo mandás directo al WhatsApp de tu jefe · FASE N: ☁️ fix del backup en la nube (los 2 backups suben y el historial reaparece) · FASE M: fix del comprobante al chat equivocado + 🅾️ multi-puntos A→B→C→D · FASE L: letra grande y "Estoy yendo" en el Seguimiento · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
       </p>
     </div>
   );

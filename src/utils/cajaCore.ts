@@ -322,6 +322,83 @@ export function armarMensajeCierre(cierre: CierreCaja, riderNombre?: string): st
   return L.join('\n');
 }
 
+// ── Cuadre de entrega (FASE O) ────────────────────────────
+
+/** Cómo le entregás la plata a tu jefe al final del día */
+export interface CuadreEntrega {
+  /** lo que le das en billetes (lo que contaste − tu fondo, que es tuyo) */
+  efectivo: number;
+  /** lo que falta → lo depositás por Yape */
+  yape: number;
+  /** efectivo + yape = todo lo que recibe por tu mano */
+  total: number;
+}
+
+/**
+ * FASE O — el cuadre de la entrega. La app dice "te quedó S/400 en
+ * efectivo y S/300 en yape", pero en la vida real (yapeos, cambios,
+ * vueltos) a veces tenés OTRA plata en la mano. Este cálculo parte
+ * de lo que CONTASTE al cerrar y reparte el total del día:
+ *   · efectivo = contado − fondo (el fondo es tuyo, no se entrega)
+ *   · yape = neto del día − efectivo (lo que falta para que la
+ *     empresa reciba todo lo que pasó por tus manos, gastos ya
+ *     descontados del neto)
+ */
+export function calcularCuadreEntrega(e: {
+  contado: number;
+  fondoInicial: number;
+  netoDelDia: number;
+}): CuadreEntrega {
+  const efectivo = Math.max(0, e.contado - e.fondoInicial);
+  const yape = Math.max(0, e.netoDelDia - efectivo);
+  return { efectivo, yape, total: efectivo + yape };
+}
+
+/**
+ * FASE O — mensaje directo para el WhatsApp del jefe. Igual que
+ * armarMensajeCierre pero pensado para el que recibe la plata:
+ * lo que va en EFECTIVO y lo que va por YAPE, con el contexto.
+ */
+export function armarMensajeCuadreJefe(cierre: CierreCaja, riderNombre?: string): string {
+  const q = calcularCuadreEntrega(cierre);
+  const L: string[] = [];
+  const quien = riderNombre?.trim() || 'Rider';
+  const mon = (n: number) => `S/ ${Math.max(0, n).toFixed(2)}`;
+  const cobrado = cierre.efectivoCobrado + cierre.digitalRider + cierre.empresa;
+  const gastos = cierre.gastosEfectivo + cierre.gastosDigital;
+
+  L.push(`💰 *CUADRE DEL DÍA — ${quien}*`);
+  L.push(`📅 ${fechaCorta(cierre.fecha)}`);
+  L.push('');
+  L.push(`💵 *Cobrado del día: ${mon(cobrado)}*`);
+  L.push(`· según la app: ${mon(cierre.efectivoCobrado)} en efectivo + ${mon(cierre.digitalRider)} en yape`);
+  if (cierre.empresa > 0) L.push(`· la empresa cobra directo: ${mon(cierre.empresa)} (no pasa por mis manos)`);
+  if (gastos > 0) L.push(`· gastos de la ruta: ${mon(gastos)} (${cierre.gastos.length}) — ya descontados`);
+  L.push('');
+  L.push(`🤲 *Te entrego en efectivo: ${mon(q.efectivo)}*`);
+  L.push(`📲 *El resto te lo deposito por Yape: ${mon(q.yape)}*`);
+  if (Math.abs(cierre.diferencia) > 0.01) {
+    if (cierre.diferencia < 0) {
+      L.push(`ℹ️ Me quedó menos efectivo que lo previsto (−S/ ${Math.abs(cierre.diferencia).toFixed(2)}) — la diferencia la cubre el Yape`);
+    } else {
+      L.push(`ℹ️ Me quedó más efectivo que lo previsto (+S/ ${cierre.diferencia.toFixed(2)})`);
+    }
+  }
+  if (cierre.nota?.trim()) {
+    L.push('');
+    L.push(`📝 ${cierre.nota.trim()}`);
+  }
+  return L.join('\n');
+}
+
+/** FASE O — normaliza el WhatsApp del jefe: solo dígitos; 9 dígitos → 51 (Perú) */
+export function normalizarCelJefe(texto: string): string {
+  const d = (texto || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length === 9) return '51' + d;
+  return d;
+}
+
 // ── Fusiones local vs remoto ──────────────────────────────
 
 /** id de gasto aleatorio (prefijo anti-colisión con remoto) */

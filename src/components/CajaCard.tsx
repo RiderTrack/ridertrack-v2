@@ -41,11 +41,14 @@ import {
   Gasto,
   ResumenCaja,
   armarMensajeCierre,
+  armarMensajeCuadreJefe,
+  calcularCuadreEntrega,
   categoriaInfo,
   etiquetaDiferencia,
   fechaCorta,
   formatearSoles,
   horaCorta,
+  normalizarCelJefe,
   resumenCajaDia,
 } from '../utils/cajaCore';
 
@@ -214,6 +217,12 @@ function parsearSoles(texto: string): number {
   return Number.isFinite(n) ? Math.max(0, n) : NaN;
 }
 
+// ── FASE O: WhatsApp del jefe (directo, sin robot) ─────────
+const JEFE_KEY = 'rt_whatsapp_jefe';
+function leerJefe(): string {
+  try { return localStorage.getItem(JEFE_KEY) || ''; } catch { return ''; }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 💰 GESTOR COMPLETO (vive en el modal del menú ☰)
 // ═══════════════════════════════════════════════════════════
@@ -237,6 +246,11 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   const [notaCierre, setNotaCierre] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [historialAbierto, setHistorialAbierto] = useState(false);
+
+  // ── FASE O: cuadre de entrega + WhatsApp del jefe ──
+  const cuadreHoy = cierreHoy ? calcularCuadreEntrega(cierreHoy) : null;
+  const [jefe, setJefe] = useState(leerJefe);
+  const [jefeEdit, setJefeEdit] = useState(() => !leerJefe());
 
   const fondoEfectivo = fondoInput != null ? parsearSoles(fondoInput) : caja.fondo;
 
@@ -325,6 +339,32 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     } catch (e: any) {
       onShowToast?.('No se pudo enviar', e?.message || 'Revisa tu internet e inténtalo de nuevo', 'error');
     }
+  };
+
+  // ── FASE O: guardar número / mandar cuadre al jefe ──
+  const guardarJefe = () => {
+    const tel = normalizarCelJefe(jefe);
+    if (!tel) {
+      onShowToast?.('Número inválido', 'Escribe el WhatsApp del jefe (ej: 987654321)', 'warning');
+      return;
+    }
+    try { localStorage.setItem(JEFE_KEY, tel); } catch { /* sin storage: sigue en memoria */ }
+    setJefe(tel);
+    setJefeEdit(false);
+    onShowToast?.('✓ Jefe guardado', `El cuadre irá a +${tel}`, 'success');
+  };
+
+  const mandarAlJefe = () => {
+    if (!cierreHoy) return;
+    const tel = normalizarCelJefe(jefe);
+    if (!tel) {
+      setJefeEdit(true);
+      onShowToast?.('Falta el número', 'Escribe el WhatsApp de tu jefe (ej: 987654321)', 'warning');
+      return;
+    }
+    const texto = armarMensajeCuadreJefe(cierreHoy, riderName);
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank');
+    onShowToast?.('📲 Cuadre listo', 'Se abrió tu WhatsApp con el mensaje — dale enviar', 'success');
   };
 
   // ── render helpers ──
@@ -551,6 +591,17 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
           })()}
           {fila('🏷️', 'Neto del día (− gastos)', formatearSoles(cierreHoy!.netoDelDia), 'text-emerald-300')}
           {cierreHoy!.nota && <p className="text-[10px] text-slate-500 mt-1 italic">📝 {cierreHoy!.nota}</p>}
+          {cuadreHoy && (
+            <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-violet-500/10 p-2.5">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-violet-300 mb-1">📲 Cuadre para tu jefe</p>
+              {fila('🤲', 'Le entregás en efectivo', formatearSoles(cuadreHoy.efectivo), 'text-emerald-300')}
+              {fila('📲', 'Depositás por Yape', formatearSoles(cuadreHoy.yape), 'text-violet-300')}
+              {fila('🧾', 'Recibe en total', formatearSoles(cuadreHoy.total), 'text-white')}
+              <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
+                De lo que contaste ({formatearSoles(cierreHoy!.contado)}) se resta tu fondo ({formatearSoles(cierreHoy!.fondoInicial)}) — eso es tuyo. El resto sale por Yape.
+              </p>
+            </div>
+          )}
           <div className="flex gap-2 mt-3">
             <button
               onClick={() => void mandarAMate()}
@@ -565,6 +616,51 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
             >
               <Unlock className="w-4 h-4" /> Reabrir
             </button>
+          </div>
+          {/* ── FASE O: WhatsApp directo al jefe ── */}
+          <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-slate-950/60 p-2.5">
+            {jefe && !jefeEdit ? (
+              <>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-[10px] text-slate-400 flex-1 truncate">👤 Tu jefe: +{jefe}</span>
+                  <button
+                    onClick={() => setJefeEdit(true)}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
+                    title="Cambiar el número"
+                  >
+                    ✏️ editar
+                  </button>
+                </div>
+                <button
+                  onClick={mandarAlJefe}
+                  className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  📲 Mandar el cuadre al jefe
+                </button>
+                <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
+                  Se abre tu WhatsApp con el mensaje listo (efectivo + yape). Va directo — el robot no participa.
+                </p>
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={`${inputTexto} flex-1 min-w-0 py-2`}
+                  placeholder="WhatsApp del jefe (ej: 987654321)"
+                  inputMode="tel"
+                  value={jefe}
+                  onChange={(e) => setJefe(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') guardarJefe();
+                  }}
+                />
+                <button
+                  onClick={guardarJefe}
+                  className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex-shrink-0"
+                >
+                  ✓ guardar
+                </button>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -593,6 +689,19 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               return <span className={`text-sm font-black ${color}`}>{et.texto}</span>;
             })()}
           </div>
+          {(() => {
+            // FASE O: preview del cuadre mientras escribís el conteo
+            const contado = parsearSoles(contadoInput);
+            if (contadoInput.trim() === '' || isNaN(contado)) return null;
+            const q = calcularCuadreEntrega({ contado, fondoInicial: caja.fondo, netoDelDia: resumen.netoDelDia });
+            return (
+              <p className="text-[10px] text-slate-400 leading-relaxed mt-1.5">
+                → cuadre:{' '}
+                <b className="text-emerald-300">S/ {q.efectivo.toFixed(2)} en efectivo</b> +{' '}
+                <b className="text-violet-300">S/ {q.yape.toFixed(2)} por Yape</b> para tu jefe (tu fondo se queda afuera)
+              </p>
+            );
+          })()}
           <input
             className={`${inputTexto} w-full mt-2`}
             placeholder="nota del cierre (opcional — ej: faltó 2 porque di vuelto mal)"
