@@ -30,7 +30,7 @@ import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
 // manda un mensaje REAL a tu WhatsApp
-import { encolarAccionDT, uidDisponible, PLANTILLAS_DEF, ETIQUETAS_PLANTILLA, TipoPlantilla, resolverPlantilla } from '../services/robotBot';
+import { encolarAccionDT, escucharResultadoDT, uidDisponible, PLANTILLAS_DEF, ETIQUETAS_PLANTILLA, TipoPlantilla, resolverPlantilla } from '../services/robotBot';
 // FASE B2: imágenes del robot — una por cada aviso, como en el trabajo
 import {
   TIPOS_IMAGEN_DT,
@@ -40,7 +40,7 @@ import {
   quitarImagenDT,
 } from '../services/imagenesDT';
 import { auth } from '../../services/firebase';
-import { armarMensajeFoto, MENSAJE_FOTO_DEF, normalizarCelular } from '../utils';
+import { armarMensajeCobro, armarMensajeFoto, qrDelMetodo, MENSAJE_FOTO_DEF, normalizarCelular } from '../utils';
 import type { Viaje } from '../types';
 
 interface Props {
@@ -107,6 +107,9 @@ export default function AjustesView({
   // no hay URL ni token; la prueba manda un mensaje REAL a tu WhatsApp
   const [robotActivo, setRobotActivo] = useState(config.robotActivo);
   const [robotEstado, setRobotEstado] = useState<'sin-probar' | 'probando' | 'online' | 'offline'>('sin-probar');
+  // 🟣 FASE R: estado de la prueba CON QR (un cobro de verdad a vos
+  // mismo — el diagnóstico que descubre si el QR puede salir)
+  const [qrPrueba, setQrPrueba] = useState<{ estado: 'probando' | 'ok' | 'error' | 'cola'; mensaje: string } | null>(null);
   const sesionActiva = uidDisponible() !== null;
   // FASE C: 💬 textos EDITABLES de los avisos del robot — arrancan
   // de lo que ya guardaste (o del original de fábrica) y se guardan
@@ -197,6 +200,80 @@ export default function AjustesView({
     if (config.robotActivo) probarRobot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 🟣 FASE R: 🧪 Prueba CON QR — te manda a VOS un cobro DE VERDAD
+  // (el mismo mensaje + QR que le llegaría a un cliente). Es EL
+  // diagnóstico: la prueba común solo prueba el TEXTO; esta descubre
+  // si el QR puede salir (el bug del guardián de pagos pasaba piola
+  // porque la prueba común siempre llegaba). El resultado te llega
+  // con el motivo REAL que escribió el bot.
+  async function probarRobotConQr() {
+    if (!sesionActiva) {
+      onToast('Abrí sesión con tu cuenta de RiderTrack para usar el robot');
+      return;
+    }
+    const cel = normalizarCelular(config.miCelular);
+    if (!cel) {
+      onToast('Poné tu celular en 👤 Mis datos (acá en Ajustes) para probarte el robot');
+      return;
+    }
+    const tieneYape = config.yape.numero.trim().length > 0;
+    const tienePlin = config.plin.numero.trim().length > 0;
+    if (!tieneYape && !tienePlin) {
+      setQrPrueba({
+        estado: 'error',
+        mensaje: 'Configurá tu Yape o Plin en "Mi QR Yape/Plin → 🏍️ inDrive" — sin número no hay cobro que probar',
+      });
+      return;
+    }
+    const metodo = tieneYape ? 'yape' : 'plin';
+    const texto = armarMensajeCobro(
+      { cliente: config.miNombre || 'Vos', monto: 1, direccion: 'prueba del robot' },
+      config,
+      metodo,
+    );
+    setQrPrueba({ estado: 'probando', mensaje: 'Mandando el cobro de prueba con tu QR…' });
+    const r = await encolarAccionDT({
+      tipo: 'dt_cobro',
+      telefono: cel,
+      texto,
+      imagenBase64: qrDelMetodo(config, metodo) || undefined,
+      nombre: 'Vos (prueba QR)',
+      metodo,
+    });
+    if (!r.ok) {
+      setQrPrueba({ estado: 'error', mensaje: '⚠️ ' + r.error });
+      return;
+    }
+    if (!r.docId) {
+      setQrPrueba({ estado: 'cola', mensaje: '🧪 Cobro de prueba encolado — mirá tu WhatsApp en un rato' });
+      return;
+    }
+    escucharResultadoDT(
+      r.docId,
+      res => {
+        if (res.estado === 'enviado') {
+          setQrPrueba({
+            estado: 'ok',
+            mensaje: res.nota
+              ? '🟡 Llegó SIN QR — el robot no pudo con la imagen (revisá el parche v1.3 y el QR)'
+              : '🟢 ¡Llegó! El cobro con QR sale perfecto 💜',
+          });
+        } else if (res.estado === 'error') {
+          setQrPrueba({
+            estado: 'error',
+            mensaje: '🔴 El robot no pudo: ' + (res.error || 'sin detalle') + ' — ¿parche v1.3 instalado y tu Yape/Plin configurados?',
+          });
+        } else {
+          setQrPrueba({
+            estado: 'cola',
+            mensaje: '🟡 El bot no respondió — el cobro quedó encolado (sale apenas reviva)',
+          });
+        }
+      },
+      25000,
+    );
+  }
 
   // ═══ FASE B2: 🖼️ imágenes del robot (una por aviso) ═══
   // Suscripción en vivo: lo que subís acá (o desde otro celular)
@@ -897,13 +974,17 @@ export default function AjustesView({
         </div>
         <p className="mt-1 text-[11px] leading-snug text-slate-400">
           Con el robot prendido, los botones le mandan al cliente <b className="text-violet-300">solo</b>:{' '}
-          <b className="text-violet-300">Cobrar</b> (con tu QR de Yape adentro 💜),{' '}
+          <b className="text-violet-300">Cobrar</b> (te pregunta{' '}
+          <b className="text-violet-300">💜 solo Yape</b> / <b className="text-sky-300">🔷 solo Plin</b> /{' '}
+          <b className="text-slate-300">💙 ambos</b> — cada mensaje sale ÚNICAMENTE con el método que
+          elijas y SU QR),{' '}
           <b className="text-violet-300">Voy en camino</b>, <b className="text-violet-300">Llegando en X min</b>,{' '}
           <b className="text-violet-300">Ya llegué</b>, <b className="text-violet-300">Entregado</b> y{' '}
           <b className="text-violet-300">Pedir ubicación</b> —
           sin abrir WhatsApp. Va por la nube (cola propia de inDrive): si el bot se reinicia, el mensaje
-          sale apenas revive. Si algo falla, la app abre WhatsApp como siempre. Necesita el parche{' '}
-          <span className="font-mono text-[10px]">drivertrack_bot.js</span> en tu rudy-bot (Termux).
+          sale apenas revive. Si algo falla, la app te avisa el motivo y abre WhatsApp como siempre.
+          Necesita el parche <span className="font-mono text-[10px]">drivertrack_bot.js v1.3</span> en
+          tu rudy-bot (Termux).
         </p>
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -916,7 +997,18 @@ export default function AjustesView({
             {robotEstado === 'probando' ? <Loader2 size={13} className="animate-spin" /> : null}
             {robotEstado === 'probando' ? 'Mandando…' : 'Mandarme prueba'}
           </button>
-          {robotEstado !== 'probando' && (
+          {/* 🟣 FASE R: la prueba con QR — un cobro DE VERDAD a vos mismo,
+              con el mensaje y el QR que le llegaría a un cliente */}
+          <button
+            onClick={probarRobotConQr}
+            disabled={qrPrueba?.estado === 'probando'}
+            className="flex items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-2 text-[11px] font-bold text-violet-300 ring-1 ring-violet-500/40 disabled:opacity-60"
+            data-testid="robot-probar-qr"
+          >
+            {qrPrueba?.estado === 'probando' ? <Loader2 size={13} className="animate-spin" /> : '💜'}
+            {qrPrueba?.estado === 'probando' ? 'Mandando…' : 'Prueba con QR'}
+          </button>
+          {robotEstado !== 'probando' && qrPrueba?.estado !== 'probando' && (
             <p
               className={`text-[11px] font-semibold ${
                 robotEstado === 'online'
@@ -936,8 +1028,27 @@ export default function AjustesView({
           )}
         </div>
 
+        {/* 🟣 FASE R: el resultado REAL de la prueba con QR — con el motivo
+            que escribió el bot (si no pudo, acá ves POR QUÉ) */}
+        {qrPrueba && qrPrueba.estado !== 'probando' && (
+          <p
+            className={`mt-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold leading-snug ${
+              qrPrueba.estado === 'ok'
+                ? 'bg-emerald-500/10 text-emerald-300'
+                : qrPrueba.estado === 'error'
+                  ? 'bg-red-500/10 text-red-400'
+                  : 'bg-amber-500/10 text-amber-300'
+            }`}
+            data-testid="robot-estado-qr"
+          >
+            {qrPrueba.mensaje}
+          </p>
+        )}
+
         {/* FASE B: la prueba es un mensaje REAL a tu WhatsApp — si llega,
-            todo el circuito (app → Firestore → bot → tu celular) anda */}
+            todo el circuito (app → Firestore → bot → tu celular) anda.
+            FASE R: la PRUEBA CON QR manda el cobro completo (mensaje +
+            QR) — si esa llega, el cobro a un cliente sale seguro */}
         <p className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
           <span className={sesionActiva ? 'text-emerald-400' : 'text-red-400'}>{sesionActiva ? '●' : '○'}</span>
           {sesionActiva ? 'Sesión de RiderTrack abierta ✓' : 'Sin sesión — el robot necesita tu cuenta'}
@@ -1243,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.7 (FASE Q — 🛵 LA CAJA DESCUENTA LO DE TU RUTA: al cerrar la caja, tu paga por pedidos (S/9 normal, S/12 lejanos) se queda contigo — el cuadre al jefe sale con el descuento YA HECHO y tu paga congelada dentro del cierre · FASE P: ✏️ mensaje al jefe limpio y editable con plantillas · FASE O: 📲 cuadre directo al WhatsApp del jefe con lo que CONTASTE · FASE N: ☁️ fix del backup en la nube · FASE M: fix comprobante al chat equivocado + 🅾️ multi-puntos · FASE L: letra grande + "Estoy yendo" · FASE K: 🎯 recarga semanal · FASE J: 📷 foto de entrega automática) · Lima, PE
+        DriverTrack v0.10.8 (FASE R — 💜🔷 COBRO YAPE/PLIN SEPARADO: al apretar Cobrar elegís si el mensaje va SOLO con Yape, SOLO con Plin o con ambos — cada uno con SU QR · FIX DEL GUARDIÁN: el bot ya no bloquea tus cobros con tu QR personal (el guardián ahora admite TUS números de inDrive solos) · la app te muestra el resultado REAL del cobro y abre WhatsApp de respaldo si el robot no pudo · prueba con QR en Ajustes 🧪 · QRs viajan livianos con presupuesto · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
       </p>
     </div>
   );

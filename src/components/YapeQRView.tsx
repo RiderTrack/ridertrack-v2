@@ -20,6 +20,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
 // FASE A2: billeteras personales de inDrive (localStorage dt_config_v1)
 import { cargarConfig, guardarConfig, normalizarConfig } from '../drivertrack/storage';
+// 🟣 FASE R: QR de inDrive con PRESUPUESTO de peso — viaja liviano en
+// el sync (dt_sync) y en los cobros del robot (acciones_dt)
+import { comprimirQrPago } from '../drivertrack/utils';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import {
   ConfigCuentas,
@@ -731,7 +734,9 @@ const IndrivePanel: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
     e.target.value = '';
     if (!file) return;
     try {
-      const b64 = await comprimirImagen(file);
+      // 🟣 FASE R: con presupuesto (~160 KB) — el QR viaja liviano en
+      // los cobros del robot y en el sync entre tus dos cels
+      const b64 = await comprimirQrPago(file);
       cambiar(cual, { qrBase64: b64 });
     } catch {
       onShowToast?.('No se pudo leer la imagen', 'Probá con otra foto del QR', 'warning');

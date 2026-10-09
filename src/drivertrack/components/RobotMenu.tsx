@@ -240,8 +240,8 @@ export default function RobotMenu({
                   <span className="block text-xs font-black">Cobrar este viaje</span>
                   <span className="block text-[10px] font-medium opacity-70">
                     {telefonos.length > 1
-                      ? `a ${telefonos[telIdx]?.label ?? 'quien recibe'} · mensaje + tu QR 💜 (S/ ${viaje.tarifa.toFixed(2)})`
-                      : `mensaje + tu QR de Yape 💜 (S/ ${viaje.tarifa.toFixed(2)})`}
+                      ? `a ${telefonos[telIdx]?.label ?? 'quien recibe'} · mensaje + tu QR 💜/🔷 (S/ ${viaje.tarifa.toFixed(2)})`
+                      : `mensaje + tu QR 💜/🔷 (S/ ${viaje.tarifa.toFixed(2)})`}
                   </span>
                 </span>
               </button>

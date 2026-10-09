@@ -1,9 +1,12 @@
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 // 🧪 test_drivertrack_bot.js — prueba del parche con MOCKS
 // Simula firebase-admin + campanas_bot + sock de Baileys y
 // verifica que el handler procese bien las acciones dt_*.
+// FASE R: también prueba guardiaPagos.js v2 (lista blanca
+// extensible) + los arreglos del v1.3 (números personales,
+// resultado real, reintento del cobro sin QR).
 // Correr: node test_drivertrack_bot.js
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 const path = require('path');
 const assert = require('assert');
 
@@ -22,6 +25,12 @@ class MockDocSnap {
   get ref() { return new MockDocRef(this.id); }
 }
 
+// 🟣 FASE R: lo que devuelve dt_sync/{uid} (los números personales
+// de Yape/Plin que la app de Rudy configura en Mi QR → inDrive)
+let dtSyncData = {
+  config: { yape: { numero: '987 654 321' }, plin: { numero: '' } },
+};
+
 const mockFirestore = {
   collection: () => ({
     doc: () => ({
@@ -33,6 +42,8 @@ const mockFirestore = {
           },
         }),
       }),
+      // 🟣 FASE R: lectura de dt_sync → config con los números personales
+      get: async () => ({ exists: true, data: () => dtSyncData }),
     }),
   }),
 };
@@ -47,10 +58,17 @@ const mockCampanas = {
 };
 
 // ── MOCK del sock de Baileys ──
+// 🟣 FASE R: modoSend — 'normal' | 'null' (bloqueado por guardián/freno)
+// | 'fallo-imagen' (la IMAGEN no sale pero el texto sí)
 const mensajesEnviados = [];
+let modoSend = 'normal';
 const mockSock = {
   user: { id: 'bot' },
   sendMessage: async (jid, content) => {
+    if (modoSend === 'null') return null; // bloqueado (guardián/freno)
+    if (modoSend === 'fallo-imagen' && content.image) {
+      throw new Error('media upload failed');
+    }
     mensajesEnviados.push({ jid, content });
     return { key: { id: 'msg-' + mensajesEnviados.length } };
   },
@@ -81,8 +99,9 @@ require.cache['mock:firebase-admin/firestore'] = { id: 'mock:firebase-admin/fire
 require.cache['mock:firebase'] = { id: 'mock:firebase', filename: 'mock:firebase', loaded: true, exports: { getUidRudy: () => 'UID-TEST' } };
 require.cache['mock:campanas'] = { id: 'mock:campanas', filename: 'mock:campanas', loaded: true, exports: mockCampanas };
 
-// ── Cargar el parche real ──
+// ── Cargar el parche real + el guardián v2 real ──
 const { iniciarDrivertrackBot } = require(path.join(__dirname, 'drivertrack_bot.js'));
+const guardia = require(path.join(__dirname, 'guardiaPagos.js'));
 
 // ── Helper: simular que llega un doc nuevo ──
 function simularDoc(id, datos) {
@@ -96,6 +115,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   console.log('🧪 Test 1: arranque del parche');
   iniciarDrivertrackBot(mockSock);
+  await sleep(300); // 🟣 FASE R: dar tiempo a leer dt_sync y registrar números
   console.log('   ✓ parche iniciado sin crashear');
 
   console.log('🧪 Test 2: dt_aviso (texto solo) — voy en camino');
@@ -255,11 +275,92 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert(String(errFoto.error || '').includes('foto'), 'el error no explica que faltó la foto');
   console.log('   ✓ sin foto: marcado error, NADA enviado (la app lo muestra)');
 
+  // ═════════════════════════════════════════════════════════════
+  // 🟣 FASE R — guardián v2 + v1.3 (números personales, resultado
+  // real, reintento del cobro sin QR)
+  // ═════════════════════════════════════════════════════════════
+
+  console.log('🧪 Test 15 (FASE R): el arranque registró el número PERSONAL de dt_sync en el guardián');
+  const permitidos = guardia.numerosPermitidos();
+  assert(permitidos.includes('980811297'), 'Lorenzo (trabajo) tiene que seguir permitido');
+  assert(permitidos.includes('987654321'), 'el número personal leído de dt_sync no se registró: ' + permitidos.join(','));
+  console.log('   ✓ permitidos: ' + permitidos.join(' · '));
+
+  console.log('🧪 Test 16 (FASE R): guardián v2 — cobro con el número personal PASA, inventado NO');
+  const msgPersonal = '💜 Puedes pagarme por Yape:\n📱 *987 654 321* (Rudy)\n💵 O en efectivo al recibir';
+  assert(guardia.revisarMensajeSaliente(msgPersonal).seguro === true, 'el número personal registrado NO pasa (el bug de la FASE R)');
+  const msgLorenzo = '💜 Puedes pagarme por Yape: 980 811 297';
+  assert(guardia.revisarMensajeSaliente(msgLorenzo).seguro === true, 'el número del trabajo NO pasa (regresión)');
+  const msgInventado = 'págamme al 996 111 222 por yape';
+  assert(guardia.revisarMensajeSaliente(msgInventado).seguro === false, 'un número inventado en contexto de pago NO debe pasar');
+  const msgBot = 'yapea al 907 565 569';
+  const chkBot = guardia.revisarMensajeSaliente(msgBot);
+  assert(chkBot.seguro === false && String(chkBot.detalle).includes('BOT'), 'el número del bot sigue bloqueado con su aviso');
+  assert(guardia.permitirNumeroCobro('123') === false, 'permitirNumeroCobro no debe aceptar números cortos');
+  assert(guardia.permitirNumeroCobro('51987999888') === true, 'debe aceptar con el 51 adelante');
+  assert(guardia.revisarMensajeSaliente('yapea al 987 999 888').seguro === true, 'el número recién permitido no pasa');
+  console.log('   ✓ personal PASA · trabajo PASA · inventado BLOQUEADO · bot BLOQUEADO');
+
+  console.log('🧪 Test 17 (FASE R): envío BLOQUEADO (null) → doc ERROR, nunca más "enviado" falso');
+  const antes17 = mensajesEnviados.length;
+  modoSend = 'null';
+  simularDoc('doc-bloqueado', {
+    tipo: 'dt_cobro',
+    telefono: '51987654321',
+    texto: '💜 Cobro S/ 9.00 — yapea al 996 555 444',
+    imagenBase64: qrMini,
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  modoSend = 'normal';
+  assert(mensajesEnviados.length === antes17, 'nada debe salir cuando el bot bloquea');
+  const blk = updates.find(u => u.id === 'doc-bloqueado');
+  assert(blk && blk.resultado === 'error' && blk.processed === true, 'el bloqueo debe quedar como ERROR visible');
+  assert(String(blk.error || '').includes('bloque'), 'el error debe explicar el bloqueo: ' + (blk && blk.error));
+  console.log('   ✓ bloqueo del guardián → resultado=error (la app lo muestra y abre WhatsApp)');
+
+  console.log('🧪 Test 18 (FASE R): la IMAGEN del cobro falla → reintento en TEXTO (con nota "sin QR")');
+  const antes18 = mensajesEnviados.length;
+  modoSend = 'fallo-imagen';
+  simularDoc('doc-qr-falla', {
+    tipo: 'dt_cobro',
+    telefono: '51987654321',
+    texto: '💜 Puedes pagarme por Yape: 987 654 321 — S/ 15.00',
+    imagenBase64: qrMini,
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  modoSend = 'normal';
+  assert(mensajesEnviados.length === antes18 + 1, 'debía reintentar el cobro en texto solo');
+  const reintento = mensajesEnviados[mensajesEnviados.length - 1];
+  assert(!reintento.content.image && reintento.content.text.includes('15.00'), 'el reintento debía ser el TEXTO con el monto');
+  const doc18 = updates.find(u => u.id === 'doc-qr-falla');
+  assert(doc18 && doc18.resultado === 'enviado', 'el cobro en texto debía quedar enviado');
+  assert(String(doc18.nota || '').startsWith('sin QR'), 'debía llevar la nota "sin QR": ' + (doc18 && doc18.nota));
+  console.log('   ✓ el cobro NO se pierde: sale el texto y el doc avisa "sin QR"');
+
+  console.log('🧪 Test 19 (FASE R): la FOTO de entrega falla → ERROR duro (sin reintento en texto)');
+  const antes19 = mensajesEnviados.length;
+  modoSend = 'fallo-imagen';
+  simularDoc('doc-foto-falla', {
+    tipo: 'dt_foto_entrega',
+    telefono: '51987654321',
+    texto: '📦 Foto de tu entrega',
+    imagenBase64: fotoMini,
+    createdAt: new Date().toISOString(),
+  });
+  await sleep(250);
+  modoSend = 'normal';
+  assert(mensajesEnviados.length === antes19, 'la foto no debe reintentarse en texto (confundiría)');
+  const doc19 = updates.find(u => u.id === 'doc-foto-falla');
+  assert(doc19 && doc19.resultado === 'error' && doc19.processed === true, 'la foto fallida debe quedar como error');
+  console.log('   ✓ foto fallida → error visible, NADA enviado (diseño FASE J intacto)');
 
   console.log('');
   console.log('════════════════════════════════════════');
-  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (14/14)');
+  console.log('✅ TODOS LOS TESTS DEL PARCHE PASARON (19/19)');
   console.log('════════════════════════════════════════');
+  process.exit(0); // cortar timers just in case
 })().catch((e) => {
   console.error('❌ FALLO:', e.message);
   process.exit(1);

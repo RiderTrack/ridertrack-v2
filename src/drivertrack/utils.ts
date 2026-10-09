@@ -30,12 +30,116 @@ export async function vibrar(ms = 400): Promise<void> {
 export function comprimirImagen(file: File): Promise<string> {
   return comprimirImagenConLimite(file, 800, 0.8);
 }
-
 // F-ID2: para el ESCANEO OCR usamos más resolución — el texto de una
 // dirección (a veces a mano, a veces chiquito en una captura) necesita
 // píxeles para que Gemini lo lea bien. 1400px / calidad 0.85 ≈ 300-500 KB.
 export function comprimirImagenParaOCR(file: File): Promise<string> {
   return comprimirImagenConLimite(file, 1400, 0.85);
+}
+
+// ═══ FASE R: 💜🔷 QR de PAGO con PRESUPUESTO de peso ═══
+// Un QR no necesita foto-calidad: con 800px y calidad media sobra para
+// que el cliente lo escanee. El presupuesto garantiza que el QR viaje
+// LIVIANO siempre — en la acción del robot (acciones_dt, límite 1 MB
+// por doc) y en el sync de la nube (dt_sync) — venga de la captura que
+// venga. Si un escalón no alcanza, baja al siguiente hasta entrar.
+const PRESUPUESTO_QR_BASE64 = 160 * 1024; // ~160 KB de base64 ≈ 120 KB de JPEG
+
+/** FASE R: comprime un QR de cobro con techo de peso (para que el
+ * cobro por el robot nunca falle por una imagen pesada). */
+export async function comprimirQrPago(file: File): Promise<string> {
+  const escalones: Array<[number, number]> = [
+    [800, 0.78],
+    [700, 0.72],
+    [600, 0.66],
+    [520, 0.6],
+  ];
+  let ultima = '';
+  for (const [lado, calidad] of escalones) {
+    ultima = await comprimirImagenConLimite(file, lado, calidad);
+    if (ultima.length <= PRESUPUESTO_QR_BASE64) return ultima;
+  }
+  return ultima; // la más liviana que se pudo — el guard de mandarCobro decide
+}
+
+/** FASE R: re-comprime un QR YA GUARDADO (dataURL) para que entre en
+ * el presupuesto — sana los QRs pesados que quedaron de versiones
+ * viejas sin que tengas que subirlos de nuevo. Devuelve '' si no pudo. */
+export async function alivianarQrBase64(
+  qr: string,
+  presupuesto = PRESUPUESTO_QR_BASE64,
+): Promise<string> {
+  if (!qr || qr.length <= presupuesto) return qr;
+  try {
+    const img = await cargarImagenEl(qr);
+    const lado = Math.max(img.width, img.height);
+    for (const paso of [1, 0.85, 0.72, 0.6, 0.5]) {
+      const objetivo = Math.min(800, Math.round(lado * paso));
+      if (objetivo < 240) break;
+      const dataUrl = reCodificarJpeg(img, objetivo, 0.72);
+      if (dataUrl.length <= presupuesto) return dataUrl;
+    }
+    return reCodificarJpeg(img, 420, 0.62); // última: chiquita y legible
+  } catch {
+    return '';
+  }
+}
+
+function cargarImagenEl(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('imagen inválida'));
+    img.src = src;
+  });
+}
+
+function reCodificarJpeg(img: HTMLImageElement, ladoMax: number, calidad: number): string {
+  let { width, height } = img;
+  if (width > ladoMax || height > ladoMax) {
+    if (width >= height) {
+      height = Math.round((height * ladoMax) / width);
+      width = ladoMax;
+    } else {
+      width = Math.round((width * ladoMax) / height);
+      height = ladoMax;
+    }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', calidad);
+}
+
+// FASE R: saneo UNA vez por carga de la app — si un QR guardado pesa
+// más de 220 KB (versiones viejas o capturas densas), se aliviana solo
+// y se guarda. Así el sync y los cobros viajan livianos sin tocar nada.
+const LIMITE_QR_PESADO = 220 * 1024;
+let _qrSaneados = false;
+
+/** FASE R: alivia los QRs pesados de la config (una vez por carga).
+ * Devuelve la config nueva si cambió algo, o null si no hubo cambios. */
+export async function sanearQrPesados(config: ConfigDT): Promise<ConfigDT | null> {
+  if (_qrSaneados) return null;
+  _qrSaneados = true;
+  let cambio = false;
+  const c: ConfigDT = { ...config, yape: { ...config.yape }, plin: { ...config.plin } };
+  for (const k of ['yape', 'plin'] as const) {
+    const qr = c[k].qrBase64;
+    if (qr && qr.length > LIMITE_QR_PESADO) {
+      const liviana = await alivianarQrBase64(qr);
+      if (liviana && liviana.length < qr.length) {
+        c[k] = { ...c[k], qrBase64: liviana };
+        cambio = true;
+      }
+    }
+  }
+  return cambio ? c : null;
 }
 
 function comprimirImagenConLimite(file: File, MAX: number, calidad: number): Promise<string> {
@@ -102,15 +206,27 @@ export function linkWhatsApp(numero: string, texto: string): string {
 // qué botón apretabas. Ahora es EXACTAMENTE el mismo mensaje ordenado
 // por bloques: saludo → pedido (monto + entrega) → cómo pagar (TU
 // Yape/Plin guardados) → gracias.
+//
+// 🟣 FASE R: `metodo` separa los mensajes, como pidió Rudy ("que uno
+// sea solo el mensaje Yape y el otro solo mensaje Plin"):
+//   • 'yape'  → el mensaje habla SOLO de tu Yape (+ efectivo)
+//   • 'plin'  → SOLO de tu Plin (+ efectivo)
+//   • undefined → los dos juntos (el mensaje de siempre, "Ambos")
+export type MetodoCobro = 'yape' | 'plin';
+
 export function armarMensajeCobro(
   datos: { cliente: string; monto: number; direccion: string },
   config: ConfigDT,
+  metodo?: MetodoCobro,
 ): string {
   const nombre = datos.cliente.trim() || 'estimado cliente';
   const yape = config.yape.numero.trim();
   const plin = config.plin.numero.trim();
   const titularYape = config.yape.titular.trim();
   const titularPlin = config.plin.titular.trim();
+  // Defensivo: si pediste un método que no tiene número guardado, se
+  // cae al comportamiento de siempre (lo que haya configurado)
+  const solo = metodo === 'yape' && !yape ? undefined : metodo === 'plin' && !plin ? undefined : metodo;
 
   const lineas: string[] = [`Hola ${nombre}! 👋`, ''];
 
@@ -123,8 +239,16 @@ export function armarMensajeCobro(
   if (datos.direccion.trim()) lineas.push(`📍 Entrega en: ${datos.direccion.trim()}`);
   lineas.push('');
 
-  // Bloque 2 — cómo pagar (TU Yape guardado, no el del pedido)
-  if (yape && plin) {
+  // Bloque 2 — cómo pagar (TU Yape/Plin guardados, no el del pedido)
+  if (solo === 'yape') {
+    lineas.push('💜 Puedes pagarme por Yape:');
+    lineas.push(`📱 *${yape}*${titularYape ? ` (${titularYape})` : ''}`);
+    lineas.push('💵 O en efectivo al recibir');
+  } else if (solo === 'plin') {
+    lineas.push('🔷 Puedes pagarme por Plin:');
+    lineas.push(`📱 *${plin}*${titularPlin ? ` (${titularPlin})` : ''}`);
+    lineas.push('💵 O en efectivo al recibir');
+  } else if (yape && plin) {
     lineas.push('💜 Puedes pagarme por Yape:');
     lineas.push(`📱 *${yape}*${titularYape ? ` (${titularYape})` : ''}`);
     lineas.push(`🔷 O por Plin: *${plin}*${titularPlin ? ` (${titularPlin})` : ''}`);
@@ -143,6 +267,14 @@ export function armarMensajeCobro(
 
   lineas.push('', '¡Gracias! 💚');
   return lineas.join('\n');
+}
+
+/** 🟣 FASE R: el QR que viaja con el cobro según el método elegido —
+ * Yape manda SU QR, Plin el SUYO, "ambos" prefiere el de Yape. */
+export function qrDelMetodo(config: ConfigDT, metodo?: MetodoCobro): string {
+  if (metodo === 'plin') return config.plin.qrBase64 || '';
+  if (metodo === 'yape') return config.yape.qrBase64 || '';
+  return config.yape.qrBase64 || config.plin.qrBase64 || '';
 }
 
 // F-ID2.5: celular peruano → formato wa.me. "987 654 321" o

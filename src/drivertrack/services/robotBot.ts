@@ -34,11 +34,12 @@ export interface AccionDT {
   tipo: TipoAccionDT;
   telefono: string; // ya normalizado: 51 + 9 dígitos
   texto: string; // el mensaje COMPLETO (la app lo arma)
-  imagenBase64?: string; // dataURL — viaja en dt_cobro (tu QR de Yape) y en dt_foto_entrega (la foto comprimida ~60-150 KB)
+  imagenBase64?: string; // dataURL — viaja en dt_cobro (tu QR de Yape/Plin según el método) y en dt_foto_entrega (la foto comprimida ~60-150 KB)
   imagenUrl?: string; // URL en la nube de la imagen del aviso (FASE B2) — el bot la baja con fetch
   minutos?: number; // ⏱️ solo en dt_aviso llegando: en cuántos minutos llegás
   nombre?: string; // nombre del cliente (para los logs del bot)
   viajeId?: string; // trazabilidad: qué viaje lo disparó
+  metodo?: 'yape' | 'plin'; // 🟣 FASE R: qué billetera elegiste para el cobro (solo logs/estadística del bot)
 }
 
 /** ¿Hay sesión de RiderTrack? (necesaria para escribir en Firestore) */
@@ -114,6 +115,9 @@ export async function encolarAccionDT(
 export interface ResultadoAccionDT {
   estado: 'enviado' | 'error' | 'vencido' | 'timeout';
   error?: string;
+  /** 🟣 FASE R: nota del bot — p.ej. 'sin QR (…)' cuando el cobro
+   *  salió en texto porque la imagen no pudo viajar. */
+  nota?: string;
 }
 
 /**
@@ -154,10 +158,10 @@ export function escucharResultadoDT(
       ref,
       snap => {
         if (listo) return;
-        const d = snap.data() as { resultado?: string; error?: string } | undefined;
+        const d = snap.data() as { resultado?: string; error?: string; nota?: string } | undefined;
         if (d?.resultado === 'enviado' || d?.resultado === 'error' || d?.resultado === 'vencido') {
           parar();
-          onResultado({ estado: d.resultado, error: d.error });
+          onResultado({ estado: d.resultado, error: d.error, nota: d.nota });
         }
       },
       () => {

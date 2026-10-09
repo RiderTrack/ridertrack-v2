@@ -11,11 +11,13 @@ import { useEffect, useState } from 'react';
 import { useTema } from '../../theme/useTema';
 import { ConfigDT, Gasto, Viaje } from '../types';
 import { cargarConfig, cargarGastos, cargarViajes, guardarGastos, guardarViajes } from '../storage';
-import { armarMensajeCobro, linkWhatsApp, normalizarCelular, vibrar } from '../utils';
-import { encolarAccionDT, uidDisponible } from '../services/robotBot';
+import { armarMensajeCobro, qrDelMetodo, alivianarQrBase64, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from '../utils';
+import { encolarAccionDT, escucharResultadoDT, uidDisponible } from '../services/robotBot';
 import { escucharImagenesDT, ImagenDT } from '../services/imagenesDT';
 import CajaView from '../components/CajaView';
 import YapePanel from '../components/YapePanel';
+// 🟣 FASE R: ¿cómo le cobrás? (solo Yape / solo Plin / ambos)
+import ElegirMetodoCobroModal from '../components/ElegirMetodoCobroModal';
 import { EstadoGPS, leerEstadoGPS } from '../services/gps';
 
 interface Props {
@@ -87,39 +89,98 @@ export default function PanelCajaDT({ onToast }: Props) {
     });
   }
 
+  // 🟣 FASE R: el cobro que espera la elección del método (Yape/Plin)
+  const [cobroPendiente, setCobroPendiente] = useState<{
+    datos: { cliente: string; monto: number; direccion: string };
+    cel: string;
+  } | null>(null);
+
   // 💜 cobro por el robot (mismo flujo del shell, acá independiente)
-  async function mandarCobro(
+  // 🟣 FASE R: si tenés los DOS números (Yape y Plin) te pregunta cómo
+  // cobrarle — el mensaje sale SOLO con el método que elijas y SU QR.
+  function mandarCobro(
     datos: { cliente: string; monto: number; direccion: string },
     celular: string,
-  ): Promise<void> {
+  ): void {
     const cel = normalizarCelular(celular);
     if (!cel) {
       mostrarToast('Poné el celular del cliente para mandarle el cobro');
       return;
     }
-    const texto = armarMensajeCobro(datos, config);
+    const tieneYape = config.yape.numero.trim().length > 0;
+    const tienePlin = config.plin.numero.trim().length > 0;
+    if (tieneYape && tienePlin) {
+      vibrar(40);
+      setCobroPendiente({ datos, cel });
+      return;
+    }
+    void ejecutarCobro(datos, cel, tieneYape ? 'yape' : tienePlin ? 'plin' : undefined);
+  }
+
+  /** 🟣 FASE R: el cobro de verdad (mismo flujo del shell) — escucha el
+   *  resultado REAL del bot: si no pudo, te avisa el motivo y abre
+   *  WhatsApp de respaldo. El QR viaja con presupuesto de peso. */
+  async function ejecutarCobro(
+    datos: { cliente: string; monto: number; direccion: string },
+    cel: string,
+    metodo?: MetodoCobro,
+  ): Promise<void> {
+    const texto = armarMensajeCobro(datos, config, metodo);
     if (!config.robotActivo) {
       window.open(linkWhatsApp(cel, texto), '_blank');
       vibrar(60);
       return;
     }
+    let qrViaja = qrDelMetodo(config, metodo);
+    if (qrViaja && qrViaja.length > 400_000) {
+      const liviana = await alivianarQrBase64(qrViaja);
+      if (liviana) qrViaja = liviana;
+      else {
+        qrViaja = '';
+        mostrarToast('⚠️ Tu QR pesa demasiado — el cobro sale con los números escritos');
+      }
+    }
+    if (qrViaja && qrViaja.length > 600_000) qrViaja = '';
+
     setCobroEnCurso(true);
     mostrarToast('🤖 Mandando el cobro por el robot…');
     const r = await encolarAccionDT({
       tipo: 'dt_cobro',
       telefono: cel,
       texto,
-      imagenBase64: config.yape.qrBase64 || undefined,
+      imagenBase64: qrViaja || undefined,
       nombre: datos.cliente || undefined,
+      metodo,
     });
     setCobroEnCurso(false);
-    if (r.ok) {
-      mostrarToast('✓ Cobro en camino — el cliente lo recibe ya 💜');
-      vibrar(120);
+    if (!r.ok) {
+      mostrarToast('⚠️ ' + r.error + ' · abro WhatsApp…');
+      window.open(linkWhatsApp(cel, texto), '_blank');
       return;
     }
-    mostrarToast('⚠️ ' + r.error + ' · abro WhatsApp…');
-    window.open(linkWhatsApp(cel, texto), '_blank');
+    const ult = cel.slice(-4);
+    mostrarToast(`✓ Cobro en camino (al …${ult}) — esperamos la confirmación del bot…`);
+    vibrar(120);
+    if (r.docId) {
+      escucharResultadoDT(
+        r.docId,
+        res => {
+          if (res.estado === 'enviado') {
+            mostrarToast(
+              res.nota
+                ? `⚠️ Cobro entregado SIN QR (al …${ult}) — el robot no pudo con la imagen`
+                : `✓ Cobro entregado 💜 (al …${ult})`,
+            );
+            vibrar(res.nota ? 60 : 120);
+          } else if (res.estado === 'error') {
+            mostrarToast(`⚠️ El robot no pudo: ${res.error || 'sin detalle'} · abro WhatsApp…`);
+            vibrar(60);
+            window.open(linkWhatsApp(cel, texto), '_blank');
+          }
+        },
+        25000,
+      );
+    }
   }
 
   const hoy = viajes.filter(v => v.fecha === new Date().toISOString().slice(0, 10));
@@ -153,6 +214,20 @@ export default function PanelCajaDT({ onToast }: Props) {
           montoInicial={netoHoy}
           onCerrar={() => setCobrarAbierto(false)}
           onToast={mostrarToast}
+        />
+      )}
+
+      {/* 🟣 FASE R: ¿cómo le cobrás? — solo Yape / solo Plin / ambos */}
+      {cobroPendiente && (
+        <ElegirMetodoCobroModal
+          datos={cobroPendiente.datos}
+          config={config}
+          onCerrar={() => setCobroPendiente(null)}
+          onElegir={metodo => {
+            const pend = cobroPendiente;
+            setCobroPendiente(null);
+            if (pend) void ejecutarCobro(pend.datos, pend.cel, metodo);
+          }}
         />
       )}
 

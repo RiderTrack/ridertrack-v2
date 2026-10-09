@@ -47,12 +47,12 @@ import {
   resumenDia,
   totalGastosDia,
 } from './storage';
-import { armarMensajeCobro, linkWhatsApp, normalizarCelular, vibrar } from './utils';
+import { armarMensajeCobro, qrDelMetodo, alivianarQrBase64, sanearQrPesados, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from './utils';
 // FASE B: 🤖 el robot ahora escucha por Firestore (acciones_dt) —
 // cola propia de inDrive, sobrevive reinicios del bot. El viejo
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
 // instalarse y exigía URL + token a mano.
-import { encolarAccionDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAviso } from './services/robotBot';
+import { encolarAccionDT, escucharResultadoDT, uidDisponible, armarAviso, armarPedirUbicacion, TipoAviso } from './services/robotBot';
 // FASE B2: imágenes del robot — subís una imagen por aviso en
 // Ajustes y el robot la manda CON el mensaje (como el trabajo)
 import { escucharImagenesDT, ImagenDT } from './services/imagenesDT';
@@ -75,6 +75,8 @@ import ViajeList from './components/ViajeList';
 import MetaBar from './components/MetaBar';
 import GpsBar from './components/GpsBar';
 import Confeti from './components/Confeti';
+// 🟣 FASE R: el modal para elegir cómo cobrar (solo Yape / solo Plin / ambos)
+import ElegirMetodoCobroModal from './components/ElegirMetodoCobroModal';
 
 // ═══ FASE C: la sección inDrive del menú quedó SOLO en VIAJES ═══
 // La Caja, el Mapa, las Stats y los Ajustes de inDrive ahora viven
@@ -307,20 +309,73 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
   // UN solo flujo compartido para el botón Cobrar del formulario y el
   // 💬/🤖 de la lista. Si el robot está activo, el bot (Termux, en este
   // mismo teléfono) le manda al cliente el mensaje de cobro CON LA
-  // IMAGEN de tu QR de Yape — sin abrir WhatsApp. Si no responde, la
-  // app cae SOLA al wa.me de siempre: el cobro nunca se traba.
+  // IMAGEN de tu QR — sin abrir WhatsApp. Si no responde, la app cae
+  // SOLA al wa.me de siempre: el cobro nunca se traba.
   const [cobroEnCurso, setCobroEnCurso] = useState(false);
 
-  async function mandarCobro(
+  // 🟣 FASE R: el cobro que espera la elección del método (Yape/Plin)
+  const [cobroPendiente, setCobroPendiente] = useState<{
+    datos: { cliente: string; monto: number; direccion: string };
+    cel: string;
+  } | null>(null);
+
+  // 🟣 FASE R: saneo UNA vez por carga — si un QR guardado quedó pesado
+  // (capturas densas de versiones viejas), se aliviana solo para que
+  // el cobro y el sync viajen livianos y nunca rompan el límite del doc
+  useEffect(() => {
+    let vivo = true;
+    sanearQrPesados(config)
+      .then(nueva => {
+        if (!vivo || !nueva) return;
+        guardarConfig(nueva);
+        setConfig(nueva);
+        console.log('💜🔷 [FASE R] QR pesado alivianado — cobros y sync más livianos');
+      })
+      .catch(() => {
+        /* no pasa nada: el guard de mandarCobro protege igual */
+      });
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 🟣 FASE R: intercepta TODOS los caminos de cobro (formulario,
+   *  lista, menú del robot, contactos). Si tenés los DOS números
+   *  configurados te pregunta cómo cobrarle (💜 solo Yape / 🔷 solo
+   *  Plin / 💙 ambos — pedido de Rudy: mensajes SEPARADOS); si solo
+   *  tenés uno, sale directo sin preguntar. */
+  function mandarCobro(
     datos: { cliente: string; monto: number; direccion: string },
     celular: string,
-  ): Promise<void> {
+  ): void {
     const cel = normalizarCelular(celular);
     if (!cel) {
       mostrarToast('Poné el celular del cliente para mandarle el cobro');
       return;
     }
-    const texto = armarMensajeCobro(datos, config);
+    const tieneYape = config.yape.numero.trim().length > 0;
+    const tienePlin = config.plin.numero.trim().length > 0;
+    if (tieneYape && tienePlin) {
+      // los dos configurados → que Rudy elija el mensaje (FASE R)
+      vibrar(40);
+      setCobroPendiente({ datos, cel });
+      return;
+    }
+    void ejecutarCobro(datos, cel, tieneYape ? 'yape' : tienePlin ? 'plin' : undefined);
+  }
+
+  /** 🟣 FASE R: el cobro de verdad, con el método elegido — el mensaje
+   *  sale SOLO con esa billetera y viaja SU QR. Además ahora ESCUCHA el
+   *  resultado real del bot (FASE J enseñó que el "✓ en camino" puede
+   *  ser mentira): si el robot falla, te avisa con el motivo y te abre
+   *  WhatsApp de respaldo — el cobro nunca se pierde en silencio. */
+  async function ejecutarCobro(
+    datos: { cliente: string; monto: number; direccion: string },
+    cel: string,
+    metodo?: MetodoCobro,
+  ): Promise<void> {
+    const texto = armarMensajeCobro(datos, config, metodo);
 
     // Robot apagado → como siempre: WhatsApp manual (revisás y envía vos)
     if (!config.robotActivo) {
@@ -330,30 +385,69 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     }
 
     // FASE B: robot activo → la acción va a la cola Firestore y el
-    // rudy-bot la manda SOLO (mensaje + tu QR de Yape en la misma
-    // torta). Si no hay sesión (no debería pasar dentro de RT),
-    // caemos al wa.me de siempre — nunca te quedás sin cobrar.
+    // rudy-bot la manda SOLO (mensaje + el QR del método elegido).
+    // 🟣 FASE R: el QR viaja con PRESUPUESTO — si pesa demasiado se
+    // aliviana al toque (y si no se puede, el cobro sale con los
+    // números escritos antes que perderse).
+    let qrViaja = qrDelMetodo(config, metodo);
+    if (qrViaja && qrViaja.length > 400_000) {
+      const liviana = await alivianarQrBase64(qrViaja);
+      if (liviana) qrViaja = liviana;
+      else {
+        qrViaja = '';
+        mostrarToast('⚠️ Tu QR pesa demasiado — el cobro sale con los números escritos');
+      }
+    }
+    if (qrViaja && qrViaja.length > 600_000) qrViaja = ''; // candado duro: jamás romper el doc por el QR
+
     setCobroEnCurso(true);
     mostrarToast('🤖 Mandando el cobro por el robot…');
     const r = await encolarAccionDT({
       tipo: 'dt_cobro',
       telefono: cel,
       texto,
-      imagenBase64: config.yape.qrBase64 || undefined,
+      imagenBase64: qrViaja || undefined,
       nombre: datos.cliente || undefined,
+      metodo,
     });
     setCobroEnCurso(false);
-    if (r.ok) {
-      // FASE M: el toast te dice a QUÉ NÚMERO salió — si el viaje
-      // tiene dos teléfonos (envía/recibe), ves al toque si el
-      // comprobante le llegó a la persona que querías
-      const ult = cel.slice(-4);
-      mostrarToast(`✓ Cobro en camino (al …${ult}) — el cliente lo recibe ya 💜`);
-      vibrar(120);
+    if (!r.ok) {
+      mostrarToast('⚠️ ' + r.error + ' · abro WhatsApp…');
+      window.open(linkWhatsApp(cel, texto), '_blank');
       return;
     }
-    mostrarToast('⚠️ ' + r.error + ' · abro WhatsApp…');
-    window.open(linkWhatsApp(cel, texto), '_blank');
+    // FASE M: el toast te dice a QUÉ NÚMERO salió — si el viaje
+    // tiene dos teléfonos (envía/recibe), ves al toque si el
+    // comprobante le llegó a la persona que querías
+    const ult = cel.slice(-4);
+    mostrarToast(`✓ Cobro en camino (al …${ult}) — esperamos la confirmación del bot…`);
+    vibrar(120);
+
+    // 🟣 FASE R: escuchar qué PASÓ DE VERDAD (el bot escribe el
+    // resultado en el doc). Con esto nunca más un "cobro fantasma":
+    // si el robot no pudo, ves el motivo y WhatsApp se abre solo.
+    if (r.docId) {
+      escucharResultadoDT(
+        r.docId,
+        res => {
+          if (res.estado === 'enviado') {
+            mostrarToast(
+              res.nota
+                ? `⚠️ Cobro entregado SIN QR (al …${ult}) — el robot no pudo con la imagen`
+                : `✓ Cobro entregado 💜 (al …${ult})`,
+            );
+            vibrar(res.nota ? 60 : 120);
+          } else if (res.estado === 'error') {
+            mostrarToast(`⚠️ El robot no pudo: ${res.error || 'sin detalle'} · abro WhatsApp…`);
+            vibrar(60);
+            window.open(linkWhatsApp(cel, texto), '_blank');
+          }
+          // 'timeout' → la acción sigue ENCOLADA y saldrá apenas el
+          // bot responda; no spamear más toasts
+        },
+        25000,
+      );
+    }
   }
 
   // ═══ FASE B: 🛣️ AVISOS AL CLIENTE por el robot ═══
@@ -810,6 +904,21 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           estado={estadoGPS}
           cliente={viajes.find(v => v.id === estadoGPS.viajeId)?.cliente ?? ''}
           onDetener={() => detenerGPS()}
+        />
+      )}
+
+      {/* 🟣 FASE R: ¿cómo le cobrás? — solo Yape / solo Plin / ambos.
+          Aparece SOLO si los dos números están configurados. */}
+      {cobroPendiente && (
+        <ElegirMetodoCobroModal
+          datos={cobroPendiente.datos}
+          config={config}
+          onCerrar={() => setCobroPendiente(null)}
+          onElegir={metodo => {
+            const pend = cobroPendiente;
+            setCobroPendiente(null);
+            if (pend) void ejecutarCobro(pend.datos, pend.cel, metodo);
+          }}
         />
       )}
 

@@ -1,0 +1,96 @@
+════════════════════════════════════════════════════════════
+🟣 FASE R — FIX DEL QR QUE NO SALÍA + COBRO YAPE/PLIN SEPARADO
+════════════════════════════════════════════════════════════
+
+¿TE PASÓ ESTO? Cambiaste el QR de inDrive por uno nuevo (con otro
+número) y desde ahí el mensaje de cobro CON QR nunca salía — pero
+el mensaje de prueba sí llegaba. No era la imagen: era el GUARDIÁN
+DE PAGOS del bot. Ese guardián tiene lista BLANCA: en mensajes que
+hablan de pagar (yape/plin/cobro…), cualquier número que no sea el
+del trabajo (Lorenzo) se BLOQUEA EN SILENCIO. Tu QR nuevo tiene tu
+número personal → cada cobro quedaba bloqueado… y el bot lo marcaba
+como "enviado" igual (mentira). La prueba llegaba porque no habla
+de pagos.
+
+ESTE PARCHE LO ARREGLA (2 archivos):
+
+1) guardiaPagos.js v2 — la lista blanca ahora se puede extender:
+   el bot registra TUS números personales de Yape/Plin (los que
+   configurás en la app: "Mi QR Yape/Plin → 🏍️ inDrive") y los
+   admite en los cobros. El trabajo queda protegido IGUAL que
+   siempre (números inventados por IA: sigue bloqueando).
+
+2) drivertrack_bot.js v1.3 —
+   · Lee tus números personales de la nube (solos, cada 3 min y
+     antes de cada cobro) y los registra en el guardián.
+   · NADA MÁS DE "ENVIADO" FALSO: si un envío queda bloqueado o
+     WhatsApp no lo confirma, la acción se marca ERROR con el
+     motivo — la app te lo muestra y te abre WhatsApp de respaldo.
+   · Si el QR no puede salir por un problema de IMAGEN, el cobro
+     se reintenta en texto solo (el monto y tus números ya van en
+     el mensaje) — nunca se pierde.
+
+════════════════════════════════════════════════════════════
+📥 INSTALACIÓN (3 pasos, como siempre)
+════════════════════════════════════════════════════════════
+
+1) Pasá este zip a Termux (Downloads) y descomprilo ENCIMA de la
+   carpeta del bot (no adentro de una subcarpeta):
+
+     cd ~/bot-whatsapp
+     unzip -o ~/storage/downloads/robot-drivertrack-faser.zip
+
+2) Reiniciá el bot:
+
+     pm2 restart rudy-bot
+
+3) Verificá en los logs que aparezca el cartel nuevo:
+
+     pm2 logs rudy-bot --lines 30
+
+   Tenés que ver:
+     🏍️ [DT] Parche activo (drivertrack_bot.js v1.3 (FASE R …))
+     🏍️ [DT] 💜🔷 Números personales permitidos en el guardián: …
+
+   ⚠️ Si en vez de eso ves "guardiaPagos.js sin permitirNumeroCobro
+   — ¿copiaste la v2 del zip?", el unzip no pisó el guardiaPagos.js
+   ( revisá que estés en ~/bot-whatsapp y no en una subcarpeta).
+
+════════════════════════════════════════════════════════════
+✅ CÓMO PROBARLO (2 minutos)
+════════════════════════════════════════════════════════════
+
+IMPORTANTE: instalá primero el APK v0.10.8 — trae el botón
+"Prueba con QR" que hace este paso facilísimo.
+
+1) En la app: Configuración → inDrive (libre) → 🤖 Robot →
+   "💜 Prueba con QR" → te tiene que llegar a TU WhatsApp el
+   mensaje de cobro con tu QR en 1-2 segundos, y el cartel tiene
+   que decir "🟢 ¡Llegó! El cobro con QR sale perfecto 💜".
+
+2) Si dice "🔴 El robot no pudo: …" el motivo queda a la vista:
+   · "guardián de pagos" → tu número personal no está registrado:
+     configurá tu Yape/Plin en "Mi QR Yape/Plin → 🏍️ inDrive",
+     guardá, esperá 3 minutos (o reiniciá el bot) y probá de nuevo.
+   · otra cosa → mandale el texto a tu asistente para mirarlo.
+
+3) Probá un cobro de verdad con un viaje de prueba (tu propio
+   número como cliente) y listo 🎉
+
+════════════════════════════════════════════════════════════
+💜🔷 LA APP TAMBIÉN CAMBIÓ (APK v0.10.8)
+════════════════════════════════════════════════════════════
+
+· Al apretar Cobrar (con los DOS números configurados) te
+  pregunta: 💜 Solo Yape / 🔷 Solo Plin / 💙 Ambos — cada mensaje
+  sale ÚNICAMENTE con el método que elijas y viaja SU QR. Con un
+  solo número configurado no pregunta: sale directo.
+· El cobro ahora te muestra el resultado REAL del bot (✓ entregado
+  / ⚠️ sin QR / 🔴 no pudo + motivo) y abre WhatsApp de respaldo
+  si el robot falla — nunca más cobros fantasma.
+· Los QR viajan livianos (con presupuesto de peso): el cobro y el
+  sync entre tus dos cels no se traban por una imagen pesada.
+
+Nota: los cobros que quedaron bloqueados estos días NO salieron
+(el bot los marcaba "enviado" sin mandarlos) — a esos clientes
+convieneles mandar el cobro a mano una vez 🙏
