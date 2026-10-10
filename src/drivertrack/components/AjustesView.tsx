@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.9 (FASE S — 🛵 TU PAGA SALE DEL YAPE: al cerrar caja, el efectivo que contaste va COMPLETO a tu jefe y tu paga de ruta (9/12) te la descontás del Yape antes de depositar — igual que lo hacés en la vida real; si el Yape no alcanza, el resto de tu paga sale de los billetes · FASE R: 💜🔷 cobro Yape/Plin separado con SU QR + fix del guardián del bot · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
+        DriverTrack v0.10.10 (FASE T — 📅 la caja tiene memoria: al entrar a Caja ves “Ver otro día” con tus cierres guardados por fecha (90 días); tocás un día y lo ves ENTERO — resumen, contado/diferencia, gastos, tu paga, el cuadre al jefe de ese día y podés reenviarlo al jefe o a MATE; la caja de la nueva ruta ya no “borra” la de ayer · 📷 la foto de entrega ahora te deja elegir a quién le llega: 📤 quien envía, 📥 quien recibe o 👥 Ambos (el robot manda 2 mensajes; a mano se comparte 2 veces) · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
       </p>
     </div>
   );

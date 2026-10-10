@@ -80,12 +80,6 @@ function comprimirDesdeSrc(src: string, MAX = 720, calidad = 0.62): Promise<stri
   });
 }
 
-/** El teléfono de la entrega (a quién se le manda la foto si
- *  hace falta el plan B del wa.me): el que RECIBE, o el que ENVÍA */
-function telDelViaje(v: Viaje): string {
-  return (v.celularRecibe ?? '').trim() || (v.celularEnvia ?? '').trim() || v.celular.trim();
-}
-
 export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, onToast }: Props) {
   // el mensaje arranca RESUELTO con los datos de ESTE viaje (las
   // etiquetas {cliente}… ya reemplazadas) — se puede retocar acá
@@ -102,6 +96,26 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
   const [exito, setExito] = useState(false);
   const [fueAuto, setFueAuto] = useState(false); // ✓ verde del robot vs "elegí WhatsApp"
 
+  // ── 📅 FASE T: ¿a quién le mandás la foto? El viaje puede tener DOS
+  // números (FASE C): quien ENVÍA (🅰️ el que pide — el celular viejo del
+  // cliente cuenta como quien envía) y quien RECIBE (🅱️). Elegís:
+  // 📤 Envía · 📥 Recibe · 👥 Ambos (les llega a los DOS chats).
+  // Default = quien RECIBE (FASE M: el mismo destino al que iba la foto
+  // y el comprobante); si el viaje tiene un solo número, ni se pregunta.
+  const telEnvia = (viaje.celularEnvia ?? '').trim() || viaje.celular.trim();
+  const telRecibe = (viaje.celularRecibe ?? '').trim();
+  const dosNumeros = Boolean(telEnvia && telRecibe && telEnvia !== telRecibe);
+  const [destino, setDestino] = useState<'envia' | 'recibe' | 'ambos'>(() =>
+    telRecibe ? 'recibe' : 'envia',
+  );
+
+  /** los números elegidos ya normalizados — 1, o 2 con 👥 Ambos */
+  function numerosElegidos(): string[] {
+    if (destino === 'ambos') return [normalizarCelular(telEnvia), normalizarCelular(telRecibe)];
+    if (destino === 'envia') return [normalizarCelular(telEnvia)];
+    return [normalizarCelular(telRecibe || telEnvia)];
+  }
+
   // 🤖 FASE J: estado del envío automático por el robot
   //   'enviando' → la acción está en la cola y esperamos el resultado
   //   'cola'     → el bot no respondió (apagado): la acción QUEDÓ encolada
@@ -111,12 +125,13 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
   const pararEscuchaRef = useRef<(() => void) | null>(null);
 
   // ¿Puede el robot mandar esta foto? Robot prendido en Ajustes +
-  // sesión de RiderTrack (para escribir en Firestore) + celular del
-  // cliente cargado en el viaje. Si algo falla, el botón 📎 manual
+  // sesión de RiderTrack (para escribir en Firestore) + al menos UN
+  // número válido del destino elegido (con 👥 Ambos alcanza con que uno
+  // de los dos esté bien cargado). Si algo falla, el botón 📎 manual
   // sigue siempre disponible — nunca te quedás sin poder mandarla.
-  const celCliente = normalizarCelular(telDelViaje(viaje));
+  const destinosValidos = numerosElegidos().filter(n => n.length >= 10);
   const robotListo =
-    Boolean(config.robotActivo) && uidDisponible() !== null && celCliente.length >= 10;
+    Boolean(config.robotActivo) && uidDisponible() !== null && destinosValidos.length > 0;
 
   // 📷 saca la foto con el plugin nativo (cámara o galería)
   async function sacar(source: 'camera' | 'photos') {
@@ -164,10 +179,15 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
    *  ADENTRO (base64, ~60-150 KB) y el rudy-bot se la entrega al
    *  cliente en 1-2 segundos — sin abrir WhatsApp, igual que el
    *  cobro con QR. La app ESCUCHA el resultado real del doc:
-   *  enviado ✓ / error / bot apagado (queda encolada, no se pierde). */
+   *  enviado ✓ / error / bot apagado (queda encolada, no se pierde).
+   *
+   *  📅 FASE T: UNA acción por número elegido — 👥 Ambos encola 2 y la
+   *  foto les llega a los DOS chats. El estado final se arma cuando
+   *  TODAS respondieron (alguna enviada → ✓; todas timeout → encolada). */
   async function mandarPorRobot() {
     if (!fotoSrc || mandando || estadoRobot === 'enviando') return;
-    if (celCliente.length < 10) {
+    const destinos = numerosElegidos().filter(n => n.length >= 10);
+    if (destinos.length === 0) {
       onToast('Este viaje no tiene celular del cliente — mandala a mano 📎');
       return;
     }
@@ -186,44 +206,73 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
         setGuardada(true);
       }
 
-      const r = await encolarAccionDT({
-        tipo: 'dt_foto_entrega',
-        telefono: celCliente,
-        texto: mensaje,
-        imagenBase64: dataUrl,
-        nombre: viaje.cliente || undefined,
-        viajeId: viaje.id,
-      });
-      if (!r.ok || !r.docId) {
+      const encoladas: { docId: string; telefono: string }[] = [];
+      for (const tel of destinos) {
+        const r = await encolarAccionDT({
+          tipo: 'dt_foto_entrega',
+          telefono: tel,
+          texto: mensaje,
+          imagenBase64: dataUrl,
+          nombre: viaje.cliente || undefined,
+          viajeId: viaje.id,
+        });
+        if (r.ok && r.docId) encoladas.push({ docId: r.docId, telefono: tel });
+        else console.warn('[foto] no se pudo encolar para', tel, r.error);
+      }
+      if (encoladas.length === 0) {
         setEstadoRobot('error');
-        setErrorRobot(r.error ?? 'no se pudo encolar');
-        onToast('⚠️ ' + (r.error ?? 'No se pudo encolar') + ' — mandala a mano 📎');
+        setErrorRobot('no se pudo encolar');
+        onToast('⚠️ No se pudo encolar — mandala a mano 📎');
         return;
       }
 
-      // quedamos A LA ESPERA del resultado real que escribe el bot
+      // quedamos A LA ESPERA del resultado real de cada una
       pararEscuchaRef.current?.();
-      pararEscuchaRef.current = escucharResultadoDT(r.docId, res => {
-        if (res.estado === 'enviado') {
+      const paradores: (() => void)[] = [];
+      pararEscuchaRef.current = () => paradores.forEach(p => p());
+      const total = encoladas.length;
+      let enviados = 0;
+      let fallidas = 0;
+      let timeouts = 0;
+      let resuelto = false;
+      const aQuien =
+        destino === 'ambos' ? 'los 2 chats (📤 y 📥)' : destino === 'envia' ? 'quien envía (📤)' : 'quien recibe (📥)';
+      const finalizar = () => {
+        if (resuelto) return;
+        if (enviados + fallidas + timeouts < total) return; // aún hay acciones en camino
+        resuelto = true;
+        if (enviados > 0) {
           setEstadoRobot(null);
           setFueAuto(true);
           setExito(true);
           vibrar(120);
-          onToast('✓ El robot le mandó la foto al cliente 🤖📷');
+          onToast(
+            enviados === total
+              ? `✓ El robot le mandó la foto a ${aQuien} 🤖📷`
+              : `✓ Enviada a ${enviados} de ${total} — el resto quedó en la cola`,
+          );
           setTimeout(onCerrar, 900);
-        } else if (res.estado === 'timeout') {
-          // el bot no respondió: la acción QUEDÓ ENCOLADA y sale
-          // apenas encienda — no se pierde, pero avisamos igual
+        } else if (timeouts === total) {
+          // el bot no respondió: las acciones QUEDAN ENCOLADAS y salen
+          // apenas encienda — no se pierden, pero avisamos igual
           setEstadoRobot('cola');
           onToast('🕓 El bot está apagado — la foto queda encolada y sale apenas encienda');
         } else {
           setEstadoRobot('error');
-          setErrorRobot(
-            res.error || (res.estado === 'vencido' ? 'la acción llegó vencida al bot' : 'el bot no pudo')
-          );
+          setErrorRobot('el bot no pudo');
           onToast('⚠️ El robot no pudo — mandala a mano 📎');
         }
-      });
+      };
+      for (const e of encoladas) {
+        paradores.push(
+          escucharResultadoDT(e.docId, res => {
+            if (res.estado === 'enviado') enviados++;
+            else if (res.estado === 'timeout') timeouts++;
+            else fallidas++;
+            finalizar();
+          }),
+        );
+      }
     } catch (e) {
       setEstadoRobot('error');
       setErrorRobot((e as Error)?.message || 'error inesperado');
@@ -234,7 +283,9 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
 
   /** Manda la foto + mensaje A MANO (plan B de siempre): hoja de
    *  compartir nativa (foto y texto JUNTOS — elegís WhatsApp y el
-   *  chat). Si no está, wa.me con el mensaje y la foto en galería. */
+   *  chat). Con 👥 Ambos la hoja se abre DOS veces seguidas (primero
+   *  un chat, después el otro — el título de cada hoja te guía). Si
+   *  no está, wa.me con el mensaje y la foto en galería. */
   async function mandarManual() {
     if (!fotoSrc || mandando) return;
     setMandando(true);
@@ -262,15 +313,27 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
       if (pathParaShare) {
         try {
           const { Share } = await import('@capacitor/share');
-          await Share.share({
-            title: 'Foto de la entrega',
-            text: mensaje,
-            files: [pathParaShare],
-            dialogTitle: 'Mandar la foto',
-          });
+          const compartir = (titulo: string) =>
+            Share.share({
+              title: 'Foto de la entrega',
+              text: mensaje,
+              files: [pathParaShare!],
+              dialogTitle: titulo,
+            });
+          if (destino === 'ambos' && dosNumeros) {
+            // 👥 los 2 chats: la hoja se abre 2 veces — 1 de 2 y 2 de 2
+            await compartir(`1 de 2 — al chat de quien ENVÍA (${telEnvia})`);
+            await compartir(`2 de 2 — al chat de quien RECIBE (${telRecibe})`);
+          } else {
+            await compartir('Mandar la foto');
+          }
           vibrar(120);
           setExito(true);
-          onToast('✓ Elegí WhatsApp y el chat del cliente 📷');
+          onToast(
+            destino === 'ambos' && dosNumeros
+              ? '✓ Compartila en los 2 chats de WhatsApp 📷'
+              : '✓ Elegí WhatsApp y el chat del cliente 📷'
+          );
           setTimeout(onCerrar, 900);
           return;
         } catch {
@@ -280,13 +343,23 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
 
       // PLAN B: chat abierto con el mensaje listo; la foto se
       // adjunta a mano (está en la galería si la sacaste con 📷)
-      const tel = telDelViaje(viaje);
-      if (tel) {
+      const abrirChat = (tel: string) => {
         const num = tel.replace(/[^0-9]/g, '');
+        if (!num) return;
         window.open(`https://wa.me/${num.length === 9 ? `51${num}` : num}?text=${encodeURIComponent(mensaje)}`, '_blank');
-        onToast('📎 La foto está en tu galería — adjuntala en el chat');
+      };
+      if (destino === 'ambos' && dosNumeros) {
+        abrirChat(telEnvia);
+        abrirChat(telRecibe);
+        onToast('📎 Te abrí los 2 chats — adjuntá la foto en cada uno (está en tu galería)');
       } else {
-        onToast('📎 La foto está en tu galería (el viaje no tiene celular cargado)');
+        const tel = destino === 'recibe' && telRecibe ? telRecibe : telEnvia || telRecibe;
+        if (tel) {
+          abrirChat(tel);
+          onToast('📎 La foto está en tu galería — adjuntala en el chat');
+        } else {
+          onToast('📎 La foto está en tu galería (el viaje no tiene celular cargado)');
+        }
       }
       vibrar(120);
       setExito(true);
@@ -336,6 +409,43 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
           </button>
         </div>
 
+        {/* 📅 FASE T: ¿a quién le mandás la foto? Mismo selector que el
+            menú del robot (FASE C.2): solo si el viaje tiene los DOS
+            números distintos. Default: quien RECIBE (FASE M). */}
+        {dosNumeros && (
+          <div className="mt-2.5" data-testid="foto-destinatarios">
+            <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">¿A quién le mandás la foto?</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {([
+                { id: 'envia', label: '📤 Envía', title: `Va al chat de quien hace el pedido: ${telEnvia}` },
+                { id: 'recibe', label: '📥 Recibe', title: `Va al chat de quien recibe: ${telRecibe}` },
+                { id: 'ambos', label: '👥 Ambos', title: 'Les llega a los DOS chats' },
+              ] as { id: 'envia' | 'recibe' | 'ambos'; label: string; title: string }[]).map(o => (
+                <button
+                  key={o.id}
+                  onClick={() => setDestino(o.id)}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-black transition-all active:scale-[0.97] ${
+                    destino === o.id
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                  title={o.title}
+                  data-testid={`foto-dest-${o.id}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              {destino === 'ambos'
+                ? 'La foto va a los 2 chats (el robot manda 2 mensajes)'
+                : destino === 'envia'
+                  ? `Va al chat de quien hace el pedido: ${telEnvia}`
+                  : `Va al chat de quien recibe: ${telRecibe}`}
+            </p>
+          </div>
+        )}
+
         {/* la foto: preview, o los dos botones para sacarla */}
         {fotoSrc ? (
           <div className="relative mt-3">
@@ -350,7 +460,11 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
                 <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-900/90 p-3">
                   <CheckCircle2 className="h-10 w-10 text-emerald-400" />
                   <span className="text-sm font-bold text-white">{fueAuto ? '¡Enviada!' : '¡Lista!'}</span>
-                  {fueAuto && <span className="text-[10px] font-bold text-emerald-300">el robot se la mandó al cliente</span>}
+                  {fueAuto && (
+                    <span className="text-[10px] font-bold text-emerald-300">
+                      el robot se la mandó{destino === 'ambos' && dosNumeros ? ' a los 2 chats' : ' al cliente'}
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -429,7 +543,7 @@ export default function FotoEntregaModal({ viaje, config, onCerrar, onGuardar, o
         {estadoRobot === 'enviando' && (
           <p className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-300">
             <Loader2 size={13} className="animate-spin shrink-0" />
-            El robot se la está mandando al cliente… 🤖
+            El robot se la está mandando… 🤖
           </p>
         )}
         {estadoRobot === 'error' && (

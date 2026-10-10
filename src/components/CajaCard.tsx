@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Wallet, Plus, Trash2, Lock, Unlock, Send, RefreshCw, ChevronDown, ChevronUp, Coins } from 'lucide-react';
+import { Wallet, Plus, Trash2, Lock, Unlock, Send, RefreshCw, CalendarDays, Coins } from 'lucide-react';
 import {
   arrancarCaja,
   recargarCaja,
@@ -44,6 +44,7 @@ import {
 } from '../utils/pagoPedidosCore'; // 🛵 FASE D/Q
 import {
   CATEGORIAS_GASTO,
+  CierreCaja,
   Gasto,
   MAX_PLANTILLAS_CUADRE,
   PagoRutaCierre,
@@ -299,7 +300,10 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   const [contadoInput, setContadoInput] = useState('');
   const [notaCierre, setNotaCierre] = useState('');
   const [guardando, setGuardando] = useState(false);
-  const [historialAbierto, setHistorialAbierto] = useState(false);
+  // 📅 FASE T: día que estás viendo — null = HOY (la caja de siempre,
+  // que arranca en 0 porque es un día nuevo); 'YYYY-MM-DD' = la caja
+  // de OTRO día, leída de su cierre guardado (90 días de historia).
+  const [fechaVer, setFechaVer] = useState<string | null>(null);
 
   // ── FASE O: cuadre de entrega + WhatsApp del jefe ──
   const cuadreHoy = cierreHoy ? calcularCuadreEntrega(cierreHoy) : null;
@@ -319,6 +323,29 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   const textoActivo = plantillaActiva?.texto ?? PLANTILLA_CUADRE_DEFECTO;
   const mensajeJefe = cierreHoy ? aplicarPlantillaCuadre(textoActivo, cierreHoy, riderName) : '';
   const previewEditando = cierreHoy ? aplicarPlantillaCuadre(textoEdit, cierreHoy, riderName) : '';
+
+  // ── 📅 FASE T: la caja de OTRO día — su cierre congelado. Los cierres
+  // ya se guardan 90 días (nube + teléfono, usuarios/{uid}.caja); lo
+  // nuevo es poder VOLVER a verlos enteros: "ayer cuánto hice", y así.
+  const cierresPorFecha = useMemo(
+    () => [...caja.cierres].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)),
+    [caja.cierres]
+  );
+  const cierreVer = useMemo(
+    () => (fechaVer ? cierresPorFecha.find((c) => c.fecha === fechaVer) ?? null : null),
+    [fechaVer, cierresPorFecha]
+  );
+  const cuadreVer = useMemo(
+    () => (cierreVer ? calcularCuadreEntrega(cierreVer) : null),
+    [cierreVer]
+  );
+  const mensajeJefeVer = useMemo(
+    () => (cierreVer ? aplicarPlantillaCuadre(textoActivo, cierreVer, riderName) : ''),
+    [cierreVer, textoActivo, riderName]
+  );
+  const nPedidosVer = cierreVer
+    ? (cierreVer.pagoRuta?.cantidadNormal || 0) + (cierreVer.pagoRuta?.cantidadLejos || 0) || cierreVer.entregas
+    : 0;
 
   const fondoEfectivo = fondoInput != null ? parsearSoles(fondoInput) : caja.fondo;
 
@@ -420,6 +447,29 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
       onShowToast?.('📤 MATE', 'Enviando el cierre al grupo…', 'info');
       await enviarAGrupoMate(armarMensajeCierre(cierreHoy, riderName));
       onShowToast?.('✅ Cierre enviado', 'El grupo MATE recibe el resumen de tu caja', 'success');
+    } catch (e: any) {
+      onShowToast?.('No se pudo enviar', e?.message || 'Revisa tu internet e inténtalo de nuevo', 'error');
+    }
+  };
+
+  // ── 📅 FASE T: mandar el cuadre / el cierre de OTRO día ──
+  const mandarAlJefeDia = (cierre: CierreCaja) => {
+    const tel = normalizarCelJefe(jefe);
+    if (!tel) {
+      setJefeEdit(true);
+      onShowToast?.('Falta el número', 'Escribe el WhatsApp de tu jefe (ej: 987654321)', 'warning');
+      return;
+    }
+    const textoFinal = aplicarPlantillaCuadre(textoActivo, cierre, riderName);
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(textoFinal)}`, '_blank');
+    onShowToast?.('📲 Cuadre listo', `Se abrió tu WhatsApp con el cuadre del ${fechaCorta(cierre.fecha)} — dale enviar`, 'success');
+  };
+
+  const mandarAMateDia = async (cierre: CierreCaja) => {
+    try {
+      onShowToast?.('📤 MATE', `Enviando el cierre del ${fechaCorta(cierre.fecha)}…`, 'info');
+      await enviarAGrupoMate(armarMensajeCierre(cierre, riderName));
+      onShowToast?.('✅ Cierre enviado', 'El grupo MATE recibe el resumen de ese día', 'success');
     } catch (e: any) {
       onShowToast?.('No se pudo enviar', e?.message || 'Revisa tu internet e inténtalo de nuevo', 'error');
     }
@@ -545,6 +595,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
 
   return (
     <div className="space-y-3">
+      {!cierreVer && (<>
       {/* ── Encabezado ── */}
       <div
         className={`rounded-2xl border p-3.5 ${
@@ -586,7 +637,73 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
           </button>
         </div>
       </div>
+      </>)}
 
+      {/* ── 📅 FASE T: tus otros días. La caja de la nueva ruta arranca en 0
+          porque es OTRO día; los anteriores quedan guardados con TODOS sus
+          números. Tocá una fecha y la ves entera (ayer, anteayer, y así). ── */}
+      {cierresPorFecha.length > 0 && (
+        <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3" data-testid="caja-dias">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+              📅 Ver otro día <span className="normal-case tracking-normal text-slate-600">({cierresPorFecha.length} con cierre)</span>
+            </p>
+            {fechaVer && (
+              <button
+                onClick={() => setFechaVer(null)}
+                className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold transition-all active:scale-95"
+                data-testid="boton-volver-hoy"
+              >
+                ← hoy
+              </button>
+            )}
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-1">
+            <button
+              onClick={() => setFechaVer(null)}
+              className={`flex-shrink-0 rounded-xl px-3 py-1.5 border text-center transition-all active:scale-95 ${
+                fechaVer == null
+                  ? 'bg-cyan-600 border-cyan-500 text-white'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+              }`}
+              data-testid="chip-hoy"
+            >
+              <span className="block text-[11px] font-black leading-tight">Hoy</span>
+              <span className="block text-[9px] leading-tight text-slate-400">
+                {cerrada
+                  ? `neto ${formatearSoles(cierreHoy!.netoDelDia)}`
+                  : cargando
+                    ? 'cargando…'
+                    : `${resumen.entregas} entregas`}
+              </span>
+            </button>
+            {cierresPorFecha.map((c) => {
+              const activo = fechaVer === c.fecha;
+              const et = etiquetaDiferencia(c.diferencia);
+              return (
+                <button
+                  key={`${c.fecha}_${c.at}`}
+                  onClick={() => setFechaVer(c.fecha)}
+                  className={`flex-shrink-0 rounded-xl px-3 py-1.5 border text-center transition-all active:scale-95 ${
+                    activo
+                      ? 'bg-violet-600 border-violet-500 text-white'
+                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                  }`}
+                  data-testid={`chip-dia-${c.fecha}`}
+                  title={`Caja del ${fechaCorta(c.fecha)} — ${et.texto}`}
+                >
+                  <span className="block text-[11px] font-black leading-tight">{fechaCorta(c.fecha)}</span>
+                  <span className={`block text-[9px] font-bold leading-tight tabular-nums ${activo ? 'text-violet-200' : 'text-emerald-400'}`}>
+                    {formatearSoles(c.netoDelDia)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!cierreVer && (<>
       {/* ── Fondo inicial ── */}
       <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
         <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2 flex items-center gap-1">
@@ -1055,34 +1172,165 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
           </p>
         </div>
       )}
+      </>)}
 
-      {/* ── Historial de cierres ── */}
-      {caja.cierres.length > 0 && (
-        <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
-          <button
-            onClick={() => setHistorialAbierto((v) => !v)}
-            className="w-full flex items-center justify-between text-[10px] uppercase tracking-wider font-bold text-slate-400 hover:text-slate-200 transition-colors"
-          >
-            <span>📊 Últimos cierres ({caja.cierres.length})</span>
-            {historialAbierto ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-          {historialAbierto && (
-            <div className="mt-2 space-y-1">
-              {caja.cierres.slice(0, 10).map((c) => {
-                const et = etiquetaDiferencia(c.diferencia);
-                const color = et.clase === 'ok' ? 'text-emerald-300' : et.clase === 'sobra' ? 'text-amber-300' : 'text-red-300';
-                return (
-                  <div key={`${c.fecha}_${c.at}`} className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-2 py-1.5">
-                    <span className="text-[11px] text-slate-400 tabular-nums w-12 flex-shrink-0">{fechaCorta(c.fecha)}</span>
-                    <span className="text-[11px] text-slate-500 flex-shrink-0">{c.entregas} ent.</span>
-                    <span className="text-xs font-bold text-emerald-300 tabular-nums flex-shrink-0">neto {formatearSoles(c.netoDelDia)}</span>
-                    <span className={`text-[10px] font-bold truncate flex-1 min-w-0 ${color}`}>{et.texto}</span>
-                  </div>
-                );
-              })}
+      {/* ── 📅 FASE T: la caja de OTRO día, entera — congelada tal como
+          cerraste ese día. Los números no se recalculan: son los que
+          quedaron guardados en el cierre (sobreviven a rutas nuevas). ── */}
+      {cierreVer && cuadreVer && (
+        <>
+          {/* encabezado del día */}
+          <div className="rounded-2xl border border-violet-500/40 bg-gradient-to-br from-violet-500/10 via-slate-900/80 to-slate-900/80 p-3.5" data-testid="dia-header">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border bg-violet-500/15 border-violet-500/40">
+                <CalendarDays className="w-5 h-5 text-violet-400" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                  Caja del {fechaCorta(cierreVer.fecha)} · cerrada {horaCorta(cierreVer.at)}
+                </p>
+                <p className="text-xl font-black text-white leading-tight">neto {formatearSoles(cierreVer.netoDelDia)}</p>
+                <p className="text-[10px] text-slate-500">
+                  {cierreVer.entregas} entregas · contado {formatearSoles(cierreVer.contado)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* resumen congelado de ese día */}
+          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">📋 Resumen de ese día</p>
+            {fila('💵', 'Efectivo cobrado', formatearSoles(cierreVer.efectivoCobrado), 'text-emerald-300')}
+            {cierreVer.digitalRider !== 0 && fila('📱', 'Yape digital', formatearSoles(cierreVer.digitalRider), 'text-violet-300')}
+            {cierreVer.empresa !== 0 && fila('🏪', 'Cobró la empresa directo', formatearSoles(cierreVer.empresa), 'text-slate-300')}
+            {fila('🧾', 'Total cobrado', formatearSoles(cierreVer.efectivoCobrado + cierreVer.digitalRider + cierreVer.empresa), 'text-white')}
+            {fila('💸', `Gastos (${cierreVer.gastos.length})`, formatearSoles(cierreVer.gastosEfectivo + cierreVer.gastosDigital), 'text-orange-300')}
+            {cierreVer.pagoRuta?.total ? fila('🛵', `Tu paga (${nPedidosVer} pedidos)`, formatearSoles(cierreVer.pagoRuta.total), 'text-amber-300') : null}
+            <div className="border-t border-slate-700/60 my-1.5" />
+            {fila('🤲', 'Contado', formatearSoles(cierreVer.contado))}
+            {fila('🧮', 'Esperado', formatearSoles(cierreVer.esperado))}
+            {(() => {
+              const et = etiquetaDiferencia(cierreVer.diferencia);
+              const color = et.clase === 'ok' ? 'text-emerald-300' : et.clase === 'sobra' ? 'text-amber-300' : 'text-red-300';
+              return (
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-xs text-slate-400">⚖️ Diferencia</span>
+                  <span className={`text-base font-black ${color}`}>{et.texto}</span>
+                </div>
+              );
+            })()}
+            {fila('🏷️', 'Neto del día (− gastos)', formatearSoles(cierreVer.netoDelDia), 'text-emerald-300')}
+            {cierreVer.fondoInicial > 0 && fila('🔑', 'Fondo inicial', formatearSoles(cierreVer.fondoInicial))}
+            {cierreVer.nota && <p className="text-[10px] text-slate-500 mt-1 italic">📝 {cierreVer.nota}</p>}
+          </div>
+
+          {/* gastos de ese día (snapshot congelado) */}
+          {cierreVer.gastos.length > 0 && (
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">💸 Gastos de ese día</p>
+              <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar pr-0.5">
+                {cierreVer.gastos.map((g) => {
+                  const cat = categoriaInfo(g.categoria);
+                  return (
+                    <div key={g.id} className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-2 py-1.5">
+                      <span className="text-sm w-5 text-center flex-shrink-0">{cat.icono}</span>
+                      <span className="text-[11px] text-slate-400 tabular-nums flex-shrink-0">{horaCorta(g.ts)}</span>
+                      <span className="text-xs text-slate-200 font-medium truncate flex-1 min-w-0">
+                        {cat.nombre}
+                        {g.concepto ? <span className="text-slate-500"> · {g.concepto}</span> : null}
+                      </span>
+                      <span className={`text-xs font-bold tabular-nums flex-shrink-0 ${g.pago === 'yape' ? 'text-violet-300' : 'text-orange-300'}`}>
+                        {g.pago === 'yape' ? '📱' : '💵'} {formatearSoles(g.monto)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
-        </div>
+
+          {/* cuadre al jefe de ese día */}
+          <div className="rounded-2xl border border-violet-500/40 bg-gradient-to-br from-violet-500/10 via-slate-900/80 to-slate-900/80 p-3.5">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">📲 Cuadre para tu jefe (ese día)</p>
+            {cuadreVer.loTuyo > 0 && fila('🛵', `Te quedaste de tu ruta (${nPedidosVer} pedidos)`, formatearSoles(cuadreVer.loTuyo), 'text-amber-300')}
+            {fila('🤲', 'Le entregaste en efectivo', formatearSoles(cuadreVer.efectivo), 'text-emerald-300')}
+            {fila('📲', cuadreVer.loTuyo > 0 ? 'Depositaste por Yape (tu paga ya restada)' : 'Depositaste por Yape', formatearSoles(cuadreVer.yape), 'text-violet-300')}
+            {cuadreVer.teDebe > 0 && fila('⚠️', 'La empresa te quedó debiendo', formatearSoles(cuadreVer.teDebe), 'text-red-300')}
+            {fila('🧾', 'Recibió en total', formatearSoles(cuadreVer.total), 'text-white')}
+          </div>
+
+          {/* enviar: jefe + MATE */}
+          <div className="rounded-2xl border border-violet-500/40 bg-slate-950/60 p-3">
+            {jefe && !jefeEdit ? (
+              <>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-[10px] text-slate-400 flex-1 truncate">👤 Tu jefe: +{jefe}</span>
+                  <button
+                    onClick={() => setJefeEdit(true)}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
+                    title="Cambiar el número"
+                  >
+                    ✏️ editar
+                  </button>
+                </div>
+                <div className="rounded-xl bg-slate-900/80 border border-slate-700/60 p-2.5 mb-2">
+                  <p className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1">💬 Así le llega a tu jefe</p>
+                  <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                    <pre className="text-[11px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed" data-testid="dia-mensaje-jefe">{mensajeJefeVer}</pre>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => mandarAlJefeDia(cierreVer)}
+                    className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    data-testid="dia-mandar-jefe"
+                  >
+                    📲 Mandar el cuadre del {fechaCorta(cierreVer.fecha)}
+                  </button>
+                  <button
+                    onClick={() => void mandarAMateDia(cierreVer)}
+                    className="px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center gap-1.5"
+                    title="Reenviar el cierre de ese día al grupo MATE"
+                    data-testid="dia-mandar-mate"
+                  >
+                    <Send className="w-4 h-4" /> MATE
+                  </button>
+                </div>
+                <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
+                  Se arma con los números congelados de ese día — se abre tu WhatsApp listo para enviar.
+                </p>
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={`${inputTexto} flex-1 min-w-0 py-2`}
+                  placeholder="WhatsApp del jefe (ej: 987654321)"
+                  inputMode="tel"
+                  value={jefe}
+                  onChange={(e) => setJefe(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') guardarJefe();
+                  }}
+                />
+                <button
+                  onClick={guardarJefe}
+                  className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition-all active:scale-[0.98] flex-shrink-0"
+                >
+                  ✓ guardar
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* volver a hoy */}
+          <button
+            onClick={() => setFechaVer(null)}
+            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-sm font-bold transition-all active:scale-[0.98]"
+            data-testid="boton-volver-hoy-grande"
+          >
+            ← Volver a la caja de hoy
+          </button>
+        </>
       )}
     </div>
   );
