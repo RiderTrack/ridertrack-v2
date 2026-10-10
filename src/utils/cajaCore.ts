@@ -349,12 +349,20 @@ export function armarMensajeCierre(cierre: CierreCaja, riderNombre?: string): st
 export interface CuadreEntrega {
   /** 🛵 FASE Q: tu paga de la ruta — se queda contigo, no se entrega */
   loTuyo: number;
+  /** 🛵 FASE S: cuánto de tu paga te lo descuentás del Yape antes de
+   * depositar (lo normal: TODA tu paga — así lo hace Rudy en la vida
+   * real, el efectivo va completo al jefe) */
+  pagaDelYape: number;
+  /** 🛵 FASE S: si el Yape del día no alcanzó para cubrir tu paga,
+   * lo que te quedás de los billetes (día cobrado casi todo en efectivo) */
+  pagaDelEfectivo: number;
   /** 🛵 FASE Q: si tu paga superó toda la plata del día, lo que la
    * empresa te tiene que completar (se ve en el mensaje al jefe) */
   teDebe: number;
-  /** lo que le das en billetes (lo que contaste − tu fondo − tu paga) */
+  /** lo que le das en billetes (lo que contaste − tu fondo; tu paga
+   * YA no sale de acá, salvo que el Yape no alcanzara para cubrirla) */
   efectivo: number;
-  /** lo que falta → lo depositás por Yape */
+  /** lo que depositás por Yape (el digital del día − tu paga) */
   yape: number;
   /** efectivo + yape = todo lo que recibe por tu mano */
   total: number;
@@ -376,18 +384,21 @@ function pagoRutaTotal(v: unknown): number {
 }
 
 /**
- * FASE O + FASE Q — el cuadre de la entrega. La app dice "te quedó
+ * FASE O + Q + S — el cuadre de la entrega. La app dice "te quedó
  * S/400 en efectivo y S/300 en yape", pero en la vida real (yapeos,
  * cambios, vueltos) a veces tenés OTRA plata en la mano. Este
  * cálculo parte de lo que CONTASTE al cerrar y reparte el total:
  *   · loTuyo = tu paga por pedidos (S/9 × normales + S/12 × lejanos,
- *     FASE D) — se descuenta PRIMERO, sale de los billetes que
- *     tenés en la mano
- *   · efectivo = contado − fondo − loTuyo (el fondo es tuyo y tu
- *     paga también; lo que sobre va al jefe)
- *   · yape = (neto del día − loTuyo) − efectivo (lo que falta para
- *     que la empresa reciba todo lo que pasó por tus manos, gastos
- *     ya descontados del neto)
+ *     FASE D) — se queda contigo
+ *   · FASE S: tu paga te la descontás del YAPE primero (Rudy: "si
+ *     tengo 140 en el Yape le resto mis 72 y me los paso a mi
+ *     cuenta") → el efectivo contado va COMPLETO al jefe. Si el
+ *     Yape del día no alcanza a cubrir tu paga, el resto sale de
+ *     los billetes (pagaDelEfectivo)
+ *   · efectivo = contado − fondo (− lo que faltó de tu paga si el
+ *     Yape no alcanzó) — el fondo es tuyo, no se entrega
+ *   · yape = (neto del día − loTuyo) − efectivo (lo que depositás:
+ *     el digital del día menos tu paga; gastos ya descontados)
  *   · teDebe = si tu paga superó TODO el neto del día, lo que la
  *     empresa te tiene que completar (pasa cuando casi todo se
  *     cobró directo por la empresa)
@@ -400,11 +411,19 @@ export function calcularCuadreEntrega(e: {
   pagoRuta?: number | PagoRutaCierre;
 }): CuadreEntrega {
   const loTuyo = pagoRutaTotal(e.pagoRuta);
-  const efectivo = Math.max(0, e.contado - e.fondoInicial - loTuyo);
+  // billetes sin el fondo (el fondo es tuyo, no se entrega)
+  const efectivoSinFondo = e.contado - e.fondoInicial;
+  // lo digital del día según lo que contaste: lo que falta del neto
+  const yapeDisponible = Math.max(0, e.netoDelDia - Math.max(0, efectivoSinFondo));
+  // FASE S: tu paga sale PRIMERO del Yape — el efectivo va completo
+  const pagaDelYape = Math.min(loTuyo, yapeDisponible);
+  // si el Yape no alcanza, el resto de tu paga sale de los billetes
+  const pagaDelEfectivo = Math.max(0, loTuyo - yapeDisponible);
+  const efectivo = Math.max(0, efectivoSinFondo - pagaDelEfectivo);
   const totalJefe = Math.max(0, e.netoDelDia - loTuyo);
   const yape = Math.max(0, totalJefe - efectivo);
   const teDebe = Math.max(0, loTuyo - e.netoDelDia);
-  return { loTuyo, teDebe, efectivo, yape, total: efectivo + yape };
+  return { loTuyo, pagaDelYape, pagaDelEfectivo, teDebe, efectivo, yape, total: efectivo + yape };
 }
 
 /**
@@ -477,7 +496,7 @@ export const VARIABLES_CUADRE: { clave: string; ej: string }[] = [
   { clave: 'efectivo', ej: 'S/ 300.00' },
   { clave: 'yape', ej: 'S/ 882.37' },
   { clave: 'total', ej: 'S/ 1182.37' },
-  { clave: 'loTuyo', ej: '🛵 Mi paga de la ruta (10 pedidos): S/ 90.00 — ya descontada (vacío si no hay)' },
+  { clave: 'loTuyo', ej: '🛵 Mi paga de la ruta (10 pedidos): S/ 90.00 — ya descontada del Yape (vacío si no hay)' },
   { clave: 'teDebe', ej: '⚠️ La empresa me queda debiendo: S/ 40.00 (vacío si no hay)' },
   { clave: 'gastos', ej: '· gastos de la ruta: S/ 20.00 (2) — ya descontados (vacío si no hay)' },
   { clave: 'empresa', ej: '· la empresa cobra directo: S/ 80.00 (vacío si no hay)' },
@@ -505,7 +524,15 @@ export function aplicarPlantillaCuadre(texto: string, cierre: CierreCaja, riderN
     efectivo: mon(q.efectivo),
     yape: mon(q.yape),
     total: mon(q.total),
-    loTuyo: q.loTuyo > 0 ? `🛵 Mi paga de la ruta (${nPedidos || cierre.entregas} pedidos): ${mon(q.loTuyo)} — ya descontada` : '',
+    // 🛵 FASE S: la línea de tu paga ahora dice DE DÓNDE la restaste —
+    // del Yape (lo normal), del efectivo (día sin digital) o mezcla
+    loTuyo: (() => {
+      if (q.loTuyo <= 0) return '';
+      const base = `🛵 Mi paga de la ruta (${nPedidos || cierre.entregas} pedidos): ${mon(q.loTuyo)} — ya descontada`;
+      if (q.pagaDelEfectivo <= 0) return `${base} del Yape`;
+      if (q.pagaDelYape <= 0) return `${base} del efectivo`;
+      return `${base} (${mon(q.pagaDelYape)} del Yape + ${mon(q.pagaDelEfectivo)} del efectivo)`;
+    })(),
     teDebe: q.teDebe > 0 ? `⚠️ La empresa me queda debiendo: ${mon(q.teDebe)}` : '',
     gastos: gastos > 0 ? `· gastos de la ruta: ${mon(gastos)} (${cierre.gastos.length}) — ya descontados` : '',
     empresa: cierre.empresa > 0 ? `· la empresa cobra directo: ${mon(cierre.empresa)} (no pasa por mis manos)` : '',

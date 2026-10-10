@@ -769,11 +769,12 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
           {cuadreHoy && (
             <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-violet-500/10 p-2.5">
               <p className="text-[10px] uppercase tracking-wider font-bold text-violet-300 mb-1">📲 Cuadre para tu jefe</p>
-              {/* 🛵 FASE Q: tu paga se descuenta ANTES de entregar */}
+              {/* 🛵 FASE Q/S: tu paga se descuenta ANTES de entregar —
+                  FASE S: del YAPE primero, el efectivo va completo */}
               {cuadreHoy.loTuyo > 0 &&
                 fila('🛵', `Te quedás de tu ruta (${(cierreHoy!.pagoRuta?.cantidadNormal || 0) + (cierreHoy!.pagoRuta?.cantidadLejos || 0) || cierreHoy!.entregas} pedidos)`, formatearSoles(cuadreHoy.loTuyo), 'text-amber-300')}
               {fila('🤲', 'Le entregás en efectivo', formatearSoles(cuadreHoy.efectivo), 'text-emerald-300')}
-              {fila('📲', 'Depositás por Yape', formatearSoles(cuadreHoy.yape), 'text-violet-300')}
+              {fila('📲', cuadreHoy.loTuyo > 0 ? 'Depositás por Yape (tu paga ya restada)' : 'Depositás por Yape', formatearSoles(cuadreHoy.yape), 'text-violet-300')}
               {cuadreHoy.teDebe > 0 &&
                 fila('⚠️', 'La empresa te queda debiendo', formatearSoles(cuadreHoy.teDebe), 'text-red-300')}
               {fila('🧾', 'Recibe en total', formatearSoles(cuadreHoy.total), 'text-white')}
@@ -781,7 +782,9 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
                 {cuadreHoy.teDebe > 0
                   ? `Tu paga (${formatearSoles(cuadreHoy.loTuyo)}) es más que lo que pasó por tus manos — te quedás TODO el efectivo contado (${formatearSoles(cierreHoy!.contado)}) y la empresa te completa.`
                   : cuadreHoy.loTuyo > 0
-                    ? `De lo que contaste (${formatearSoles(cierreHoy!.contado)}) se resta tu fondo (${formatearSoles(cierreHoy!.fondoInicial)}) y tu paga de ruta (${formatearSoles(cuadreHoy.loTuyo)}) — eso es tuyo. El resto sale por Yape.`
+                    ? cuadreHoy.pagaDelEfectivo <= 0
+                      ? `El efectivo que contaste (${formatearSoles(cierreHoy!.contado)}${cierreHoy!.fondoInicial > 0 ? ` − tu fondo ${formatearSoles(cierreHoy!.fondoInicial)}` : ''}) va COMPLETO al jefe — tu paga de ruta (${formatearSoles(cuadreHoy.loTuyo)}) te la descuentás del Yape antes de depositar.`
+                      : `Tu paga de ruta (${formatearSoles(cuadreHoy.loTuyo)}) salió del Yape (${formatearSoles(cuadreHoy.pagaDelYape)}) y de los billetes (${formatearSoles(cuadreHoy.pagaDelEfectivo)}) — eso es tuyo. El resto va al jefe.`
                     : `De lo que contaste (${formatearSoles(cierreHoy!.contado)}) se resta tu fondo (${formatearSoles(cierreHoy!.fondoInicial)}) — eso es tuyo. El resto sale por Yape.`}
               </p>
             </div>
@@ -1019,7 +1022,14 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
                 <b className="text-violet-300">S/ {q.yape.toFixed(2)} por Yape</b> para tu jefe
                 {q.loTuyo > 0 ? (
                   <>
-                    {' '}(tu paga <b className="text-amber-300">S/ {q.loTuyo.toFixed(2)}</b> y tu fondo se quedan afuera)
+                    {' '}(tu paga{' '}
+                    <b className="text-amber-300">S/ {q.loTuyo.toFixed(2)}</b>
+                    {q.pagaDelEfectivo <= 0
+                      ? ' te la descuentás del Yape — el efectivo va completo'
+                      : q.pagaDelYape <= 0
+                        ? ' sale de los billetes (no hubo Yape hoy)'
+                        : `: S/ ${q.pagaDelYape.toFixed(2)} del Yape + S/ ${q.pagaDelEfectivo.toFixed(2)} de los billetes`}
+                    ; tu fondo se queda afuera)
                   </>
                 ) : (
                   ' (tu fondo se queda afuera)'
