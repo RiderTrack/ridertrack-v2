@@ -4,12 +4,15 @@
 // acá y se DESCUENTAN del neto → el número que queda es lo EN MANO.
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, MessageCircle, Minus, QrCode, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, History as HistoryIcon, MessageCircle, Minus, QrCode, Trash2 } from 'lucide-react';
 import { ConfigDT, emojiGasto, Gasto, nombreOrigen, nombreGasto, TIPOS_GASTO, TipoGasto, Viaje } from '../types';
 import { fechaBonita, fechaHoy, horaAhora, resumenDia, totalGastosDia } from '../storage';
 import { armarMensajeCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
 // FASE K: saldo de la recarga semanal (banner comisión prepagada)
 import { estadoSaldo } from '../services/recarga';
+// FASE T: 📜 historial — todos tus días con sus números
+import { diasHistorial } from '../services/historialDT';
+import HistorialModal from './HistorialModal';
 import ViajeList from './ViajeList';
 
 interface Props {
@@ -67,6 +70,9 @@ export default function CajaView({
   const [tipoGasto, setTipoGasto] = useState<TipoGasto>('saldo');
   const [notaGasto, setNotaGasto] = useState('');
   const [confirmarGastoId, setConfirmarGastoId] = useState<string | null>(null);
+  // FASE T: 📜 el historial de TODOS los días (ayer, anteayer…)
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const diasHistorialLista = useMemo(() => diasHistorial(viajes, gastos), [viajes, gastos]);
 
   function guardarGasto() {
     // acepta coma o punto decimal — en el teclado del Perú sale las dos
@@ -206,6 +212,26 @@ export default function CajaView({
           <ChevronRight size={18} />
         </button>
       </div>
+
+      {/* ═══ FASE T: 📜 HISTORIAL — todos tus días, uno por renglón ═══
+          Pedido de Rudy: "cuántos viajes hice el día anterior, cuánto
+          hice ayer y antes de ayer, igualito que rider track — para
+          tener control de mi dinero también de libre". Los viajes y
+          gastos ya se guardan todos con su fecha: esto los lista. */}
+      <button
+        onClick={() => setHistorialAbierto(true)}
+        className="flex w-full items-center justify-between gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2.5 text-left transition-all active:scale-[0.99] hover:bg-emerald-500/[0.12]"
+        data-testid="boton-historial-dt"
+      >
+        <span className="flex min-w-0 items-center gap-2 text-xs font-black text-slate-100">
+          <HistoryIcon size={15} className="shrink-0 text-emerald-400" /> 📜 Historial
+        </span>
+        <span className="truncate text-[10px] font-semibold text-slate-400">
+          {diasHistorialLista.length > 0
+            ? `${diasHistorialLista.length} día${diasHistorialLista.length !== 1 ? 's' : ''} — tocá y mirá cuánto hiciste cada uno`
+            : 'tus días van a aparecer acá'}
+        </span>
+      </button>
 
       {/* Tarjetas de resumen */}
       <div className="grid grid-cols-4 gap-2">
@@ -449,6 +475,20 @@ export default function CajaView({
         }
         cobroEnCurso={cobroEnCurso}
       />
+
+      {/* FASE T: 📜 el modal con todos los días — tocás uno y la
+          Caja salta a esa fecha (viajes, gastos y todo el detalle) */}
+      {historialAbierto && (
+        <HistorialModal
+          viajes={viajes}
+          gastos={gastos}
+          onCerrar={() => setHistorialAbierto(false)}
+          onIrAFecha={f => {
+            setFecha(f);
+            setHistorialAbierto(false);
+          }}
+        />
+      )}
     </div>
   );
 }
