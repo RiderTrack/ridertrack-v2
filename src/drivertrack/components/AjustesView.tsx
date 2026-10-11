@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.10 (FASE T — 📅 la caja tiene memoria: al entrar a Caja ves “Ver otro día” con tus cierres guardados por fecha (90 días); tocás un día y lo ves ENTERO — resumen, contado/diferencia, gastos, tu paga, el cuadre al jefe de ese día y podés reenviarlo al jefe o a MATE; la caja de la nueva ruta ya no “borra” la de ayer · 📷 la foto de entrega ahora te deja elegir a quién le llega: 📤 quien envía, 📥 quien recibe o 👥 Ambos (el robot manda 2 mensajes; a mano se comparte 2 veces) · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
+        DriverTrack v0.10.11 (FASE U — 👥 el menú del robot 🤖 ahora tiene la opción “Ambos”: los avisos (Ya llegué, Voy en camino, Llegando, Entregado y Pedir ubicación) les llegan a los DOS chats — quien envía Y quien recibe — igual que la foto de entrega; el cobro sigue yendo a un solo chat para que nadie reciba el pedido de pago dos veces · FASE T: 📅 la caja tiene memoria (ver otro día por fecha) + 📷 foto de entrega 📤/📥/👥 · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
       </p>
     </div>
   );

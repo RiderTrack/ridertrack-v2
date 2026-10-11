@@ -464,21 +464,25 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     viaje: Viaje,
     tipo: TipoAviso,
     minutos?: number,
-    telefono?: string,
+    telefono?: string | string[],
   ): Promise<void> {
-    // FASE C: teléfono elegido en el menú 🤖 (cliente · quien envía ·
-    // quien recibe) — si no viene, el cliente del viaje como siempre
-    const cel = normalizarCelular(telefono ?? viaje.celular);
-    if (!cel) {
+    // FASE C: teléfono elegido en el menú 🤖 (quien envía · quien
+    // recibe) — si no viene, el cliente del viaje como siempre.
+    // 👥 FASE U: puede venir una LISTA (Ambos) → el aviso sale UNA
+    // vez por chat, igual que la foto de entrega (FASE T)
+    const lista = Array.isArray(telefono) ? telefono : [telefono ?? viaje.celular];
+    const cels = [...new Set(lista.map(c => normalizarCelular(c)).filter(Boolean))];
+    if (cels.length === 0) {
       mostrarToast('Este viaje no tiene celular del cliente');
       return;
     }
     const texto = armarAviso(tipo, viaje, config.miNombre, minutos, config.plantillas);
     // FASE B2: la imagen del aviso (si subiste una) viaja como URL —
     // el bot la baja de la nube y la manda junto con el texto
-    const imagen = imagenesDT[tipo === 'llegando' ? 'llegando' : tipo];
+    const imagen = imagenesDT[tipo];
     if (!config.robotActivo || !uidDisponible()) {
-      window.open(linkWhatsApp(cel, texto), '_blank');
+      cels.forEach(cel => window.open(linkWhatsApp(cel, texto), '_blank'));
+      if (cels.length > 1) mostrarToast('Te abrí los 2 chats — mandá el aviso en cada uno');
       vibrar(60);
       return;
     }
@@ -491,48 +495,76 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
             ? '🏁 Avisando que ya llegaste…'
             : '✅ Avisando entrega…',
     );
-    const r = await encolarAccionDT({
-      tipo: 'dt_aviso',
-      telefono: cel,
-      texto,
-      imagenUrl: imagen?.url,
-      minutos: tipo === 'llegando' ? minutos : undefined,
-      nombre: viaje.cliente || undefined,
-      viajeId: viaje.id,
-    });
-    mostrarToast(
-      r.ok
-        ? imagen
-          ? '✓ Aviso enviado con tu imagen 🖼️'
-          : '✓ Aviso enviado'
-        : '⚠️ ' + r.error + ' · abro WhatsApp…',
-    );
-    if (!r.ok) window.open(linkWhatsApp(cel, texto), '_blank');
-    vibrar(r.ok ? 120 : 60);
+    let salieron = 0;
+    for (const cel of cels) {
+      const r = await encolarAccionDT({
+        tipo: 'dt_aviso',
+        telefono: cel,
+        texto,
+        imagenUrl: imagen?.url,
+        minutos: tipo === 'llegando' ? minutos : undefined,
+        nombre: viaje.cliente || undefined,
+        viajeId: viaje.id,
+      });
+      if (r.ok) salieron++;
+      else window.open(linkWhatsApp(cel, texto), '_blank'); // ese chat no se queda sin aviso
+    }
+    if (salieron === cels.length) {
+      mostrarToast(
+        cels.length > 1
+          ? `✓ Aviso enviado a los ${cels.length} chats 📤📥`
+          : imagen
+            ? '✓ Aviso enviado con tu imagen 🖼️'
+            : '✓ Aviso enviado',
+      );
+      vibrar(120);
+    } else {
+      mostrarToast(
+        salieron > 0
+          ? `✓ Enviado a ${salieron} de ${cels.length} — el resto va por WhatsApp…`
+          : '⚠️ No se pudo encolar · te abro WhatsApp…',
+      );
+      vibrar(60);
+    }
   }
 
   // ═══ FASE B: 📍 pedirle al cliente su ubicación por el chat ═══
-  async function pedirUbicacion(viaje: Viaje, telefono?: string): Promise<void> {
-    const cel = normalizarCelular(telefono ?? viaje.celular);
-    if (!cel) {
+  // 👥 FASE U: con Ambos el pedido les sale a los DOS chats
+  async function pedirUbicacion(viaje: Viaje, telefono?: string | string[]): Promise<void> {
+    const lista = Array.isArray(telefono) ? telefono : [telefono ?? viaje.celular];
+    const cels = [...new Set(lista.map(c => normalizarCelular(c)).filter(Boolean))];
+    if (cels.length === 0) {
       mostrarToast('Este viaje no tiene celular del cliente');
       return;
     }
     const texto = armarPedirUbicacion(config.miNombre, config.plantillas?.ubicacion);
     if (!config.robotActivo || !uidDisponible()) {
-      window.open(linkWhatsApp(cel, texto), '_blank');
+      cels.forEach(cel => window.open(linkWhatsApp(cel, texto), '_blank'));
+      if (cels.length > 1) mostrarToast('Te abrí los 2 chats — pedí la ubicación en cada uno');
       return;
     }
-    const r = await encolarAccionDT({
-      tipo: 'dt_ubicacion',
-      telefono: cel,
-      texto,
-      imagenUrl: imagenesDT['ubicacion']?.url, // FASE B2: imagen opcional
-      nombre: viaje.cliente || undefined,
-      viajeId: viaje.id,
-    });
-    mostrarToast(r.ok ? '✓ Pedido de ubicación enviado' : '⚠️ ' + r.error + ' · abro WhatsApp…');
-    if (!r.ok) window.open(linkWhatsApp(cel, texto), '_blank');
+    let salieron = 0;
+    for (const cel of cels) {
+      const r = await encolarAccionDT({
+        tipo: 'dt_ubicacion',
+        telefono: cel,
+        texto,
+        imagenUrl: imagenesDT['ubicacion']?.url, // FASE B2: imagen opcional
+        nombre: viaje.cliente || undefined,
+        viajeId: viaje.id,
+      });
+      if (r.ok) salieron++;
+      else window.open(linkWhatsApp(cel, texto), '_blank');
+    }
+    if (salieron === cels.length) {
+      mostrarToast(cels.length > 1 ? '✓ Pedido de ubicación enviado a los 2 chats' : '✓ Pedido de ubicación enviado');
+    } else {
+      mostrarToast(
+        salieron > 0
+          ? `✓ Enviado a ${salieron} de ${cels.length} — el resto va por WhatsApp…`
+          : '⚠️ No se pudo encolar · te abro WhatsApp…',
+      );
+    }
   }
 
   function eliminarViaje(id: string) {

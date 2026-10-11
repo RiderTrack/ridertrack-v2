@@ -12,6 +12,12 @@
 // cuántos minutos (5/10/15/20 o el que quieras) y si subiste una
 // imagen en Ajustes → 🖼️ Imágenes del robot, va CON ESA IMAGEN.
 //
+// 👥 FASE U: tercera opción en "¿a quién?" — AMBOS. Igual que la
+// foto de entrega (FASE T): los avisos les llegan a los DOS chats
+// (el robot manda 2 mensajes). El cobro sigue yendo a UN solo
+// chat (con 👥 va a quien recibe) — nadie recibe el pedido de
+// pago dos veces.
+//
 // El robot manda cada aviso UNA sola vez por botón — nada de
 // respuestas automáticas (esas siguen desactivadas como siempre).
 // Si el robot está apagado, cada opción cae al wa.me de siempre.
@@ -26,8 +32,13 @@ interface Props {
   viaje: Viaje;
   robotActivo: boolean;
   onCerrar: () => void;
-  onAviso: (viaje: Viaje, tipo: TipoAviso, minutos?: number, telefono?: string) => Promise<void> | void;
-  onPedirUbicacion: (viaje: Viaje, telefono?: string) => Promise<void> | void;
+  onAviso: (
+    viaje: Viaje,
+    tipo: TipoAviso,
+    minutos?: number,
+    telefono?: string | string[],
+  ) => Promise<void> | void;
+  onPedirUbicacion: (viaje: Viaje, telefono?: string | string[]) => Promise<void> | void;
   onCobrar: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   /** FASE B2: qué tipos tienen imagen subida (para el badge 🖼️) */
   tiposConImagen?: string[];
@@ -86,25 +97,35 @@ export default function RobotMenu({
   const quien = viaje.cliente.trim() || 'el cliente';
   const conImagen = (t: string) => tiposConImagen?.includes(t) ?? false;
 
-  // ── FASE C.2: ¿a quién le mandamos el aviso? SOLO DOS opciones:
-  // quien ENVÍA (el celular viejo del cliente cuenta como quien
-  // envía) y quien RECIBE. Si hay uno solo (o son el mismo número),
-  // ni se pregunta — va directo.
+  // ── FASE C.2: ¿a quién le mandamos el aviso? El viaje puede tener
+  // DOS números: quien ENVÍA (el celular viejo del cliente cuenta
+  // como quien envía) y quien RECIBE. Si hay uno solo (o son el
+  // mismo número), ni se pregunta — va directo.
+  // 👥 FASE U: tercera opción AMBOS — los avisos salen a los DOS
+  // chats (mismo criterio que la foto de entrega FASE T).
   const telEnvia = (viaje.celularEnvia ?? '').trim() || viaje.celular.trim();
   const telRecibe = (viaje.celularRecibe ?? '').trim();
-  const telefonos = [
-    { label: 'Envía 📤', num: telEnvia },
-    { label: 'Recibe 📥', num: telRecibe },
-  ].filter(t => t.num.length > 0 && t.num !== (t.label === 'Recibe 📥' ? telEnvia : telRecibe));
+  const dosNumeros = Boolean(telEnvia && telRecibe && telEnvia !== telRecibe);
   // FASE M (fix comprobante): el default es quien RECIBE si existe —
   // el MISMO destino al que va la FOTO de la entrega. Antes el
   // selector arrancaba en "Envía" y el cobro iba SIEMPRE al que
   // envía aunque arriba hubieras elegido "Recibe" → la foto le
   // llegaba a uno y el comprobante al chat del otro pedido.
-  const [telIdx, setTelIdx] = useState(() =>
-    telRecibe && telRecibe !== telEnvia ? telefonos.findIndex(t => t.num === telRecibe) : 0,
+  const [destino, setDestino] = useState<'envia' | 'recibe' | 'ambos'>(() =>
+    telRecibe && telRecibe !== telEnvia ? 'recibe' : 'envia',
   );
-  const telElegido = telefonos[telIdx]?.num ?? telEnvia;
+
+  /** los números elegidos — 1, o los 2 con 👥 Ambos (FASE U):
+  *  el aviso sale UNA vez por chat, igual que la foto */
+  function telefonosElegidos(): string[] {
+    if (destino === 'ambos' && dosNumeros) return [telEnvia, telRecibe];
+    if (destino === 'envia') return [telEnvia];
+    return [telRecibe || telEnvia];
+  }
+
+  /** el chat del COBRO: siempre UNO — con 👥 Ambos va a quien
+  *  RECIBE (FASE M) para que el pedido de pago no salga dos veces */
+  const celCobro = destino === 'envia' ? telEnvia : telRecibe || telEnvia;
 
   function elegir(tipo: TipoAviso) {
     if (tipo === 'llegando') {
@@ -112,12 +133,12 @@ export default function RobotMenu({
       setPidiendoMinutos(true);
       return;
     }
-    onAviso(viaje, tipo, undefined, telElegido);
+    onAviso(viaje, tipo, undefined, telefonosElegidos());
     onCerrar();
   }
 
   function mandarLlegando(min: number) {
-    onAviso(viaje, 'llegando', min, telElegido);
+    onAviso(viaje, 'llegando', min, telefonosElegidos());
     onCerrar();
   }
 
@@ -151,28 +172,42 @@ export default function RobotMenu({
           </button>
         </div>
 
-        {/* FASE C.2: ¿a quién? — Envía · Recibe (solo si el viaje tiene
-            los DOS teléfonos distintos). FASE M: aplica a los avisos Y
-            al cobro (mismo destinatario que la foto de entrega). */}
-        {telefonos.length > 1 && (
+        {/* FASE C.2: ¿a quién? — Envía · Recibe · 👥 Ambos (solo si el
+            viaje tiene los DOS teléfonos distintos). FASE M: aplica a
+            los avisos Y al cobro (mismo destinatario que la foto de
+            entrega). FASE U: con 👥 Ambos los AVISOS salen a los 2
+            chats; el cobro va a quien RECIBE (el botón lo dice). */}
+        {dosNumeros && (
           <div className="mt-2.5" data-testid="robot-destinatarios">
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">¿A quién le aviso y le cobro?</p>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {telefonos.map((t, i) => (
+              {([
+                { id: 'envia', label: 'Envía 📤', title: `Va al chat de quien hace el pedido: ${telEnvia}` },
+                { id: 'recibe', label: 'Recibe 📥', title: `Va al chat de quien recibe: ${telRecibe}` },
+                { id: 'ambos', label: 'Ambos 👥', title: 'Los avisos les llegan a los DOS chats' },
+              ] as { id: 'envia' | 'recibe' | 'ambos'; label: string; title: string }[]).map(o => (
                 <button
-                  key={t.label}
-                  onClick={() => setTelIdx(i)}
+                  key={o.id}
+                  onClick={() => setDestino(o.id)}
                   className={`rounded-full px-3 py-1.5 text-[11px] font-black transition-all active:scale-[0.97] ${
-                    i === telIdx
+                    destino === o.id
                       ? 'bg-violet-500 text-white'
                       : 'bg-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
-                  data-testid={`robot-dest-${t.label}`}
+                  title={o.title}
+                  data-testid={`robot-dest-${o.id}`}
                 >
-                  {t.label}
+                  {o.label}
                 </button>
               ))}
             </div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              {destino === 'ambos'
+                ? 'Los avisos les llegan a los DOS chats (el cobro va a 📥 Recibe)'
+                : destino === 'envia'
+                  ? `Va al chat de quien hace el pedido: ${telEnvia}`
+                  : `Va al chat de quien recibe: ${telRecibe}`}
+            </p>
           </div>
         )}
 
@@ -204,7 +239,7 @@ export default function RobotMenu({
             <div className="mt-2 space-y-2">
               <button
                 onClick={() => {
-                  onPedirUbicacion(viaje, telElegido);
+                  onPedirUbicacion(viaje, telefonosElegidos());
                   onCerrar();
                 }}
                 className="flex w-full items-center gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-3 text-left text-cyan-300 transition-all active:scale-[0.99] hover:bg-cyan-500/20"
@@ -225,10 +260,12 @@ export default function RobotMenu({
                   // FASE M (fix comprobante): el cobro le va al
                   // DESTINATARIO ELEGIDO arriba (antes ignoraba el
                   // selector y mandaba SIEMPRE al que envía → la foto
-                  // llegaba a uno y el comprobante al chat del otro)
+                  // llegaba a uno y el comprobante al chat del otro).
+                  // 👥 FASE U: con Ambos el cobro va a UN solo chat
+                  // (quien RECIBE) — el pedido de pago no sale doble.
                   onCobrar(
                     { cliente: viaje.cliente, monto: viaje.tarifa, direccion: viaje.direccion },
-                    telElegido || telEnvia || telRecibe,
+                    celCobro,
                   );
                   onCerrar();
                 }}
@@ -239,8 +276,8 @@ export default function RobotMenu({
                 <span className="min-w-0">
                   <span className="block text-xs font-black">Cobrar este viaje</span>
                   <span className="block text-[10px] font-medium opacity-70">
-                    {telefonos.length > 1
-                      ? `a ${telefonos[telIdx]?.label ?? 'quien recibe'} · mensaje + tu QR 💜/🔷 (S/ ${viaje.tarifa.toFixed(2)})`
+                    {dosNumeros
+                      ? `a ${destino === 'envia' ? 'Envía 📤' : 'Recibe 📥'} · mensaje + tu QR 💜/🔷 (S/ ${viaje.tarifa.toFixed(2)})`
                       : `mensaje + tu QR 💜/🔷 (S/ ${viaje.tarifa.toFixed(2)})`}
                   </span>
                 </span>

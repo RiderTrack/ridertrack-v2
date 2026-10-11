@@ -77,8 +77,13 @@ interface Props {
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo
   // FASE B: avisos al cliente por el robot (menú 🤖 de cada viaje)
   // FASE C: + telefono elegido en el menú (cliente · quien envía · quien recibe)
-  onMandarAviso?: (viaje: Viaje, tipo: 'camino' | 'llegando' | 'llegada' | 'entregado', minutos?: number, telefono?: string) => Promise<void> | void;
-  onPedirUbicacion?: (viaje: Viaje, telefono?: string) => Promise<void> | void;
+  onMandarAviso?: (
+    viaje: Viaje,
+    tipo: 'camino' | 'llegando' | 'llegada' | 'entregado',
+    minutos?: number,
+    telefono?: string | string[],
+  ) => Promise<void> | void;
+  onPedirUbicacion?: (viaje: Viaje, telefono?: string | string[]) => Promise<void> | void;
   /** FASE B2: tipos de aviso con imagen subida (badge 🖼️ en el menú del robot) */
   tiposConImagen?: string[];
   /** FASE C.2: id del viaje recién agregado — se resalta (✨ NUEVO)
