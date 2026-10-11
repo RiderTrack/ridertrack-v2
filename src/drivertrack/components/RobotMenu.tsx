@@ -106,13 +106,13 @@ export default function RobotMenu({
   const telEnvia = (viaje.celularEnvia ?? '').trim() || viaje.celular.trim();
   const telRecibe = (viaje.celularRecibe ?? '').trim();
   const dosNumeros = Boolean(telEnvia && telRecibe && telEnvia !== telRecibe);
-  // FASE M (fix comprobante): el default es quien RECIBE si existe —
-  // el MISMO destino al que va la FOTO de la entrega. Antes el
-  // selector arrancaba en "Envía" y el cobro iba SIEMPRE al que
-  // envía aunque arriba hubieras elegido "Recibe" → la foto le
-  // llegaba a uno y el comprobante al chat del otro pedido.
+  // FASE M (fix comprobante): el default era quien RECIBE. 📣 FASE V:
+  // el pedido LITERAL de Rudy era "que le llegue a los dos" — ahora el
+  // default es 👥 AMBOS cuando hay dos números (los avisos salen a los
+  // DOS chats sin tocar nada); si querés solo uno, tocás el chip. El
+  // COBRO sigue yendo a UNO (quien recibe) pase lo que pase.
   const [destino, setDestino] = useState<'envia' | 'recibe' | 'ambos'>(() =>
-    telRecibe && telRecibe !== telEnvia ? 'recibe' : 'envia',
+    telRecibe && telRecibe !== telEnvia ? 'ambos' : 'envia',
   );
 
   /** los números elegidos — 1, o los 2 con 👥 Ambos (FASE U):

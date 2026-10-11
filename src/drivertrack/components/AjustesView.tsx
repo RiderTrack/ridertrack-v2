@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.11 (FASE U — 👥 el menú del robot 🤖 ahora tiene la opción “Ambos”: los avisos (Ya llegué, Voy en camino, Llegando, Entregado y Pedir ubicación) les llegan a los DOS chats — quien envía Y quien recibe — igual que la foto de entrega; el cobro sigue yendo a un solo chat para que nadie reciba el pedido de pago dos veces · FASE T: 📅 la caja tiene memoria (ver otro día por fecha) + 📷 foto de entrega 📤/📥/👥 · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado · FASE Q: 🛵 la caja descuenta lo de tu ruta · FASE P: ✏️ mensaje al jefe editable · FASE O: 📲 cuadre al WhatsApp del jefe) · Lima, PE
+        DriverTrack v0.10.12 (FASE V — 📜 HISTORIAL de inDrive: en la Caja, el botón 📜 te lista TODOS tus días (ayer, anteayer…) con viajes, neto, gastos y lo que queda en mano + resúmenes de 7 días, 30 días y todo — tocás un día y la Caja te lo muestra entero, así tenés el control de tu plata libre igual que la del trabajo · 👥 AMBOS por defecto: los avisos del robot le llegan a quien envía Y a quien recibe sin tocar nada (antes arrancaba en solo quien recibe — el pedido era "que sea para los dos") · FASE U: 👥 opción Ambos en el menú 🤖 · FASE T: 📅 la caja tiene memoria + 📷 foto 📤/📥/👥 · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado) · Lima, PE
       </p>
     </div>
   );

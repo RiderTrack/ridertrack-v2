@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-// 📜🤖 TEST FASE T — Historial de DriverTrack + avisos a AMBOS
+// 📜 TEST FASE V — Historial de DriverTrack (núcleo puro)
 // Corre con: node test-sync/test-historial-dt.mjs
 // (puro — sin Firebase, sin React, igual que test-recarga)
 // ═══════════════════════════════════════════════════════════
-// historialDT.ts / destinosDT.ts importan con extensión .ts sin
-// declarar (estilo TS) → se compilan con esbuild al vuelo
+// historialDT.ts importa '../types' sin extensión (estilo TS) →
+// se compila con esbuild al vuelo (mismo patrón que test-recarga)
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 const require2 = createRequire(import.meta.url);
@@ -19,16 +19,6 @@ await build({
   logLevel: 'silent',
 });
 const { diasHistorial, resumenPeriodo, etiquetaDia, moverDia } = await import(OUT_H);
-
-const OUT_D = new URL('./.tmp-destinos.mjs', import.meta.url).pathname;
-await build({
-  entryPoints: [new URL('../src/drivertrack/services/destinosDT.ts', import.meta.url).pathname],
-  bundle: true,
-  format: 'esm',
-  outfile: OUT_D,
-  logLevel: 'silent',
-});
-const { telefonosViaje, destinosDelAviso, destinoDelCobro } = await import(OUT_D);
 
 let ok = 0, fail = 0;
 function check(nombre, cond, extra = '') {
@@ -68,7 +58,7 @@ const AYER = '2025-10-11';
 const ANTEAYER = '2025-10-10';
 const HACE_8 = '2025-10-04';
 
-console.log('📜 TEST FASE T — Historial de DriverTrack + avisos a ambos\n');
+console.log('📜 TEST FASE V — Historial de DriverTrack\n');
 
 // ── 1. diasHistorial — el renglón de cada día ──────────────
 console.log('1) diasHistorial — cuánto hiciste cada día');
@@ -146,33 +136,5 @@ console.log('3) etiquetaDia + moverDia — las etiquetas del renglón');
   check('moverDia +1 sobre el 31 de oct → 1 de nov', moverDia('2025-10-31', 1) === '2025-11-01');
 }
 
-// ── 4. destinosDT — los avisos a AMBOS ─────────────────────
-console.log('4) destinosDT — el aviso le llega a los dos');
-{
-  const dosTels = { celular: '', celularEnvia: '987111222', celularRecibe: '987333444' };
-  const unTel = { celular: '987111222', celularEnvia: '', celularRecibe: '' };
-  const mismoNum = { celular: '987111222', celularEnvia: '987111222', celularRecibe: '987111222' };
-
-  check('telefonosViaje: dos teléfonos distintos → dos', telefonosViaje(dosTels).dos === true);
-  check('telefonosViaje: el celular viejo cuenta como quien envía', telefonosViaje({ celular: '987111222', celularRecibe: '987333444' }).envia === '987111222');
-  check('telefonosViaje: un solo número → no hay chips', telefonosViaje(unTel).dos === false);
-  check('telefonosViaje: mismo número 3 veces → no hay chips', telefonosViaje(mismoNum).dos === false);
-
-  // el pedido literal de Rudy: "ya llegué" a AMBOS
-  check('destinosDelAviso ambos → LOS DOS números (recibe primero, como la foto)', JSON.stringify(destinosDelAviso(dosTels, 'ambos')) === JSON.stringify(['987333444', '987111222']), JSON.stringify(destinosDelAviso(dosTels, 'ambos')));
-  check('destinosDelAviso envia → solo el que envía', JSON.stringify(destinosDelAviso(dosTels, 'envia')) === JSON.stringify(['987111222']));
-  check('destinosDelAviso recibe → solo el que recibe', JSON.stringify(destinosDelAviso(dosTels, 'recibe')) === JSON.stringify(['987333444']));
-  check('un solo teléfono + ambos → ese solo (no se duplica)', destinosDelAviso(unTel, 'ambos').length === 1);
-  check('mismo número en ambos campos + ambos → 1 único (Set)', destinosDelAviso(mismoNum, 'ambos').length === 1);
-  check('elección envía pero no hay → cae al que recibe (defensivo)', JSON.stringify(destinosDelAviso(unTel, 'envia')) === JSON.stringify(['987111222']));
-  check('sin ningún teléfono → []', destinosDelAviso({ celular: '', celularEnvia: '', celularRecibe: '' }, 'ambos').length === 0);
-
-  // el cobro SIEMPRE a uno solo (FASE M intacta)
-  check('destinoDelCobro con ambos → quien RECIBE (default FASE M)', destinoDelCobro(dosTels, 'ambos') === '987333444');
-  check('destinoDelCobro elegiste envía → quien envía', destinoDelCobro(dosTels, 'envia') === '987111222');
-  check('destinoDelCobro elegiste recibe → quien recibe', destinoDelCobro(dosTels, 'recibe') === '987333444');
-  check('destinoDelCobro sin quien recibe → cae al que envía', destinoDelCobro(unTel, 'ambos') === '987111222');
-}
-
-console.log(`\n📜 Resultado FASE T: ${ok} ✓ · ${fail} ✗`);
+console.log(`\n📜 Resultado FASE V: ${ok} ✓ · ${fail} ✗`);
 if (fail > 0) process.exit(1);
