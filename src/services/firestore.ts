@@ -630,6 +630,12 @@ export function subscribeToRutaActiva(
             respondioInicioRuta: c.respondioInicioRuta,
             // ✅ Registro web (verificación con la empresa — Fase 2.6)
             webReg: c.webReg === true,
+            // 🛵 FASE X (fix S/12): la marca lejos VUELVE del doc del
+            // bot — sin esto el snapshot la BORRABA en cada update y tu
+            // paga contaba TODOS los pedidos como S/9 (2 de 12 + 4 de 9
+            // → contaba 54 en vez de 60). El bot y el publish ya la
+            // escribían: solo faltaba leerla de vuelta.
+            ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
             // Coordenadas geocodificadas (Fase 1.3/1.4) — viajan con
             // el cliente para no volver a geocodificar nunca
             ...(typeof c.lat === 'number' && typeof c.lng === 'number'
@@ -696,6 +702,9 @@ export function subscribeToClientesRegistrados(
             mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '',
             hora: '',
             nota: '',
+            // 🛵 FASE X: idem subscribeToRutaActiva — si el respaldo
+            // trae la marca lejos, se conserva
+            ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
           });
         });
         console.log('🔄 Clientes registrados del Modular cargados:', clientes.length);

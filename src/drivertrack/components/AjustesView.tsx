@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.13 (FASE W — 💰 CAJA EN VIVO: lo que cerrás en un celular aparece en el otro SIN recargar (toast "🔄 Caja actualizada"), y al guardar se fusiona con la nube — nunca más un celular pisa el cierre del otro · 📝 PANEL DE OBSERVACIONES: en la Ruta, el botón 📝 del buscador te muestra TODAS las observaciones de una (horarios, referencias) — tocás una fila y saltás al cliente; botón Copiar para pegarlas en WhatsApp, y cada cliente con obs lleva su badge 📝 en la lista · FASE V: 📜 historial de inDrive + 👥 AMBOS por defecto · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
+        DriverTrack v0.10.14 (FASE X — 🛵 FIX DE LA PAGA: los pedidos de S/12 (lejos) contaban como S/9 — la marca se perdía al leer la ruta del bot; ahora "Ganado hoy", la caja y el cierre multiplican BIEN (2 de 12 + 4 de 9 = S/60, no 54) y las marcas S/12 ya no se borran solas · FASE W: 💰 caja en vivo entre celulares + 📝 panel de observaciones · FASE V: 📜 historial + 👥 AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
       </p>
     </div>
   );
