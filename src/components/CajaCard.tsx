@@ -32,6 +32,7 @@ import {
   gastosDeHoy,
   cierreDeHoy,
   EstadoCaja,
+  EVENTO_CAJA_REMOTA,
 } from '../services/caja';
 import { Cliente, leerHistorial, subscribeToRutaActiva } from '../services/firestore';
 import { hoyISO } from '../utils/stats'; // ⚡ F3.48: hoy en hora de Lima
@@ -291,6 +292,17 @@ interface CajaCardProps {
 export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast }) => {
   const { caja, gastosHoy, resumen, cierreHoy, cargando, pagoRuta, cfgPago } = useResumenCaja(uid);
   const cerrada = !!cierreHoy;
+
+  // 🔄 FASE W: la caja ya se sincroniza EN VIVO entre celulares —
+  // cuando algo llega desde el otro (cierre, gasto, fondo), avisá
+  // sin asustar: los números de abajo ya se actualizaron solos.
+  useEffect(() => {
+    const alCambiarRemoto = () => {
+      onShowToast?.('🔄 Caja actualizada', 'Se sincronizó desde tu otro celular', 'info');
+    };
+    window.addEventListener(EVENTO_CAJA_REMOTA, alCambiarRemoto);
+    return () => window.removeEventListener(EVENTO_CAJA_REMOTA, alCambiarRemoto);
+  }, [onShowToast]);
 
   const [fondoInput, setFondoInput] = useState<string | null>(null); // null = usa el guardado
   const [gastoCat, setGastoCat] = useState('gasolina');
@@ -631,7 +643,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               await recargarCaja(uid);
             }}
             className="p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
-            title="Recargar desde la nube"
+            title="Recargar desde la nube · 🔄 la caja ya se sincroniza sola entre tus celulares"
           >
             <RefreshCw className="w-4 h-4" />
           </button>

@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.12 (FASE V — 📜 HISTORIAL de inDrive: en la Caja, el botón 📜 te lista TODOS tus días (ayer, anteayer…) con viajes, neto, gastos y lo que queda en mano + resúmenes de 7 días, 30 días y todo — tocás un día y la Caja te lo muestra entero, así tenés el control de tu plata libre igual que la del trabajo · 👥 AMBOS por defecto: los avisos del robot le llegan a quien envía Y a quien recibe sin tocar nada (antes arrancaba en solo quien recibe — el pedido era "que sea para los dos") · FASE U: 👥 opción Ambos en el menú 🤖 · FASE T: 📅 la caja tiene memoria + 📷 foto 📤/📥/👥 · FASE S: 🛵 tu paga sale del Yape · FASE R: 💜🔷 cobro Yape/Plin separado) · Lima, PE
+        DriverTrack v0.10.13 (FASE W — 💰 CAJA EN VIVO: lo que cerrás en un celular aparece en el otro SIN recargar (toast "🔄 Caja actualizada"), y al guardar se fusiona con la nube — nunca más un celular pisa el cierre del otro · 📝 PANEL DE OBSERVACIONES: en la Ruta, el botón 📝 del buscador te muestra TODAS las observaciones de una (horarios, referencias) — tocás una fila y saltás al cliente; botón Copiar para pegarlas en WhatsApp, y cada cliente con obs lleva su badge 📝 en la lista · FASE V: 📜 historial de inDrive + 👥 AMBOS por defecto · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
       </p>
     </div>
   );

@@ -9,3 +9,6 @@ coverage/
 test-sync/.tmp-resumenCore.mjs
 test-sync/syncDT.compilado.cjs
 test-sync/.tmp-*
+test-sync/caja.compilado.cjs
+test-sync/cajaCore.compilado.cjs
+test-sync/obsRuta.compilado.cjs

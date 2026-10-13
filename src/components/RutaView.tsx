@@ -28,6 +28,7 @@ import {
   AlertCircle,
   Loader2,
   Pencil,
+  StickyNote,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 // 🙏 F3.44: modo de aviso por cliente (automático/manual, como la v1)
@@ -51,6 +52,8 @@ import type { ParadaNav } from '../services/navegacionGps';
 import { tipoDireccion, etiquetaDireccion, claseBadgeDireccion, direccionIncompleta, mensajePedirUbicacion } from '../utils/direcciones';
 import { esPagoEmpresa } from '../utils/realData';
 import { sonarPago } from '../services/notificaciones';
+// 📝 FASE W: panel de observaciones de la ruta (helpers puros)
+import { armarTextoObservaciones, clientesConObs, fechaBonitaObs } from '../utils/obsRuta';
 // Fase 3.8: JID del grupo MATE (el bot lo necesita para saber a dónde mandar)
 import { GRUPO_MATE_JID } from '../utils/chatBaileys';
 // 🛵 FASE D: cobro por pedido (temporada) — botón S/9⇄S/12 por cliente
@@ -97,6 +100,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // con la página de la empresa — se filtra con la búsqueda/filtros
   const [listadoVerifAbierto, setListadoVerifAbierto] = useState(false);
   const [listadoCopiado, setListadoCopiado] = useState(false);
+
+  // 📝 FASE W: panel de observaciones — TODAS las obs de la ruta
+  // de una (leerlas, copiarlas, saltar al cliente) sin abrir
+  // cliente por cliente
+  const [obsPanelAbierto, setObsPanelAbierto] = useState(false);
+  const [obsCopiado, setObsCopiado] = useState(false);
+  /** cuántos clientes de la ruta tienen obs (para el contador) */
+  const nObs = useMemo(() => clientesConObs(clientes).length, [clientes]);
 
   // Estado de optimización en curso (Fase 1.3 — progreso real)
   const [optimizando, setOptimizando] = useState(false);
@@ -536,6 +547,38 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     setListadoCopiado(true);
     setTimeout(() => setListadoCopiado(false), 2000);
     onShowToast?.('📋 Listado copiado', `${clientesFiltrados.length} clientes listos para pegar`, 'success');
+  };
+
+  // 📝 FASE W: copiar TODAS las observaciones de la ruta (texto
+  // plano para pegar en WhatsApp — el que coordina horarios con
+  // los clientes lo agradece)
+  const copiarObservaciones = async () => {
+    const lista = clientesConObs(clientesFiltrados);
+    if (lista.length === 0) return;
+    const texto = armarTextoObservaciones(lista, fechaBonitaObs());
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setObsCopiado(true);
+    setTimeout(() => setObsCopiado(false), 2000);
+    onShowToast?.('📝 Observaciones copiadas', `${lista.length} ${lista.length === 1 ? 'cliente' : 'clientes'} listos para pegar`, 'success');
+  };
+
+  // 📝 FASE W: tocás una fila del panel → el cliente queda ABIERTO
+  // abajo (con sus botones de pago) y la lista scrollea hasta él
+  const saltarACliente = (id: string | number) => {
+    setClienteExpandido(id);
+    setObsPanelAbierto(false);
+    setTimeout(() => {
+      document.getElementById(`cliente-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
   };
 
   // 🤖 Enviar acción al bot de Baileys vía Firestore
@@ -984,7 +1027,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           </div>
           {/* 📋 Listado de verificación (Fase 2.5) — para cruzar con la página de la empresa */}
           <button
-            onClick={() => setListadoVerifAbierto(!listadoVerifAbierto)}
+            onClick={() => {
+              setListadoVerifAbierto(!listadoVerifAbierto);
+              if (!listadoVerifAbierto) setObsPanelAbierto(false);
+            }}
             className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
               listadoVerifAbierto
                 ? 'bg-blue-600 border-blue-500 text-white'
@@ -993,6 +1039,32 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             title="Listado de verificación para cruzar con la página de la empresa"
           >
             <ClipboardList className="w-4 h-4" />
+          </button>
+
+          {/* 📝 FASE W: observaciones de la ruta de UNA — horarios,
+              referencias, notas raras: sin abrir cliente por cliente */}
+          <button
+            onClick={() => {
+              setObsPanelAbierto(!obsPanelAbierto);
+              if (!obsPanelAbierto) setListadoVerifAbierto(false);
+            }}
+            data-testid="boton-obs-ruta"
+            title={`Observaciones de la ruta (${nObs} ${nObs === 1 ? 'cliente' : 'clientes'}) — verlas todas de una`}
+            className={`relative px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
+              obsPanelAbierto
+                ? 'bg-amber-500 border-amber-400 text-slate-900'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+            }`}
+          >
+            <StickyNote className="w-4 h-4" />
+            {nObs > 0 && (
+              <span
+                data-testid="contador-obs"
+                className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-slate-900 text-[9px] font-black flex items-center justify-center leading-none"
+              >
+                {nObs > 99 ? '99+' : nObs}
+              </span>
+            )}
           </button>
         </div>
 
@@ -1151,6 +1223,93 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           );
         })()}
 
+        {/* 📝 FASE W: PANEL DE OBSERVACIONES — todas las obs de la
+            ruta de una (sigue los filtros activos). Tocá una fila y
+            el cliente se abre abajo con sus botones de pago. */}
+        {obsPanelAbierto && (() => {
+          const lista = clientesConObs(clientesFiltrados);
+          return (
+          <div className="rounded-xl bg-slate-800 border border-amber-500/30 overflow-hidden" data-testid="panel-obs">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20">
+              <div className="flex items-center gap-2 min-w-0">
+                <StickyNote className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white">Observaciones de la ruta</div>
+                  <div className="text-[9px] text-slate-400 truncate">
+                    {lista.length === 0
+                      ? 'nadie tiene observación'
+                      : `${lista.length} ${lista.length === 1 ? 'cliente' : 'clientes'} · tocá una fila para abrirlo abajo`}
+                  </div>
+                </div>
+              </div>
+              {lista.length > 0 && (
+                <button
+                  onClick={copiarObservaciones}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-95 border shrink-0 ${
+                    obsCopiado
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                      : 'bg-amber-600 hover:bg-amber-500 border-amber-500 text-white'
+                  }`}
+                >
+                  {obsCopiado ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  {obsCopiado ? 'Copiado' : 'Copiar'}
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-72 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40" data-testid="panel-obs-lista">
+              {lista.length === 0 ? (
+                <p className="text-[11px] text-slate-400 text-center py-4">🎉 Nadie tiene observaciones</p>
+              ) : (
+                lista.map((c) => {
+                  const entregado = ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st || '');
+                  const fallido = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st || '');
+                  return (
+                    <div
+                      key={String(c.id)}
+                      data-testid="fila-obs"
+                      onClick={() => saltarACliente(c.id)}
+                      className="px-2.5 py-2 cursor-pointer hover:bg-slate-700/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-5 rounded-md bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 shrink-0">
+                          {c.num || '·'}
+                        </span>
+                        <span className="text-xs font-bold text-white truncate flex-1">{c.nombre || 'Cliente'}</span>
+                        <span className={`text-[9px] font-bold shrink-0 ${entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
+                          {getEstadoTexto(c.st || '').replace(/^\S+\s/, '')}
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); llamarCliente(c as Cliente); }}
+                          className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-700/50 transition-colors shrink-0"
+                          title="Llamar"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); abrirWhatsApp(c as Cliente); }}
+                          className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-700/50 transition-colors shrink-0"
+                          title="WhatsApp"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {/* la observación ENTERA, sin recorte — leerla es el punto */}
+                      <div className="mt-1 text-[11px] text-amber-300 leading-snug break-words whitespace-pre-wrap">
+                        📝 {c.obs}
+                      </div>
+                      {(c.dist || '').trim() && (
+                        <div className="text-[9px] text-slate-500 mt-0.5">📍 {(c.dist || '').trim()}</div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          );
+        })()}
+
         {/* Filtros por distrito y producto */}
         {clientes.length > 0 && (
           <div className="grid grid-cols-2 gap-1.5">
@@ -1203,6 +1362,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             return (
               <div
                 key={c.id}
+                id={`cliente-${c.id}`}
                 className={`rounded-lg border-l-4 ${getEstadoClase(c.st)} bg-slate-800 border-y border-r border-slate-700 overflow-hidden`}
               >
                 {/* Fila principal - Mobile optimized */}
@@ -1264,6 +1424,18 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           title={`Dirección por ${tipoDireccion(c.dir, c.obs) === 'mz' ? 'manzana' : tipoDireccion(c.dir, c.obs) === 'sn' ? 'SIN NÚMERO' : 'referencia'} — pídele su ubicación`}
                         >
                           {etiquetaDireccion(tipoDireccion(c.dir, c.obs))}
+                        </span>
+                      )}
+                      {/* 📝 FASE W: este cliente TIENE observación — visto
+                          de un vistazo al deslizar (tocá la fila y se lee
+                          completa abajo, o abrí el panel 📝 de arriba) */}
+                      {(c.obs || '').trim() && (
+                        <span
+                          data-testid="badge-obs"
+                          className="px-1 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[8px] font-bold shrink-0 leading-none"
+                          title={c.obs}
+                        >
+                          📝
                         </span>
                       )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}

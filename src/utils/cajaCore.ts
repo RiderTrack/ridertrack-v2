@@ -579,6 +579,83 @@ export function nuevoGastoId(): string {
 }
 
 /**
+ * 🔄 FASE W — TOMBSTONES de la caja: qué se borró y cuándo.
+ * El merge local↔nube es por UNIÓN (nada se pisa), pero sin esto
+ * lo que borrás en un celular lo resucitaría el merge (la nube
+ * todavía lo tiene). Con el tombstone, cualquier teléfono sabe
+ * "esto se borró DESPUÉS de lo que dice el ítem" → lo mantiene
+ * borrado. Si volvés a agregar/cerrar, el ítem nuevo tiene su
+ * propio ts/at posterior → sobrevive al filtro.
+ */
+export interface BorradoCaja {
+  /** gastos eliminados: id + cuándo se borró */
+  gastos: { id: string; ts: number }[];
+  /** cierres reabiertos: fecha + cuándo se borró */
+  cierres: { fecha: string; ts: number }[];
+}
+
+export const BORRADO_VACIO: BorradoCaja = { gastos: [], cierres: [] };
+
+/** tombstone de un gasto que se está borrando ahora */
+export function tombstoneGasto(id: string): { id: string; ts: number } {
+  return { id, ts: Date.now() };
+}
+
+/** tombstone de un cierre (reabrir) que se está borrando ahora */
+export function tombstoneCierre(fecha: string): { fecha: string; ts: number } {
+  return { fecha, ts: Date.now() };
+}
+
+/** Une dos sets de tombstones (por clave, gana el más reciente) */
+export function fusionarBorrados(a?: BorradoCaja | null, b?: BorradoCaja | null): BorradoCaja {
+  const gastos = new Map<string, { id: string; ts: number }>();
+  for (const t of [...(a?.gastos || []), ...(b?.gastos || [])]) {
+    if (!t?.id) continue;
+    const previo = gastos.get(t.id);
+    if (!previo || (t.ts || 0) >= (previo.ts || 0)) gastos.set(t.id, t);
+  }
+  const cierres = new Map<string, { fecha: string; ts: number }>();
+  for (const t of [...(a?.cierres || []), ...(b?.cierres || [])]) {
+    if (!t?.fecha) continue;
+    const previo = cierres.get(t.fecha);
+    if (!previo || (t.ts || 0) >= (previo.ts || 0)) cierres.set(t.fecha, t);
+  }
+  return { gastos: [...gastos.values()], cierres: [...cierres.values()] };
+}
+
+/** Saca tombstones viejos (más de `dias` días) — el merge ya no
+ * los necesita: lo que iba a resucitar ya no existe en la nube */
+export function podarBorrados(b: BorradoCaja, dias: number): BorradoCaja {
+  const limite = Date.now() - dias * 24 * 60 * 60 * 1000;
+  const vivos = (t: { ts: number }) => (t.ts || 0) >= limite;
+  return { gastos: b.gastos.filter(vivos), cierres: b.cierres.filter(vivos) };
+}
+
+/**
+ * Aplica los tombstones a gastos y cierres: fuera todo lo que se
+ * borró DESPUÉS de su propio ts/at (re-agregar/re-cerrar crea
+ * ítems más nuevos → sobreviven, que es lo correcto).
+ *
+ * OJO con los empates (mismo ms): los ids de gasto NUNCA se
+ * reutilizan (nuevoGastoId es único) → el tombstone gana y listo.
+ * Los cierres se re-crean con la MISMA fecha → el re-cierre gana
+ * el empate (así reabrir+cerrar en el mismo ms no se pierde).
+ */
+export function filtrarBorrados(
+  gastos: Gasto[],
+  cierres: CierreCaja[],
+  b?: BorradoCaja | null
+): { gastos: Gasto[]; cierres: CierreCaja[] } {
+  if (!b || (!b.gastos.length && !b.cierres.length)) return { gastos, cierres };
+  const gastosFuera = new Map(b.gastos.map((t) => [t.id, t.ts || 0]));
+  const cierresFuera = new Map(b.cierres.map((t) => [t.fecha, t.ts || 0]));
+  return {
+    gastos: gastos.filter((g) => !g || (gastosFuera.get(g.id) || 0) < (g.ts || 0)),
+    cierres: cierres.filter((c) => !c || (cierresFuera.get(c.fecha) || 0) <= (c.at || 0)),
+  };
+}
+
+/**
  * Fusiona gastos locales y remotos: dedupe por id, gana el más
  * reciente si se repite (ts mayor). Ordenado desc por ts.
  */
