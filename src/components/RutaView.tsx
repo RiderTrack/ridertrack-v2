@@ -29,6 +29,7 @@ import {
   Loader2,
   Pencil,
   StickyNote,
+  QrCode,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 // 🙏 F3.44: modo de aviso por cliente (automático/manual, como la v1)
@@ -71,6 +72,22 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
   const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
+
+  // 💜 FASE Y: QR de cobro por cliente — botoncito en cada fila que
+  // abre tu QR (Yape/Plin del TRABAJO, "Mi QR Yape/Plin" → config_empresa)
+  // con el MONTO que tiene que pagar ese cliente, así no volvés a la
+  // sección QR a chequear cuánto era (el dolor literal de Rudy).
+  const yapeQR = (config?.yape?.qrBase64 || '').trim();
+  const plinQR = (config?.plin?.qrBase64 || '').trim();
+  const yapeNum = (config?.yape?.telefono || '').replace(/\D/g, '');
+  const plinNum = (config?.plin?.telefono || '').replace(/\D/g, '');
+  const yapeTit = (config?.yape?.nombre || '').trim();
+  const plinTit = (config?.plin?.nombre || '').trim();
+  /** hay ALGO de esa billetera (imagen o número) para mostrar */
+  const hayYape = !!(yapeQR || yapeNum);
+  const hayPlin = !!(plinQR || plinNum);
+  const [qrCliente, setQrCliente] = useState<Cliente | null>(null);
+  const [qrWallet, setQrWallet] = useState<'yape' | 'plin'>('yape');
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
@@ -1451,6 +1468,27 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
                     <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
+
+                  {/* 💜 FASE Y: botoncito QR — abre tu QR de cobro con el
+                      MONTO de ESTE cliente a la vista (para mostrarle la
+                      pantalla y que escanee/pague sin ir a la sección QR) */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setQrCliente(c);
+                      // default inteligente: Yape salvo que solo haya Plin
+                      setQrWallet(!hayYape && hayPlin ? 'plin' : 'yape');
+                    }}
+                    data-testid={`btn-qr-${c.id}`}
+                    title={`Mostrar mi QR de cobro — ${c.nombre || 'cliente'} debe S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)}`}
+                    className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md border transition-all active:scale-90 ${
+                      (qrWallet === 'yape' ? hayYape : hayPlin)
+                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-400 hover:bg-purple-500/25'
+                        : 'bg-slate-700/50 border-slate-600 text-slate-500 hover:bg-slate-700'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4" />
+                  </button>
 
                   {/* 🛵 FASE D: botón S/9⇄S/12 (solo con temporada activa) */}
                   {cfgPago.activo && (
@@ -2860,6 +2898,119 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           onShowToast={onShowToast}
         />
       )}
+
+      {/* 💜 FASE Y: QR de cobro por cliente — tu QR + el MONTO que
+          tiene que pagar, en la misma pantalla (para mostrarle el
+          celular al cliente sin ir a la sección QR ni perder el
+          monto de vista). Mismo patrón del "Ampliar" de Mi QR. */}
+      {qrCliente && (() => {
+        const esYape = qrWallet === 'yape';
+        const walletQR = (esYape ? yapeQR : plinQR);
+        const walletNum = esYape ? yapeNum : plinNum;
+        const walletTit = esYape ? yapeTit : plinTit;
+        const monto = parseFloat(String(qrCliente.cobrar || 0)) || 0;
+        const numBonito = walletNum ? walletNum.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : '';
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
+            onClick={() => setQrCliente(null)}
+          >
+            <div className="relative max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setQrCliente(null)}
+                data-testid="qr-modal-cerrar"
+                className="absolute -top-11 right-0 p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white transition-colors"
+                title="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {/* Chips de billetera — solo si las DOS tienen algo */}
+              {hayYape && hayPlin && (
+                <div className="flex justify-center gap-2 mb-2.5">
+                  <button
+                    onClick={() => setQrWallet('yape')}
+                    data-testid="qr-chip-yape"
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                      esYape
+                        ? 'bg-purple-600 border-purple-400 text-white'
+                        : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    💜 Yape
+                  </button>
+                  <button
+                    onClick={() => setQrWallet('plin')}
+                    data-testid="qr-chip-plin"
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                      !esYape
+                        ? 'bg-cyan-600 border-cyan-400 text-white'
+                        : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🔷 Plin
+                  </button>
+                </div>
+              )}
+
+              {/* Tarjeta blanca (fondo claro = el QR se escanea mejor) */}
+              <div className="bg-white rounded-2xl p-4" data-testid="qr-modal-card">
+                {/* Cliente + MONTO — el motivo de esta pantalla */}
+                <div className="text-center border-b border-slate-200 pb-2.5 mb-3">
+                  <p className="text-[11px] text-slate-500 font-medium truncate">
+                    📦 {qrCliente.nombre || 'Cliente'}{qrCliente.prod ? ` · ${qrCliente.prod}` : ''}
+                  </p>
+                  {monto > 0 ? (
+                    <p className="text-3xl font-black text-slate-900 leading-tight mt-0.5" data-testid="qr-monto">
+                      S/ {monto.toFixed(2)}
+                    </p>
+                  ) : (
+                    <p className="text-sm font-bold text-slate-400 mt-0.5">sin monto cargado</p>
+                  )}
+                </div>
+
+                {/* La imagen del QR (o el aviso si no la subiste) */}
+                {walletQR ? (
+                  <img
+                    src={walletQR}
+                    alt={`QR ${esYape ? 'Yape' : 'Plin'}`}
+                    data-testid="qr-imagen"
+                    className={`w-full max-w-[280px] mx-auto block rounded-lg border-2 ${esYape ? 'border-purple-300' : 'border-cyan-300'}`}
+                  />
+                ) : (
+                  <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center max-w-[280px] mx-auto">
+                    <QrCode className="w-9 h-9 text-slate-400 mx-auto mb-1.5" />
+                    <p className="text-xs text-slate-600 font-bold">Sin QR de {esYape ? 'Yape' : 'Plin'} cargado</p>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                      Subilo en <b>Mi QR {esYape ? 'Yape' : 'Plin'}</b> → pestaña {esYape ? '💜 Yape' : '🔷 Plin'} y va a aparecer acá
+                    </p>
+                  </div>
+                )}
+
+                {/* Titular + número — por si prefiere mandar la plata al número */}
+                <div className="text-center mt-3 pb-0.5">
+                  {walletTit && <p className="text-sm font-black text-slate-900">{walletTit}</p>}
+                  {numBonito && (
+                    <p className={`text-xl font-black font-mono tracking-wider ${esYape ? 'text-purple-700' : 'text-cyan-700'}`}>
+                      {numBonito}
+                    </p>
+                  )}
+                  {walletQR && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Escaneá con {esYape ? 'Yape' : 'tu app de banco con Plin'} para pagar
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Pista del atajo robot (discreta, abajo) */}
+              <p className="text-center text-[10px] text-slate-400/80 mt-2.5">
+                💡 Para mandarlo por WhatsApp: <b>🤖 Bot → Enviar {esYape ? 'Yape' : 'Plin'}</b> del cliente
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 📍 Ubicar cliente en el mapa (Fase 1.4) */}
       {ubicarCliente && (

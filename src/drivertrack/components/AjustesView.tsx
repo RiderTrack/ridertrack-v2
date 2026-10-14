@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.14 (FASE X — 🛵 FIX DE LA PAGA: los pedidos de S/12 (lejos) contaban como S/9 — la marca se perdía al leer la ruta del bot; ahora "Ganado hoy", la caja y el cierre multiplican BIEN (2 de 12 + 4 de 9 = S/60, no 54) y las marcas S/12 ya no se borran solas · FASE W: 💰 caja en vivo entre celulares + 📝 panel de observaciones · FASE V: 📜 historial + 👥 AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
+        DriverTrack v0.10.15 (FASE Y — 💜 QR POR CLIENTE: botoncito en cada cliente de la ruta que abre tu QR de Yape/Plin con el MONTO que tiene que pagar a la vista — sin ir a la sección QR ni olvidar cuánto era; chips 💜/🔷 si tenés las dos billeteras · FASE X: fix de la paga 12/9 · FASE W: caja en vivo + panel de observaciones · FASE V: historial + AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
       </p>
     </div>
   );
