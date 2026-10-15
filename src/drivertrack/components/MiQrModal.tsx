@@ -478,7 +478,7 @@ export default function MiQrModal({ config, onGuardar, onGuardarQrYape, onCerrar
               <button
                 onClick={() => setModo('yape')}
                 className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-colors ${
-                  modo === 'yape' ? 'bg-[#7B2FBE] text-white' : 'text-slate-400'
+                  modo === 'yape' ? 'bg-[#7B2FBE] text-white siempre-blanco' : 'text-slate-400'
                 }`}
                 data-testid="qr-modo-yape"
               >
@@ -487,7 +487,7 @@ export default function MiQrModal({ config, onGuardar, onGuardarQrYape, onCerrar
               <button
                 onClick={() => setModo('whatsapp')}
                 className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-colors ${
-                  modo === 'whatsapp' ? 'bg-[#25D366] text-slate-950' : 'text-slate-400'
+                  modo === 'whatsapp' ? 'bg-[#25D366] text-slate-950 siempre-blanco' : 'text-slate-400'
                 }`}
                 data-testid="qr-modo-whatsapp"
               >
@@ -496,7 +496,7 @@ export default function MiQrModal({ config, onGuardar, onGuardarQrYape, onCerrar
               <button
                 onClick={() => setModo('contacto')}
                 className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-colors ${
-                  modo === 'contacto' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'
+                  modo === 'contacto' ? 'bg-sky-500 text-slate-950 siempre-blanco' : 'text-slate-400'
                 }`}
                 data-testid="qr-modo-contacto"
               >

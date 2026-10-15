@@ -46,7 +46,7 @@ export default function YapePanel({ billetera, tipo, montoInicial, onCerrar, onT
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/70 p-3 sm:items-center">
       <div className="dt-anim-pop w-full max-w-sm rounded-3xl border border-slate-700 bg-slate-900 p-5">
         <div className="flex items-center justify-between">
           <h3 className={`text-lg font-bold ${color}`}>

@@ -657,7 +657,17 @@ html {
 
 /* ── Paleta clara de DriverTrack (F-ID2.3): la MISMA del APK
    standalone — slate invertida + acentos oscurecidos para
-   contraste. Solo aplica dentro de su contenedor ── */
+   contraste. Solo aplica dentro de su contenedor ──
+   FASE Z-3: la paleta solo cubría 20 variables y los componentes
+   usan muchas más (violet-200 del "Ganado hoy", emerald-200 de las
+   entregas, purple-300 del elegir método, cyan-300 de los botones
+   del robot, amber/sky/indigo de los formularios…). Todo lo que
+   faltaba quedaba con su valor NATAL (claro) sobre fondos ya
+   invertidos a blanco → texto claro sobre claro, ILEGIBLE (mismo
+   linaje del bug Z-2 del QR). Se completan con los MISMOS tonos
+   que usa el tema del trabajo → RiderTrack e inDrive se leen
+   iguales bajo el sol. Los fondos sólidos -500 con letra blanca
+   siguen protegidos por la regla global .light .bg-*-500. ── */
 .dt-app.light {
   color-scheme: light; /* inputs/scrollbars internos acompañan el tema claro */
   --color-slate-50: #020617;
@@ -671,15 +681,45 @@ html {
   --color-slate-800: #e2e8f0;
   --color-slate-900: #ffffff;
   --color-slate-950: #f1f5f9;
+  --color-emerald-200: #047857;
   --color-emerald-300: #047857;
   --color-emerald-400: #059669;
   --color-emerald-500: #059669;
+  --color-emerald-600: #047857;
+  --color-emerald-700: #065f46;
+  --color-amber-200: #92400e;
   --color-amber-300: #b45309;
   --color-amber-400: #d97706;
+  --color-amber-500: #b45309;
+  --color-amber-600: #92400e;
   --color-red-400: #dc2626;
+  --color-red-500: #dc2626;
+  --color-rose-500: #be123c;
+  --color-rose-600: #be123c;
+  --color-sky-200: #0369a1;
   --color-sky-300: #0369a1;
   --color-sky-400: #0284c7;
+  --color-sky-500: #0369a1;
+  --color-sky-700: #0369a1;
+  --color-violet-100: #5b21b6;
+  --color-violet-200: #6d28d9;
   --color-violet-300: #7c3aed;
+  --color-violet-500: #7c3aed;
+  --color-purple-300: #7e22ce;
+  --color-purple-500: #9333ea;
+  --color-fuchsia-300: #a21caf;
+  --color-fuchsia-500: #a21caf;
+  --color-cyan-300: #0e7490;
+  --color-cyan-500: #0e7490;
+  --color-indigo-500: #4f46e5;
+}
+
+/* FASE Z-3: el verde de MARCA de WhatsApp (#25D366) es un hex fijo
+   — el tema no lo toca. Como TEXTO sobre fondos tenues es claro de
+   por sí → en modo claro casi invisible (2.2:1). Se oscurece SOLO
+   en claro; en oscuro sigue siendo el verde WhatsApp de siempre. */
+.dt-app.light .text-\[\#25D366\] {
+  color: #15803d;
 }
 
 /* ── Confeti de meta cumplida 🎉 ── */

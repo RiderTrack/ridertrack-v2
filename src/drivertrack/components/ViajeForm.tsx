@@ -973,7 +973,9 @@ export default function ViajeForm({
         onClick={cobrar}
         disabled={escaneando || cobroEnCurso || !celularPrincipal}
         className={`mt-2 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition-all active:scale-[0.98] disabled:opacity-50 ${
-          config.robotActivo ? 'bg-violet-500 text-white' : 'bg-[#25D366] text-slate-950'
+          config.robotActivo
+            ? 'bg-violet-500 text-white'
+            : 'bg-[#25D366] text-slate-950 siempre-blanco'
         }`}
         data-testid="boton-whatsapp"
       >
@@ -1062,7 +1064,7 @@ export default function ViajeForm({
         <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/80">
           💬 Así le va a llegar a tu cliente
         </p>
-        <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white">
+        <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
           <TextoWhatsApp texto={armarMensaje()} />
         </div>
         <p className="mt-1 text-[10px] text-slate-500">

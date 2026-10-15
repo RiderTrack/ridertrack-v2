@@ -340,7 +340,7 @@ export default function CajaView({
               </button>
               <button
                 onClick={guardarGasto}
-                className="rounded-xl bg-amber-500 py-2.5 text-xs font-black text-slate-950"
+                className="rounded-xl bg-amber-500 py-2.5 text-xs font-black text-slate-950 siempre-blanco"
                 data-testid="boton-gasto-guardar"
               >
                 ➖ Anotar

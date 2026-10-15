@@ -420,7 +420,7 @@ export default function UbicarModal({
             disabled={!hayCoord || arrastre}
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-black transition-all active:scale-[0.98] ${
               hayCoord
-                ? 'bg-sky-500 text-slate-950 hover:bg-sky-400'
+                ? 'bg-sky-500 text-slate-950 siempre-blanco hover:bg-sky-400'
                 : 'bg-slate-700 text-slate-500'
             }`}
             data-testid="boton-confirmar-ubicar"
