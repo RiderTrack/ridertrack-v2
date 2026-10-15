@@ -31,6 +31,7 @@ import {
 import * as XLSX from 'xlsx';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
 import { cargarConfigPagoPedidos, calcularPagoPedidos } from '../utils/pagoPedidosCore'; // 🛵 FASE D
+import { montosConRespaldo, parseMonedaPeru } from '../utils/moneda'; // 💰 FASE Z — parseo S/ robusto
 
 // ═══════════════════════════════════════════════════════════
 // 📋 TIPOS DE CLIENTE
@@ -607,14 +608,19 @@ export function subscribeToRutaActiva(
           const data = snapshot.data();
           const clientesData = data.clientes || [];
           // Convertir formato del Modular a formato V2
+          // 💰 FASE Z: cobrar con RESPALDO en precio — si el doc
+          // del bot/Excel trae solo `precio` (columna renombrada,
+          // carga vieja), el monto ya NO se pierde: el QR por
+          // cliente y la fila muestran la plata igual. Espejo del
+          // fallback `precio: c.precio || c.cobrar` que ya existía.
           const clientes: Cliente[] = clientesData.map((c: any, idx: number) => ({
             id: c.id || (Date.now() + idx),
             num: c.num || (idx + 1),
             nombre: c.nombre || '',
             cel: c.cel || '',
             prod: c.prod || '',
-            precio: parseFloat(String(c.precio || c.cobrar || 0)),
-            cobrar: parseFloat(String(c.cobrar || 0)),
+            precio: parseMonedaPeru(c.precio) || parseMonedaPeru(c.cobrar),
+            cobrar: parseMonedaPeru(c.cobrar) || parseMonedaPeru(c.precio),
             dir: c.dir || '',
             dist: c.dist || '',
             obs: c.obs || '',
@@ -1357,8 +1363,11 @@ export function importarExcel(file: File): Promise<Cliente[]> {
 
         const cols = {
           num: findCol(['n°', 'num', '#']),
-          precio: findCol(['precio']),
-          cobrar: findCol(['cobrar']),
+          // 💰 FASE Z: alias ampliados — el Excel de la empresa
+          // renombra columnas entre días ('MONTO', 'TOTAL', 'PAGAR'…)
+          // y el monto quedaba en 0 → QR "sin monto cargado".
+          precio: findCol(['precio', 'costo', 'valor', 'unitario']),
+          cobrar: findCol(['cobrar', 'monto', 'total', 'pagar', 'deuda', 'importe']),
           nombre: findCol(['nombre', 'cliente']),
           dir: findCol(['direcci']),
           dist: findCol(['distrito']),
@@ -1375,14 +1384,20 @@ export function importarExcel(file: File): Promise<Cliente[]> {
           const nombre = String(row[cols.nombre] || '').trim();
           if (!nombre || nombre.toUpperCase().includes('TOTAL') || nombre.toUpperCase().includes('VUELTO')) continue;
 
-          const precio = parseFloat(row[cols.precio]) || 0;
+          // 💰 FASE Z: parseo PERUANO robusto — "S/ 89.90",
+          // "S/.89,90", "1,234.56" o números ya parseados.
+          // Antes: parseFloat("S/ 89.90") = NaN → 0 → QR sin monto.
+          const crudoPrecio = cols.precio >= 0 ? row[cols.precio] : undefined;
+          const crudoCobrar = cols.cobrar >= 0 ? row[cols.cobrar] : undefined;
+          const { cobrar: cobrarNum, precio: precioNum } = montosConRespaldo(crudoCobrar, crudoPrecio);
+          const precio = precioNum;
           if (!nombre && precio === 0) continue;
 
           clientes.push({
             id: Date.now() + i,
             num: cols.num >= 0 ? (parseInt(row[cols.num]) || num) : num,
             precio: precio,
-            cobrar: parseFloat(row[cols.cobrar]) || precio,
+            cobrar: cobrarNum,
             nombre: nombre,
             dir: String(row[cols.dir] || '').trim(),
             dist: String(row[cols.dist] || '').trim(),

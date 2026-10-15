@@ -14,3 +14,5 @@ test-sync/cajaCore.compilado.cjs
 test-sync/obsRuta.compilado.cjs
 test-sync/firestore.compilado.cjs
 test-sync/pagoCore.compilado.cjs
+test-sync/firestore-fz.cjs
+test-sync/moneda.compilada.cjs

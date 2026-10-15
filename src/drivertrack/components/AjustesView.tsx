@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.15 (FASE Y — 💜 QR POR CLIENTE: botoncito en cada cliente de la ruta que abre tu QR de Yape/Plin con el MONTO que tiene que pagar a la vista — sin ir a la sección QR ni olvidar cuánto era; chips 💜/🔷 si tenés las dos billeteras · FASE X: fix de la paga 12/9 · FASE W: caja en vivo + panel de observaciones · FASE V: historial + AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
+        DriverTrack v0.10.16 (FASE Z — 💰 FIX del monto del QR por cliente: el modal lee el cliente VIVO con respaldo cobrar→precio, y si el monto llegara vacío lo anotás ahí mismo y queda guardado (fila + ruta + caja); Excel robusto que entiende "S/ 89,90" y columnas renombradas (MONTO/TOTAL/PAGAR); 📲 mandar el QR+monto por WhatsApp y marcar COBRADO sin salir del modal · FASE Y: QR por cliente · FASE X: fix de la paga 12/9 · FASE W: caja en vivo + panel de observaciones · FASE V: historial + AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
       </p>
     </div>
   );

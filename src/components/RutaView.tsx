@@ -63,6 +63,8 @@ import {
   esLejos,
   ConfigPagoPedidos,
 } from '../utils/pagoPedidosCore';
+// 💰 FASE Z: parseo de montos al estilo peruano ("S/ 89,90" → 89.90)
+import { parseMonedaPeru } from '../utils/moneda';
 
 interface RutaViewProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -88,6 +90,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const hayPlin = !!(plinQR || plinNum);
   const [qrCliente, setQrCliente] = useState<Cliente | null>(null);
   const [qrWallet, setQrWallet] = useState<'yape' | 'plin'>('yape');
+  // 💰 FASE Z: editor de monto de emergencia — si el cliente
+  // llegó sin monto (Excel con columna renombrada, carga vieja),
+  // lo anotás ACÁ mismo en la puerta y queda guardado para
+  // siempre (fila + ruta_activa + caja).
+  const [qrMontoEdit, setQrMontoEdit] = useState('');
+  const [qrMontoGuardando, setQrMontoGuardando] = useState(false);
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
@@ -618,7 +626,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         telefono: telefono,
         nombre: cliente.nombre || 'Cliente',
         prod: cliente.prod || '',
-        cobrar: parseFloat(String(cliente.cobrar || 0)),
+        cobrar: parseFloat(String(cliente.cobrar || cliente.precio || 0)),
         dir: cliente.dir || '',
         dist: cliente.dist || '',
         st: cliente.st || 'pendiente',
@@ -640,6 +648,37 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
     } catch (e: any) {
       onShowToast?.('Error', e.message || 'No se pudo enviar', 'error');
+    }
+  };
+
+  // 💰 FASE Z: guardar el monto desde el PROPIO modal del QR (cuando
+  // el cliente llegó sin monto — Excel con columna renombrada, carga
+  // vieja del bot). Persiste igual que la edición de siempre (fila +
+  // ruta_activa + respaldo + caja): lo anotás UNA vez en la puerta
+  // y ese cliente nunca más sale "sin monto cargado".
+  const guardarQrMonto = () => {
+    const live = qrCliente
+      ? clientes.find((c) => String(c.id) === String(qrCliente.id)) || qrCliente
+      : null;
+    if (!live) return;
+    // parseo peruano: "89.90", "89,90", "S/ 89.90" — todo vale
+    const n = parseMonedaPeru(qrMontoEdit);
+    if (n <= 0) {
+      onShowToast?.('Monto inválido', 'Escribí cuánto tiene que pagar (ej. 89.90)', 'warning');
+      return;
+    }
+    try {
+      actualizarCliente(live.id, { cobrar: n, precio: live.precio || n });
+      onShowToast?.(
+        '💰 Monto guardado',
+        `S/ ${n.toFixed(2)} — ${live.nombre || 'cliente'} ya lo muestra en la fila y el QR`,
+        'success'
+      );
+      setQrMontoEdit('');
+    } catch {
+      onShowToast?.('Error', 'No se pudo guardar el monto — probá de nuevo', 'error');
+    } finally {
+      setQrMontoGuardando(false);
     }
   };
 
@@ -1465,7 +1504,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                   {/* Monto */}
                   <div className="text-right shrink-0">
-                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</div>
+                    {/* 💰 FASE Z: respaldo cobrar→precio — si la carga dejó
+                        cobrar vacío pero precio llegó, la fila muestra la
+                        plata igual (antes: S/ 0.00 mentiroso) */}
+                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}</div>
                     <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
                   </div>
 
@@ -1478,11 +1520,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       setQrCliente(c);
                       // default inteligente: Yape salvo que solo haya Plin
                       setQrWallet(!hayYape && hayPlin ? 'plin' : 'yape');
+                      // 💰 FASE Z: editor de monto siempre arranca limpio
+                      setQrMontoEdit('');
                     }}
                     data-testid={`btn-qr-${c.id}`}
-                    title={`Mostrar mi QR de cobro — ${c.nombre || 'cliente'} debe S/ ${parseFloat(String(c.cobrar || 0)).toFixed(2)}`}
+                    title={`Mostrar mi QR de cobro — ${c.nombre || 'cliente'} debe S/ ${parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}`}
                     className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md border transition-all active:scale-90 ${
-                      (qrWallet === 'yape' ? hayYape : hayPlin)
+                      hayYape || hayPlin
                         ? 'bg-purple-500/15 border-purple-500/40 text-purple-400 hover:bg-purple-500/25'
                         : 'bg-slate-700/50 border-slate-600 text-slate-500 hover:bg-slate-700'
                     }`}
@@ -2902,13 +2946,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       {/* 💜 FASE Y: QR de cobro por cliente — tu QR + el MONTO que
           tiene que pagar, en la misma pantalla (para mostrarle el
           celular al cliente sin ir a la sección QR ni perder el
-          monto de vista). Mismo patrón del "Ampliar" de Mi QR. */}
+          monto de vista). Mismo patrón del "Ampliar" de Mi QR.
+          💰 FASE Z: (1) el cliente se resuelve VIVO de la lista
+          (si el bot/sync actualizó el monto detrás, el modal
+          muestra lo ÚLTIMO — nunca más un objeto congelado);
+          (2) el monto tiene RESPALDO cobrar→precio; (3) si aún
+          así está vacío, lo anotás ahí mismo y queda guardado;
+          (4) mandarlo por WhatsApp y marcar cobrado SIN salir. */}
       {qrCliente && (() => {
         const esYape = qrWallet === 'yape';
+        // 💰 FASE Z — cliente VIVO: buscado por id en la lista
+        // ACTUAL (si el doc del bot se reescribió mientras el
+        // modal estaba abierto, el monto se actualiza solo).
+        const live = clientes.find((c) => String(c.id) === String(qrCliente.id)) || qrCliente;
         const walletQR = (esYape ? yapeQR : plinQR);
         const walletNum = esYape ? yapeNum : plinNum;
         const walletTit = esYape ? yapeTit : plinTit;
-        const monto = parseFloat(String(qrCliente.cobrar || 0)) || 0;
+        // 💰 FASE Z — doble respaldo: cobrar → precio
+        const monto = parseFloat(String(live.cobrar || live.precio || 0)) || 0;
         const numBonito = walletNum ? walletNum.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : '';
         return (
           <div
@@ -2958,14 +3013,40 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 {/* Cliente + MONTO — el motivo de esta pantalla */}
                 <div className="text-center border-b border-slate-200 pb-2.5 mb-3">
                   <p className="text-[11px] text-slate-500 font-medium truncate">
-                    📦 {qrCliente.nombre || 'Cliente'}{qrCliente.prod ? ` · ${qrCliente.prod}` : ''}
+                    📦 {live.nombre || 'Cliente'}{live.prod ? ` · ${live.prod}` : ''}
                   </p>
                   {monto > 0 ? (
                     <p className="text-3xl font-black text-slate-900 leading-tight mt-0.5" data-testid="qr-monto">
                       S/ {monto.toFixed(2)}
                     </p>
                   ) : (
-                    <p className="text-sm font-bold text-slate-400 mt-0.5">sin monto cargado</p>
+                    <div className="mt-1" data-testid="qr-sin-monto">
+                      <p className="text-sm font-bold text-slate-400">sin monto cargado</p>
+                      {/* 💰 FASE Z: anotalo ACÁ — queda guardado en la fila,
+                          la ruta y el cierre (nunca más un QR sin monto
+                          por una carga rara). */}
+                      <div className="flex gap-1.5 mt-1.5 justify-center">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="S/ 0.00"
+                          value={qrMontoEdit}
+                          onChange={(e) => setQrMontoEdit(e.target.value)}
+                          data-testid="qr-monto-input"
+                          className="w-28 px-2.5 py-1.5 rounded-lg border-2 border-slate-300 text-center text-lg font-black text-slate-900 placeholder:text-slate-300 placeholder:text-sm focus:border-slate-900 outline-none"
+                        />
+                        <button
+                          onClick={() => { setQrMontoGuardando(true); guardarQrMonto(); }}
+                          disabled={qrMontoGuardando || !qrMontoEdit.trim()}
+                          data-testid="qr-monto-guardar"
+                          className="px-3 py-1.5 rounded-lg bg-slate-900 text-white font-bold text-xs hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center gap-1.5"
+                          title="Guardar este monto para este cliente (queda en la fila y en el cierre)"
+                        >
+                          {qrMontoGuardando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '💾'}
+                          Guardar
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -3003,10 +3084,56 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 </div>
               </div>
 
-              {/* Pista del atajo robot (discreta, abajo) */}
-              <p className="text-center text-[10px] text-slate-400/80 mt-2.5">
-                💡 Para mandarlo por WhatsApp: <b>🤖 Bot → Enviar {esYape ? 'Yape' : 'Plin'}</b> del cliente
-              </p>
+              {/* 💜 FASE Z — la propuesta aplicada: TODO el cobro en la
+                  puerta SIN salir del QR. (1) 📲 mandarle el QR + el
+                  monto por WhatsApp (el bot se lo manda al chat del
+                  cliente, con la plata en el mensaje); (2) marcar
+                  COBRADO ahí mismo — efectivo o pagó escaneando el
+                  QR — y el modal cierra solo (dispara el "gracias
+                  por su compra" y la caja como siempre). */}
+              <div className="mt-3 space-y-2">
+                <button
+                  onClick={() => { void enviarAccionBot(live, esYape ? 'enviar_yape' : 'enviar_plin'); }}
+                  data-testid="qr-btn-wsp"
+                  className={`w-full py-2.5 rounded-xl font-bold text-sm border flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                    esYape
+                      ? 'bg-purple-600/90 border-purple-400 text-white hover:bg-purple-600'
+                      : 'bg-cyan-600/90 border-cyan-400 text-white hover:bg-cyan-600'
+                  }`}
+                  title={`El bot le manda tu QR de ${esYape ? 'Yape' : 'Plin'} con el monto al WhatsApp de ${live.nombre || 'el cliente'}`}
+                >
+                  <Bot className="w-4 h-4" />
+                  Mandar por WhatsApp{monto > 0 ? ` — S/ ${monto.toFixed(2)}` : ''}
+                </button>
+                {live.st === 'pendiente' || !live.st ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { cambiarEstado(live.id, 'efectivo'); setQrCliente(null); }}
+                      data-testid="qr-marcar-efectivo"
+                      className="flex-1 py-2 rounded-xl font-bold text-xs border bg-emerald-600/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/30 transition-all active:scale-95"
+                      title="La plata te queda a vos (caja 💵) — cierra el QR y sigue la ruta"
+                    >
+                      💵 Cobró efectivo
+                    </button>
+                    <button
+                      onClick={() => { cambiarEstado(live.id, 'yape-plin'); setQrCliente(null); }}
+                      data-testid="qr-marcar-qr"
+                      className={`flex-1 py-2 rounded-xl font-bold text-xs border transition-all active:scale-95 ${
+                        esYape
+                          ? 'bg-purple-600/20 border-purple-500/50 text-purple-300 hover:bg-purple-600/30'
+                          : 'bg-cyan-600/20 border-cyan-500/50 text-cyan-300 hover:bg-cyan-600/30'
+                      }`}
+                      title="Pagó escaneando ese QR (lo cobra la empresa — caja 🏢) — cierra el QR y sigue la ruta"
+                    >
+                      📲 Pagó con el QR
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-center text-[11px] text-emerald-400 font-bold" data-testid="qr-ya-marcado">
+                    ✓ ya marcado: {getEstadoTexto(live.st)}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         );
