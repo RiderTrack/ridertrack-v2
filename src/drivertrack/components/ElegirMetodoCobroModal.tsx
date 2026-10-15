@@ -80,7 +80,7 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-violet-500/40 bg-slate-900 text-xl">💜</span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="block text-xs font-black text-violet-200">Solo Yape 💜</span>
+              <span className="block text-xs font-black text-purple-300">Solo Yape 💜</span>
               <span className="block truncate text-[10px] font-medium text-slate-400">
                 {yape || 'sin número'} {qrYape ? '· con tu QR de Yape' : '· sin QR subido'}
               </span>
@@ -102,7 +102,7 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-sky-500/40 bg-slate-900 text-xl">🔷</span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="block text-xs font-black text-sky-200">Solo Plin 🔷</span>
+              <span className="block text-xs font-black text-sky-300">Solo Plin 🔷</span>
               <span className="block truncate text-[10px] font-medium text-slate-400">
                 {plin || 'sin número'} {qrPlin ? '· con tu QR de Plin' : '· sin QR subido'}
               </span>

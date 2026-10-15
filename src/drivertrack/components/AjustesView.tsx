@@ -1354,7 +1354,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500">
-        DriverTrack v0.10.16 (FASE Z — 💰 FIX del monto del QR por cliente: el modal lee el cliente VIVO con respaldo cobrar→precio, y si el monto llegara vacío lo anotás ahí mismo y queda guardado (fila + ruta + caja); Excel robusto que entiende "S/ 89,90" y columnas renombradas (MONTO/TOTAL/PAGAR); 📲 mandar el QR+monto por WhatsApp y marcar COBRADO sin salir del modal · FASE Y: QR por cliente · FASE X: fix de la paga 12/9 · FASE W: caja en vivo + panel de observaciones · FASE V: historial + AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
+        DriverTrack v0.10.17 (FASE Z-2 — ☀️ FIX del modo CLARO en el QR por cliente: el monto y el titular usan tinta fija (zinc) sobre la tarjeta blanca — antes el tema invertía el texto y quedaba blanco sobre blanco; el fondo del modal ahora sigue el tema (claro de día) para que "💵 Cobró efectivo", "📲 Pagó con el QR" y "🤖 Mandar por WhatsApp" se lean clarito; 💜/🔷 del elegir método legibles · FASE Z: monto del QR + WhatsApp + cobrado sin salir · FASE Y: QR por cliente · FASE X: fix de la paga 12/9 · FASE W: caja en vivo + observaciones · FASE V: historial + AMBOS · FASE U/T/S/R: chips del robot, caja con memoria, foto 📤/📥/👥, paga del Yape, cobro Yape/Plin) · Lima, PE
       </p>
     </div>
   );

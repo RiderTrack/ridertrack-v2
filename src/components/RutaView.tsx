@@ -2967,7 +2967,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         const numBonito = walletNum ? walletNum.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : '';
         return (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4"
             onClick={() => setQrCliente(null)}
           >
             <div className="relative max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
@@ -3008,15 +3008,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 </div>
               )}
 
-              {/* Tarjeta blanca (fondo claro = el QR se escanea mejor) */}
-              <div className="bg-white rounded-2xl p-4" data-testid="qr-modal-card">
+              {/* Tarjeta blanca (fondo claro = el QR se escanea mejor).
+                  FASE Z-2: shadow para que se despegue del fondo claro
+                  (en modo claro el overlay ya no es negro). */}
+              <div className="bg-white rounded-2xl p-4 shadow-2xl" data-testid="qr-modal-card">
                 {/* Cliente + MONTO — el motivo de esta pantalla */}
                 <div className="text-center border-b border-slate-200 pb-2.5 mb-3">
                   <p className="text-[11px] text-slate-500 font-medium truncate">
                     📦 {live.nombre || 'Cliente'}{live.prod ? ` · ${live.prod}` : ''}
                   </p>
                   {monto > 0 ? (
-                    <p className="text-3xl font-black text-slate-900 leading-tight mt-0.5" data-testid="qr-monto">
+                    <p className="text-3xl font-black text-zinc-900 leading-tight mt-0.5" data-testid="qr-monto">
                       S/ {monto.toFixed(2)}
                     </p>
                   ) : (
@@ -3033,13 +3035,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           value={qrMontoEdit}
                           onChange={(e) => setQrMontoEdit(e.target.value)}
                           data-testid="qr-monto-input"
-                          className="w-28 px-2.5 py-1.5 rounded-lg border-2 border-slate-300 text-center text-lg font-black text-slate-900 placeholder:text-slate-300 placeholder:text-sm focus:border-slate-900 outline-none"
+                          className="w-28 px-2.5 py-1.5 rounded-lg border-2 border-zinc-300 text-center text-lg font-black text-zinc-900 placeholder:text-slate-300 placeholder:text-sm focus:border-zinc-900 outline-none"
                         />
                         <button
                           onClick={() => { setQrMontoGuardando(true); guardarQrMonto(); }}
                           disabled={qrMontoGuardando || !qrMontoEdit.trim()}
                           data-testid="qr-monto-guardar"
-                          className="px-3 py-1.5 rounded-lg bg-slate-900 text-white font-bold text-xs hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center gap-1.5"
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-100 font-bold text-xs hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center gap-1.5"
                           title="Guardar este monto para este cliente (queda en la fila y en el cierre)"
                         >
                           {qrMontoGuardando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '💾'}
@@ -3059,9 +3061,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     className={`w-full max-w-[280px] mx-auto block rounded-lg border-2 ${esYape ? 'border-purple-300' : 'border-cyan-300'}`}
                   />
                 ) : (
-                  <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center max-w-[280px] mx-auto">
-                    <QrCode className="w-9 h-9 text-slate-400 mx-auto mb-1.5" />
-                    <p className="text-xs text-slate-600 font-bold">Sin QR de {esYape ? 'Yape' : 'Plin'} cargado</p>
+                  <div className="rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 text-center max-w-[280px] mx-auto">
+                    <QrCode className="w-9 h-9 text-zinc-400 mx-auto mb-1.5" />
+                    <p className="text-xs text-zinc-600 font-bold">Sin QR de {esYape ? 'Yape' : 'Plin'} cargado</p>
                     <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
                       Subilo en <b>Mi QR {esYape ? 'Yape' : 'Plin'}</b> → pestaña {esYape ? '💜 Yape' : '🔷 Plin'} y va a aparecer acá
                     </p>
@@ -3070,7 +3072,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                 {/* Titular + número — por si prefiere mandar la plata al número */}
                 <div className="text-center mt-3 pb-0.5">
-                  {walletTit && <p className="text-sm font-black text-slate-900">{walletTit}</p>}
+                  {walletTit && <p className="text-sm font-black text-zinc-900">{walletTit}</p>}
                   {numBonito && (
                     <p className={`text-xl font-black font-mono tracking-wider ${esYape ? 'text-purple-700' : 'text-cyan-700'}`}>
                       {numBonito}
@@ -3097,8 +3099,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   data-testid="qr-btn-wsp"
                   className={`w-full py-2.5 rounded-xl font-bold text-sm border flex items-center justify-center gap-2 transition-all active:scale-95 ${
                     esYape
-                      ? 'bg-purple-600/90 border-purple-400 text-white hover:bg-purple-600'
-                      : 'bg-cyan-600/90 border-cyan-400 text-white hover:bg-cyan-600'
+                      ? 'bg-purple-600 border-purple-400 text-white hover:bg-purple-700'
+                      : 'bg-cyan-600 border-cyan-400 text-white hover:bg-cyan-700'
                   }`}
                   title={`El bot le manda tu QR de ${esYape ? 'Yape' : 'Plin'} con el monto al WhatsApp de ${live.nombre || 'el cliente'}`}
                 >
