@@ -344,10 +344,15 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
    *  lista, menú del robot, contactos). Si tenés los DOS números
    *  configurados te pregunta cómo cobrarle (💜 solo Yape / 🔷 solo
    *  Plin / 💙 ambos — pedido de Rudy: mensajes SEPARADOS); si solo
-   *  tenés uno, sale directo sin preguntar. */
+   *  tenés uno, sale directo sin preguntar.
+   *  💜 FASE AA: `metodo` opcional — cuando el cobro sale del QR POR
+   *  VIAJE, la billetera que ya estás MOSTRANDO viaja directa (no
+   *  vuelve a preguntar); si esa billetera no tuviera número, cae
+   *  al flujo de siempre (nunca se pierde). */
   function mandarCobro(
     datos: { cliente: string; monto: number; direccion: string },
     celular: string,
+    metodo?: MetodoCobro,
   ): void {
     const cel = normalizarCelular(celular);
     if (!cel) {
@@ -356,6 +361,15 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     }
     const tieneYape = config.yape.numero.trim().length > 0;
     const tienePlin = config.plin.numero.trim().length > 0;
+    // 💜 FASE AA: del QR ya venís viendo UNA billetera → esa sale
+    if (metodo === 'yape' && tieneYape) {
+      void ejecutarCobro(datos, cel, 'yape');
+      return;
+    }
+    if (metodo === 'plin' && tienePlin) {
+      void ejecutarCobro(datos, cel, 'plin');
+      return;
+    }
     if (tieneYape && tienePlin) {
       // los dos configurados → que Rudy elija el mensaje (FASE R)
       vibrar(40);

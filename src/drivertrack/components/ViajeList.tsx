@@ -17,9 +17,9 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useEffect, useState } from 'react';
-import { Camera, CheckCircle2, Phone, Route, Trash2 } from 'lucide-react';
+import { Camera, CheckCircle2, Phone, QrCode, Route, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
-import { fmtSoles, vibrar } from '../utils';
+import { MetodoCobro, fmtSoles, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
 // FASE H: 🛣️ TODO lo de la ruta (navegar A/B, copiar, GPS, km) vive
 // ahora adentro del RutaModal — antes eran botoncitos A + B + GPS
@@ -34,6 +34,11 @@ import ContactoModal, { type Contacto } from './ContactoModal';
 import FotoEntregaModal from './FotoEntregaModal';
 // FASE B: menú de avisos del robot (voy en camino · llegué · entregado…)
 import RobotMenu from './RobotMenu';
+// 💜 FASE AA: QR POR VIAJE — el mismo modal del APK de trabajo en
+// cada viaje de inDrive: botoncito violeta al lado de Ruta/Contacto
+// que abre tu QR personal con la TARIFA a la vista (lo que el
+// cliente paga) — para mostrarle la pantalla y que escanee.
+import QrViajeModal from './QrViajeModal';
 
 // FASE E: 📋 copiar dirección con respaldo (WebView de Android sin
 // clipboard API — el textarea viejo nunca falla)
@@ -72,8 +77,15 @@ interface Props {
   onIniciarGPS?: (id: string) => void; // F-ID3: arrancar la grabación
   onDetenerGPS?: () => void;           // F-ID3: terminar la grabación
   // F-ID5: flujo de cobro compartido del shell (robot si está activo,
-  // WhatsApp manual si no — mismo mensaje por bloques en ambos casos)
-  onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
+  // WhatsApp manual si no — mismo mensaje por bloques en ambos casos).
+  // 💜 FASE AA: `metodo` opcional — cuando el cobro sale del QR POR
+  // VIAJE, viaja la billetera que ya estás mostrando (el shell no
+  // vuelve a preguntar Yape/Plin/ambos).
+  onMandarCobro: (
+    datos: { cliente: string; monto: number; direccion: string },
+    celular: string,
+    metodo?: MetodoCobro,
+  ) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo
   // FASE B: avisos al cliente por el robot (menú 🤖 de cada viaje)
   // FASE C: + telefono elegido en el menú (cliente · quien envía · quien recibe)
@@ -125,6 +137,9 @@ export default function ViajeList({
   const [rutaViajeId, setRutaViajeId] = useState<string | null>(null);
   // FASE H: qué viaje tiene abierto el modal de la FOTO de entrega
   const [fotoViajeId, setFotoViajeId] = useState<string | null>(null);
+  // 💜 FASE AA: qué viaje tiene abierto el modal del QR (patrón de
+  // los otros modales de la tarjeta)
+  const [qrViajeId, setQrViajeId] = useState<string | null>(null);
   // FASE E: qué dirección se acaba de copiar ("{id}-a" / "{id}-b") —
   // muestra el ✓ Copiada en la tarjeta
   const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
@@ -454,6 +469,27 @@ export default function ViajeList({
                 <Route size={16} />
                 <span className="text-[8px] font-black leading-none">Ruta</span>
               </button>
+              {/* 💜 FASE AA: QR — abre tu QR personal con la TARIFA de
+                  ESTE cliente a la vista (mostrás la pantalla y él
+                  escanea). Violeta si tenés Yape/Plin configurados,
+                  gris si todavía no cargaste ninguno (te guía igual). */}
+              <button
+                onClick={() => {
+                  setQrViajeId(v.id);
+                  vibrar(30);
+                }}
+                className={`flex flex-col items-center rounded-lg p-2 transition-all active:scale-95 ${
+                  config.yape.qrBase64 || config.yape.numero.trim() || config.plin.qrBase64 || config.plin.numero.trim()
+                    ? 'bg-violet-500/15 text-violet-300 hover:bg-violet-500/25'
+                    : 'bg-slate-700/40 text-slate-500 hover:bg-slate-700/60'
+                }`}
+                aria-label="Mostrar mi QR de cobro"
+                title={`Mostrar mi QR de cobro — ${v.cliente || 'el cliente'} paga S/ ${(Number(v.tarifa) || 0).toFixed(2)}`}
+                data-testid="boton-qr-viaje"
+              >
+                <QrCode size={16} />
+                <span className="text-[8px] font-black leading-none">QR</span>
+              </button>
             </div>
             {/* FASE G: 📞 UN solo botón que abre el ContactoModal con
                 TODO adentro: llamar/WhatsApp a A y a B, el cobro, los
@@ -594,6 +630,26 @@ export default function ViajeList({
                     }
                   : undefined
               }
+            />
+          );
+        })()}
+
+      {/* 💜 FASE AA: modal del QR por viaje — tu QR personal con la
+          TARIFA a la vista (el mismo del APK de trabajo) + mandar el
+          cobro por WhatsApp + marcar la entrega sin salir */}
+      {qrViajeId &&
+        (() => {
+          const v = ordenados.find(x => x.id === qrViajeId);
+          if (!v) return null;
+          return (
+            <QrViajeModal
+              viaje={v}
+              config={config}
+              onCerrar={() => setQrViajeId(null)}
+              onMandarCobro={onMandarCobro}
+              cobroEnCurso={cobroEnCurso}
+              onToggleEntregado={onToggleEntregado}
+              onToast={onToast}
             />
           );
         })()}
