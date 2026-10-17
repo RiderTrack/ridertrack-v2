@@ -14,12 +14,26 @@
 // fuentes de reprogramados:
 //   A) LA COLA — pedidos que el MISMO Rudy agenda (botón 🔄
 //      Reprog. o el tilde del reporte MATE): los marcó con
-//      fecha y la app los tiene guardados para ese día.
+//      fecha y la app los tiene guardados para ese día. Desde
+//      la AD-2 también viven acá los FALLIDOS (Rudy marca
+//      fallido porque NO sabe si ventas lo reprogramará →
+//      quedan "esperando" en la listita hasta que vuelvan en
+//      el Excel, él los pase con ➕ o se limpien solos).
 //   B) LOS NO ENTREGADOS DE LA ÚLTIMA RUTA CERRADA — la app
 //      cruza solita: quiénes de ayer YA VOLVIERON en la lista
 //      de hoy (🔁 reincidentes, vienen del Excel nuevo) y
 //      quiénes NO VOLVIERON (botón ➕ para pasarlos a hoy sin
 //      bajar nada).
+//
+// 🆕 AD-2 (pedido 18 oct): "cuando pongo fallido porque yo no sé
+// si lo van a reprogramar o no... los clientes fallidos también
+// que estén en la listita" + "se iba acumulando... darle un
+// tiempo prudencial, no sé, tres cinco días... si no sale el
+// programa el cliente se borra automáticamente". → los fallidos
+// entran a la cola SIN fecha (origen 'fallido') al cerrar la
+// ruta, y la cola se AUTO-LIMPIA: lo que ya volvió en la ruta de
+// hoy se quita, y lo que lleva más de EXPIRA_DIAS días sin
+// volver se borra (no acumula espacio).
 //
 // Módulo 100% puro (patrón contabilidad.ts): recibe las fechas
 // como parámetro — sin Date.now() en las decisiones, solo en el
@@ -31,13 +45,22 @@ import type { Cliente } from './firestore';
 export interface Reprogramado {
   /** Snapshot del pedido (con coordenadas para no re-geocodificar) */
   cliente: Cliente;
-  /** Para cuándo lo agendó — YYYY-MM-DD */
+  /** Para cuándo lo agendó — YYYY-MM-DD ('' = fallido esperando) */
   para: string;
   /** Fecha de la ruta original de donde salió — YYYY-MM-DD */
   desde: string;
   /** Cuándo se agendó — ISO */
   creadoAt?: string;
+  /** 🆕 AD-2: entró por ser FALLIDO (sin fecha, esperando que
+   *  ventas lo reprograme) — se muestra como "fallido del [fecha]"
+   *  con botón ➕ para pasarlo a hoy cuando Rudy confirma. */
+  origen?: 'fallido';
 }
+
+/** 🆕 AD-2: días que un pedido puede vivir en la listita sin
+ *  volver al programa antes de borrarse solo (Rudy: "tres cinco
+ *  días... se borra automáticamente para no acumular espacio"). */
+export const EXPIRA_DIAS = 5;
 
 /** Snapshot de la última ruta cerrada (viaja en usuarios/{uid}) */
 export interface UltimaCerrada {
@@ -55,6 +78,16 @@ const ST_ENTREGADOS = [
 /** ¿El cliente quedó entregado (pagó)? */
 export function esEntregado(st: string | undefined): boolean {
   return ST_ENTREGADOS.includes((st || '').trim());
+}
+
+// ── Estados FALLIDOS (espejo de stats.ST_FALLIDOS, local para
+//    mantener el módulo puro). 'reprogramar' NO va acá: tiene su
+//    propia rama (se agenda con fecha). ──
+const ST_FALLIDOS = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'];
+
+/** 🆕 AD-2: ¿lo marcó como fallido? (entrará a la listita al cerrar) */
+export function esFallido(st: string | undefined): boolean {
+  return ST_FALLIDOS.includes((st || '').trim());
 }
 
 /** Cliente mínimo para las claves de cruce (nombre/dir/cel) */
@@ -170,26 +203,35 @@ export function reincidentesDeHoy(
 // ── La cola de agendados (fuente A) ────────────────────────
 
 /**
- * Divide la cola: lo que toca HOY (para <= hoy), lo que es para
- * más adelante, y lo que YA está en la lista de hoy (el Excel
- * ya lo trajo — se muestra como "ya en tu ruta" y no se ofrece
- * agregarlo dos veces).
+ * Divide la cola: lo que toca HOY (para <= hoy), los FALLIDOS
+ * esperando que ventas los reprograme (sin fecha — AD-2), lo
+ * que es para más adelante, y lo que YA está en la lista de hoy
+ * (el Excel ya lo trajo — se muestra como "ya en tu ruta" y no
+ * se ofrece agregarlo dos veces).
  */
 export function dividirCola(
   cola: Reprogramado[],
   hoy: string,
   hoyLista: Cliente[]
-): { paraHoy: Reprogramado[]; futuro: Reprogramado[]; yaEnLista: Reprogramado[] } {
+): {
+  paraHoy: Reprogramado[];
+  esperando: Reprogramado[];
+  futuro: Reprogramado[];
+  yaEnLista: Reprogramado[];
+} {
   const paraHoy: Reprogramado[] = [];
+  const esperando: Reprogramado[] = [];
   const futuro: Reprogramado[] = [];
   const yaEnLista: Reprogramado[] = [];
   for (const item of cola || []) {
     if (!item || !item.cliente || !normalizar(item.cliente.nombre)) continue;
     if (estaEnLista(item.cliente, hoyLista)) yaEnLista.push(item);
+    // 🆕 AD-2: fallido sin fecha → "esperando reprogramación"
+    else if (item.origen === 'fallido' || !(item.para || '')) esperando.push(item);
     else if ((item.para || '') <= hoy) paraHoy.push(item);
     else futuro.push(item);
   }
-  return { paraHoy, futuro, yaEnLista };
+  return { paraHoy, esperando, futuro, yaEnLista };
 }
 
 /**
@@ -222,23 +264,112 @@ export function quitarDeCola(
 /**
  * FASE AD · cierre de ruta: los pedidos marcados 🔄 Reprogramado
  * pasan SOLOS a la cola para mañana (los que tienen fecha, a su
- * fecha). Dedupe contra lo que ya esté en la cola — cerrar la
- * ruta dos veces no duplica nada.
+ * fecha). 🆕 AD-2: los FALLIDOS también pasan a la listita —
+ * SIN fecha (origen 'fallido', "esperando") porque Rudy no sabe
+ * si ventas los reprogramará: quedan a la vista hasta que
+ * vuelvan en el Excel, él los pase con ➕ o se limpien solos.
+ * Dedupe contra lo que ya esté en la cola — cerrar la ruta dos
+ * veces no duplica nada.
  */
 export function autoColaAlCerrar(
   clientes: Cliente[],
   hoy: string,
   colaActual: Reprogramado[]
 ): Reprogramado[] {
-  const nuevos: Reprogramado[] = (clientes || [])
-    .filter((c) => (c.st || '') === 'reprogramar' && normalizar(c.nombre))
-    .map((c) => ({
-      cliente: c,
-      para: c.reprogramadoPara || sumaDiasISO(hoy, 1),
-      desde: hoy,
-      creadoAt: new Date().toISOString(),
-    }));
+  const nuevos: Reprogramado[] = [];
+  for (const c of clientes || []) {
+    if (!normalizar(c.nombre)) continue;
+    const st = (c.st || '').trim();
+    if (st === 'reprogramar') {
+      nuevos.push({
+        cliente: c,
+        para: c.reprogramadoPara || sumaDiasISO(hoy, 1),
+        desde: hoy,
+        creadoAt: new Date().toISOString(),
+      });
+    } else if (esFallido(st)) {
+      // 🆕 AD-2: fallido → esperando (sin fecha)
+      nuevos.push({
+        cliente: c,
+        para: '',
+        desde: hoy,
+        creadoAt: new Date().toISOString(),
+        origen: 'fallido',
+      });
+    }
+  }
   return fusionarCola(colaActual, nuevos);
+}
+
+// ── 🆕 AD-2: la listita se limpia SOLA ─────────────────────
+
+/**
+ * 🧹 Purga de la cola (la listita no acumula espacio):
+ *   1) RESUELTOS — el cliente YA volvió en la lista de hoy (el
+ *      Excel nuevo lo trajo o Rudy lo pasó con ➕): fuera de la
+ *      lista, ya está en la ruta.
+ *   2) EXPIRADOS — lleva más de EXPIRA_DIAS días sin volver al
+ *      programa (Rudy: "si no sale en ese lapso, se borra
+ *      automáticamente"). El plazo corre desde el MÁS lejano
+ *      entre cuándo falló/agendó (desde) y para cuándo era
+ *      (para): un agendado para dentro de 10 días no expira
+ *      antes de su fecha.
+ */
+export function purgarCola(
+  cola: Reprogramado[],
+  hoy: string,
+  hoyLista: Cliente[]
+): { vivos: Reprogramado[]; expirados: number; resueltos: number } {
+  let expirados = 0;
+  let resueltos = 0;
+  const vivos = (cola || []).filter((item) => {
+    if (!item || !item.cliente) return false; // basura → fuera
+    if (estaEnLista(item.cliente, hoyLista)) {
+      resueltos++;
+      return false;
+    }
+    const desde = item.desde || '';
+    const para = item.para || '';
+    const base = desde > para ? desde : para; // el más lejano
+    if (base && hoy > sumaDiasISO(base, EXPIRA_DIAS)) {
+      expirados++;
+      return false;
+    }
+    return true;
+  });
+  return { vivos, expirados, resueltos };
+}
+
+/**
+ * 🆕 AD-2 · migración: los FALLIDOS de la última ruta cerrada
+ * (rutas cerradas con versiones anteriores a la AD-2, que solo
+ * los recordaba el banner B de "última ruta") entran UNA vez a
+ * la listita — desde ahí viven hasta resolverse o expirar, y no
+ * dependen de que la última ruta cerrada los recuerde. Devuelve
+ * la MISMA referencia si no hay nada que migrar (para no
+ * disparar escrituras en un efecto).
+ */
+export function migrarFallidos(
+  ultima: UltimaCerrada | null,
+  cola: Reprogramado[]
+): Reprogramado[] {
+  if (!ultima || !(ultima.noEntregados || []).length) return cola || [];
+  const yaEstan = (c: Cliente) =>
+    (cola || []).some((e) => e && e.cliente && coinciden(e.cliente, c));
+  const faltantes = (ultima.noEntregados || []).filter(
+    (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c)
+  );
+  if (!faltantes.length) return cola || [];
+  return fusionarCola(
+    cola || [],
+    faltantes.map((c) => ({
+      cliente: c,
+      para: '',
+      desde: ultima.fecha,
+      creadoAt: new Date().toISOString(),
+      origen: 'fallido' as const,
+    }))
+  );
 }
 
 // ── Convertir un pedido viejo en cliente de la ruta de hoy ──

@@ -17,11 +17,21 @@
 //   R5.  reincidentesDeHoy: ids de hoy que eran no entregados
 //   R6.  dividirCola: paraHoy / futuro / yaEnLista
 //   R7.  fusionarCola / quitarDeCola: dedupe y borrado por clave
-//   R8.  autoColaAlCerrar: 🔄 pasa a su fecha (o mañana), no
-//        duplica lo que ya estaba, otros estados no entran
+//   R8.  autoColaAlCerrar: 🔄 pasa a su fecha (o mañana) y los
+//        FALLIDOS pasan a esperando (AD-2), no duplica lo que
+//        ya estaba, otros estados no entran
 //   R9.  clienteParaRuta: pendiente, sin hora, sin claves en
 //        undefined (Firestore las rechaza), conserva lat/lng/
 //        lejos, id nuevo rp-, marca reprog + reprogDesde
+//   R10. esFallido (AD-2): los 5 estados fallidos;
+//        reprogramar/pendiente NO
+//   R12. dividirCola esperando (AD-2): fallido sin fecha;
+//        el que volvió → yaEnLista
+//   R13. purgarCola (AD-2): resueltos (ya en la ruta de hoy) y
+//        expirados (>5 días); agendado futuro no expira antes
+//        de su fecha; 5 días justos sobrevive
+//   R14. migrarFallidos (AD-2): solo fallidos de la última
+//        cerrada, sin duplicar, misma referencia si no hay nada
 // ─────────────────────────────────────────────────────────────
 import { createRequire } from 'module';
 import path from 'path';
@@ -46,6 +56,7 @@ const {
   sumaDiasISO, coinciden, esEntregado, noEntregados,
   dividirNoEntregados, reincidentesDeHoy, dividirCola,
   fusionarCola, quitarDeCola, autoColaAlCerrar, clienteParaRuta,
+  esFallido, purgarCola, migrarFallidos, EXPIRA_DIAS,
 } = R;
 
 let pass = 0, fail = 0;
@@ -175,17 +186,21 @@ check('R3d pendiente NO es entregado', !esEntregado('pendiente'));
     cli(3, 'Pagó', 'efectivo'),
     cli(4, 'Falló', 'fallida'),
     cli(5, 'Colgó', 'pendiente'),
+    cli(6, 'Rechazó', 'rechazado'),
   ];
   const nueva = autoColaAlCerrar(clientes, hoy, []);
-  check('R8a entran los 2 reprogramados (con fecha y sin fecha)', nueva.length === 2, `dio ${nueva.length}`);
+  check('R8a entran los 2 reprogramados + los 2 fallidos', nueva.length === 4, `dio ${nueva.length}`);
   const conFecha = nueva.find(e => e.cliente.nombre === 'Con Fecha');
   const sinFecha = nueva.find(e => e.cliente.nombre === 'Sin Fecha');
   check('R8b Con Fecha respeta su 2026-10-20', conFecha && conFecha.para === '2026-10-20');
   check('R8c Sin Fecha cae para MAÑANA (10-18)', sinFecha && sinFecha.para === '2026-10-18');
-  check('R8d el fallido y el pagado NO entran a la cola', !nueva.some(e => ['Falló', 'Pagó', 'Colgó'].includes(e.cliente.nombre)));
+  check('R8d el fallido entra con origen fallido', nueva.find(e => e.cliente.nombre === 'Falló')?.origen === 'fallido');
+  check('R8e el fallido entra SIN fecha (esperando)', nueva.find(e => e.cliente.nombre === 'Falló')?.para === '');
+  check('R8f el rechazado también entra (es fallido)', nueva.find(e => e.cliente.nombre === 'Rechazó')?.origen === 'fallido');
+  check('R8g el pagado y el colgado NO entran a la cola', !nueva.some(e => ['Pagó', 'Colgó'].includes(e.cliente.nombre)));
   // ya estaba en la cola → no duplica
   const otraVez = autoColaAlCerrar(clientes, hoy, nueva);
-  check('R8e cerrar dos veces NO duplica la cola', otraVez.length === 2, `dio ${otraVez.length}`);
+  check('R8h cerrar dos veces NO duplica la cola', otraVez.length === 4, `dio ${otraVez.length}`);
 }
 
 // ── R9: cliente listo para la ruta de hoy ──────────────────
@@ -218,6 +233,94 @@ check('R3d pendiente NO es entregado', !esEntregado('pendiente'));
   check('R9o ids distintos en cada pasada', listo.id !== listo2.id);
 }
 
+// ── R10: esFallido (AD-2) ─────────────────────────────
+check('R10a fallida es fallido', esFallido('fallida'));
+check('R10b rechazado es fallido', esFallido('rechazado'));
+check('R10c cancelado es fallido', esFallido('cancelado'));
+check('R10d ausente es fallido', esFallido('ausente'));
+check('R10e no-contesta es fallido', esFallido('no-contesta'));
+check('R10f reprogramar NO es fallido (va con fecha)', !esFallido('reprogramar'));
+check('R10g pendiente NO es fallido', !esFallido('pendiente'));
+check('R10h efectivo NO es fallido', !esFallido('efectivo'));
+check('R10i undefined/espacios no rompen (trim)', !esFallido(undefined) && esFallido(' fallida '));
+check('R10j EXPIRA_DIAS = 5 (Rudy: "tres cinco días")', EXPIRA_DIAS === 5);
+
+// ── R12: dividirCola — bucket esperando (AD-2) ─────────
+{
+  const hoy = '2026-10-18';
+  const cola = [
+    { cliente: cli(1, 'Espera', 'fallida', { cel: '111111111' }), para: '', desde: '2026-10-17', origen: 'fallido' },
+    { cliente: cli(2, 'Espera En Ruta', 'fallida', { cel: '222222222' }), para: '', desde: '2026-10-17', origen: 'fallido' },
+    { cliente: cli(3, 'Hoy', 'pendiente', { cel: '333333333' }), para: hoy, desde: '2026-10-16' },
+  ];
+  const hoyLista = [cli(30, 'ESPERA EN RUTA', 'pendiente', { cel: '222222222' })];
+  const { paraHoy, esperando, futuro, yaEnLista } = dividirCola(cola, hoy, hoyLista);
+  check('R12a el fallido sin fecha cae en esperando', esperando.length === 1 && esperando[0].cliente.nombre === 'Espera', `esperando=${esperando.length}`);
+  check('R12b el fallido que volvió cae en yaEnLista', yaEnLista.length === 1 && yaEnLista[0].cliente.nombre === 'Espera En Ruta');
+  check('R12c el agendado sigue en paraHoy', paraHoy.length === 1 && paraHoy[0].cliente.nombre === 'Hoy');
+  check('R12d futuro queda vacío', futuro.length === 0);
+  // item legacy SIN origen pero con para '' también cae en esperando
+  const cola2 = [{ cliente: cli(4, 'Legacy', 'fallida', { cel: '444444444' }), para: '', desde: '2026-10-16' }];
+  const d2 = dividirCola(cola2, hoy, []);
+  check('R12e item con para vacía (legacy) cae en esperando', d2.esperando.length === 1);
+}
+
+// ── R13: purgarCola — auto-limpieza (AD-2) ────────────
+{
+  const hoy = '2026-10-18';
+  const cola = [
+    // vivo: para hoy
+    { cliente: cli(1, 'Para Hoy', 'pendiente', { cel: '111111111' }), para: hoy, desde: '2026-10-17' },
+    // vivo: fallido con 5 días JUSTOS (13 + 5 = 18 → hoy NO lo mata)
+    { cliente: cli(2, 'Fallido Justo', 'fallida', { cel: '222222222' }), para: '', desde: '2026-10-13', origen: 'fallido' },
+    // muerto: fallido con 6 días (12 + 5 = 17 < 18)
+    { cliente: cli(3, 'Fallido Viejo', 'fallida', { cel: '333333333' }), para: '', desde: '2026-10-12', origen: 'fallido' },
+    // muerto: agendado viejo (base = desde 12)
+    { cliente: cli(4, 'Agend Viejo', 'pendiente', { cel: '444444444' }), para: '2026-10-11', desde: '2026-10-12' },
+    // vivo: agendado para dentro de una semana — NO expira antes de su fecha
+    { cliente: cli(5, 'Futuro Lejano', 'pendiente', { cel: '555555555' }), para: '2026-10-25', desde: '2026-10-17' },
+    // resuelto: ya está en la lista de hoy
+    { cliente: cli(6, 'Volvió', 'fallida', { cel: '999888777' }), para: '', desde: '2026-10-17', origen: 'fallido' },
+  ];
+  const hoyLista = [cli(60, 'VOLVIÓ', 'pendiente', { cel: '999-888-777' })];
+  const { vivos, expirados, resueltos } = purgarCola(cola, hoy, hoyLista);
+  check('R13a quedan 3 vivos (para hoy + 5 días justos + futuro)', vivos.length === 3, `dio ${vivos.length}`);
+  check('R13b 2 expirados (fallido y agendado de hace 6 días)', expirados === 2, `dio ${expirados}`);
+  check('R13c 1 resuelto (el que volvió en la lista de hoy)', resueltos === 1, `dio ${resueltos}`);
+  check('R13d los vivos son los correctos', ['Para Hoy', 'Fallido Justo', 'Futuro Lejano'].every(n => vivos.some(v => v.cliente.nombre === n)));
+  check('R13e el agendado para el futuro NO expira antes de su fecha', vivos.some(v => v.cliente.nombre === 'Futuro Lejano'));
+  const p2 = purgarCola(vivos, hoy, hoyLista);
+  check('R13f re-purgar no toca nada (idempotente)', p2.vivos.length === 3 && p2.expirados === 0 && p2.resueltos === 0);
+}
+
+// ── R14: migrarFallidos — ultima cerrada → listita (AD-2) ─
+{
+  const cola = [{ cliente: cli(1, 'Ya Adentro', 'pendiente', { cel: '111111111' }), para: '2026-10-20', desde: '2026-10-17' }];
+  const ultima = {
+    fecha: '2026-10-17',
+    noEntregados: [
+      cli(2, 'Falla Uno', 'fallida', { cel: '222222222' }),
+      cli(3, 'Falla Dos', 'ausente', { cel: '333333333' }),
+      cli(4, 'Pagó', 'efectivo', { cel: '444444444' }),
+      cli(5, 'Colgó', 'pendiente', { cel: '555555555' }),
+      cli(6, 'YA ADENTRO', 'pendiente', { cel: '111-111-111' }), // coincide con la cola
+    ],
+  };
+  const nueva = migrarFallidos(ultima, cola);
+  check('R14a migra SOLO los 2 fallidos', nueva.length === 3, `dio ${nueva.length}`);
+  const f1 = nueva.find(e => e.cliente.nombre === 'Falla Uno');
+  check('R14b Falla Uno entra SIN fecha (esperando)', !!f1 && f1.para === '');
+  check('R14c Falla Uno entra con origen fallido', !!f1 && f1.origen === 'fallido');
+  check('R14d desde = fecha de la ruta cerrada', !!f1 && f1.desde === '2026-10-17');
+  check('R14e el pagado y el colgado NO migran', !nueva.some(e => ['Pagó', 'Colgó'].includes(e.cliente.nombre)));
+  check('R14f el que ya estaba en la cola NO se duplica', nueva.filter(e => String(e.cliente.cel || '').replace(/\D/g, '') === '111111111').length === 1);
+  const misma = migrarFallidos(ultima, nueva);
+  check('R14g re-migrar no agrega nada', misma.length === 3, `dio ${misma.length}`);
+  check('R14h sin ultima devuelve la MISMA referencia (no dispara escrituras)', migrarFallidos(null, cola) === cola);
+  check('R14i sin fallidos que falten → misma referencia', migrarFallidos({ fecha: '2026-10-17', noEntregados: [cli(9, 'Solo Pagó', 'efectivo')] }, cola) === cola);
+  check('R14j ultima sin noEntregados → misma referencia', migrarFallidos({ fecha: '2026-10-17', noEntregados: [] }, cola) === cola);
+}
+
 // ── resultado ──────────────────────────────────────────────
-console.log(`\n═══ FASE AD (reprogramados): ${pass} ✓ / ${fail} ✗ ═══`);
+console.log(`\n═══ FASE AD-2 (reprogramados + fallidos + auto-limpieza): ${pass} ✓ / ${fail} ✗ ═══`);
 process.exit(fail === 0 ? 0 : 1);

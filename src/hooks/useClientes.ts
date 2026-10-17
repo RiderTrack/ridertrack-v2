@@ -35,6 +35,9 @@ import {
   coinciden,
   esEntregado,
   quitarDeCola,
+  // 🆕 FASE AD-2: fallidos a la listita + auto-limpieza
+  purgarCola,
+  migrarFallidos,
 } from '../services/reprog';
 import {
   batchGeocodificar,
@@ -269,6 +272,13 @@ export function useClientes() {
   }, [user?.uid]);
 
   /** Guarda la cola (estado + espejo local + Firestore merge) */
+  /** Fecha de HOY en Lima (la misma regla de stats.hoyISO, sin import
+   *  extra) — declarada ANTES de los efectos AD-2 que la usan */
+  const hoyISOLocal = useCallback(
+    () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }),
+    []
+  );
+
   const persistirCola = useCallback(
     (nueva: Reprogramado[]) => {
       setReprogramados(nueva);
@@ -282,6 +292,39 @@ export function useClientes() {
     },
     [user]
   );
+
+  // ═══ 🆕 FASE AD-2: AUTO-CUIDADO DE LA LISTITA — UN solo efecto
+  // (migrar fallidos de la última cerrada → purgar resueltos y
+  // expirados). Van JUNTOS y en ese orden para que la purga nunca
+  // PISE lo que la migración acaba de escribir: ambos pasos leen
+  // el MISMO estado del render y escriben UNA sola vez.
+  //   · MIGRAR — Rudy (18 oct): "cuando pongo fallido porque no sé
+  //     si lo van a reprogramar... los clientes fallidos también
+  //     que estén en la listita": los fallidos de la última ruta
+  //     cerrada (que solo recordaba el banner B) entran a la cola.
+  //     Idempotente: devuelve la MISMA referencia si no hay nada.
+  //   · 🧹 PURGAR — "se iba acumulando... darle un tiempo prudencial,
+  //     no sé, tres cinco días... si no sale el programa el cliente
+  //     se borra automáticamente": RESUELTOS (el cliente ya volvió
+  //     en la lista de hoy — el Excel nuevo lo trajo) salen de la
+  //     listita; EXPIRADOS (más de 5 días sin volver) se borran
+  //     solos. Silencioso por diseño (como el respaldo vivo F3.53):
+  //     la nota "se limpian solos a los 5 días" vive en el panel.
+  useEffect(() => {
+    if (!user) return;
+    // espera el snapshot real (no pisar la nube con el espejo vacío)
+    if (!reprogSyncedRef.current) return;
+    if (reprogramados.length === 0 && !ultimaCerrada) return;
+    try {
+      // 1) fallidos de la última cerrada → listita
+      const migrada = migrarFallidos(ultimaCerrada, reprogramados);
+      // 2) resueltos y expirados → fuera
+      const { vivos } = purgarCola(migrada, hoyISOLocal(), clientes);
+      if (migrada !== reprogramados || vivos.length !== migrada.length) {
+        persistirCola(vivos);
+      }
+    } catch { /* best-effort: nunca rompe la app */ }
+  }, [user, reprogramados, ultimaCerrada, clientes, persistirCola, hoyISOLocal]);
 
   // Guardar clientes en ruta_activa Y en V2 (respaldo)
   const guardar = useCallback(async (nuevosClientes: Cliente[]) => {
@@ -310,12 +353,6 @@ export function useClientes() {
   // (van DESPUÉS de agregarCliente/guardar — las de agregar usan
   // agregarCliente, que está declarado arriba; antes de esto daba
   // error de "usada antes de declarar".)
-
-  /** Fecha de HOY en Lima (la misma regla de stats.hoyISO, sin import extra) */
-  const hoyISOLocal = useCallback(
-    () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }),
-    []
-  );
 
   /** Agenda un pedido para una fecha (botón 🔄 o tilde del reporte MATE) */
   const agendarReprogramado = useCallback(
