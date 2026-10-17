@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
+// 🚀 FASE AB-1: Arranque rápido — el splash nativo se oculta desde JS
+import { SplashScreen } from '@capacitor/splash-screen';
 // F3.28: deep link de Spotify capturado a NIVEL TOP (login incluido)
 import { parsearCallbackSpotify, spotifyExchangeCode } from './services/spotify';
 import { NavigationTab, Order, Driver, OrderStatus, WhatsAppMessage, AppNotification, ActivityItem } from './types';
@@ -190,6 +192,17 @@ export default function App() {
   // respalda en usuarios/{uid}.tema (reinstalo / otro celular →
   // el look vuelve solo). Sin sesión: todo local como en F3.51.
   useSincronizacionTema(user?.uid);
+
+  // 🚀 FASE AB-1: Arranque rápido — antes el splash estaba FORZADO a
+  // 2 s (launchShowDuration: 2000) en CADA apertura. Ahora se oculta
+  // en el PRIMER paint de React (el "Cargando...", el login o la app:
+  // lo primero que esté listo) con un fade corto. El launchShowDuration
+  // de 8000 queda solo como RED DE SEGURIDAD nativa: si el JS nunca
+  // llegara a correr, Android lo esconde igual solo — nunca queda pegado.
+  // En navegador/web es un no-op inofensivo (impl. web vacía).
+  useEffect(() => {
+    SplashScreen.hide({ fadeOutDuration: 250 }).catch(() => {/* web o ya oculto */});
+  }, []);
 
   // 📋 Datos REALES de la ruta (Firestore: ruta_activa + clientes_registrados)
   const {
