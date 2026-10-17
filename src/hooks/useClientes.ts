@@ -19,7 +19,23 @@ import {
   encolarAccionBot,
   _botCel,
   guardarAutoBackupVivo,
+  // 📅 FASE AD: cola de reprogramados + última ruta cerrada
+  guardarReprogramados,
+  subscribeToReprogramados,
+  leerUltimaRuta,
+  guardarUltimaCerrada,
 } from '../services/firestore';
+// 📅 FASE AD: motor puro — la cola se guarda en usuarios/{uid}
+// (mismo doc que la ruta) y las fechas viajan como parámetro.
+import {
+  type Reprogramado,
+  type UltimaCerrada,
+  autoColaAlCerrar,
+  clienteParaRuta,
+  coinciden,
+  esEntregado,
+  quitarDeCola,
+} from '../services/reprog';
 import {
   batchGeocodificar,
   obtenerPosicionActual,
@@ -80,6 +96,16 @@ export function useClientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
+
+  // 📅 FASE AD: cola de reprogramados + snapshot de la última ruta
+  // cerrada. Viven en usuarios/{uid} (tiempo real) con espejo local
+  // para el arranque instantáneo/sin conexión.
+  const [reprogramados, setReprogramados] = useState<Reprogramado[]>([]);
+  const [ultimaCerrada, setUltimaCerrada] = useState<UltimaCerrada | null>(null);
+  /** llegó ya el primer snapshot de Firestore (no pisar el espejo local antes) */
+  const reprogSyncedRef = useRef(false);
+  /** snapshot vivo de la última CERRADA — para el respaldo del historial */
+  const ultimaCerradaRef = useRef<UltimaCerrada | null>(null);
 
   // Refs para guardar los datos de cada listener por separado
   const clientesRutaRef = useRef<Cliente[]>([]);
@@ -173,6 +199,90 @@ export function useClientes() {
     };
   }, [user, combinarClientes]);
 
+  // ═══ 📅 FASE AD: suscripción de la COLA + ÚLTIMA CERRADA ═══
+  // Espejo local para pintar instantáneo al abrir; el snapshot de
+  // Firestore es la verdad apenas llega (reprogSyncedRef evita que
+  // un snapshot vacío inicial pise un espejo local recién escrito).
+  // 📅 FASE AD: la clave del espejo local va dentro del efecto
+  useEffect(() => {
+    if (!user) {
+      setReprogramados([]);
+      setUltimaCerrada(null);
+      reprogSyncedRef.current = false;
+      ultimaCerradaRef.current = null;
+      return;
+    }
+    // arranque desde el espejo local (offline / primer render) — SOLO la
+    // cola (ultimaCerrada no se espeja: el snapshot/respaldo la traen
+    // fresca siempre — propagarla la volvía eterna entre sesiones)
+    try {
+      const crudo = localStorage.getItem(`rt_reprog_${user.uid}`);
+      if (crudo && !reprogSyncedRef.current) {
+        const espejo = JSON.parse(crudo) as { cola?: Reprogramado[] };
+        setReprogramados(espejo.cola || []);
+      }
+    } catch { /* espejo corrupto → ignora */ }
+
+    const unsub = subscribeToReprogramados(
+      user.uid,
+      (cola, ultima) => {
+        reprogSyncedRef.current = true;
+        setReprogramados(cola);
+        // el snapshot del doc SIEMPRE manda (bug del E2E: antes el
+        // respaldo local se pisaba con null en cada escritura; ahora
+        // el respaldo se MIGRA al doc apenas se lee → el snapshot lo
+        // sostiene solo). Parpadeo posible solo la primera vez.
+        setUltimaCerrada(ultima);
+        ultimaCerradaRef.current = ultima;
+        try {
+          localStorage.setItem(`rt_reprog_${user.uid}`, JSON.stringify({ cola }));
+        } catch { /* cuota llena → solo Firestore */ }
+      },
+      () => { /* sin permiso/ offline: queda el espejo local */ }
+    );
+
+    // Respaldo + MIGRACIÓN: rutas cerradas con versiones ANTERIORES a
+    // la FASE AD no escribieron ultimaCerrada en el doc → se lee la
+    // última del historial UNA vez, se muestra y se MIGRA al doc (el
+    // snapshot posterior la sostiene; sin migrar, cada escritura del
+    // doc la borraba de la pantalla — bug real encontrado en el E2E).
+    if (!ultimaCerradaRef.current) {
+      void (async () => {
+        try {
+          const reg = await leerUltimaRuta(user.uid);
+          if (!reg || !(reg.clientes || []).length) return;
+          const noEnt = reg.clientes.filter((c) => c && c.nombre && !esEntregado(c.st));
+          if (noEnt.length === 0) return;
+          if (ultimaCerradaRef.current) return; // llegó del snapshot mientras leíamos
+          const uc: UltimaCerrada = { fecha: reg.fecha, noEntregados: noEnt };
+          ultimaCerradaRef.current = uc;
+          setUltimaCerrada(uc);
+          // 📅 migración: persistir para que el snapshot la sostenga
+          void guardarUltimaCerrada(user.uid, uc);
+        } catch { /* respaldo best-effort */ }
+      })();
+    }
+
+    return unsub;
+    // CLAVE_REPROG intencional: solo re-suscribir al cambiar de usuario
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
+  /** Guarda la cola (estado + espejo local + Firestore merge) */
+  const persistirCola = useCallback(
+    (nueva: Reprogramado[]) => {
+      setReprogramados(nueva);
+      reprogSyncedRef.current = true; // optimista: lo local manda hasta el snapshot
+      if (user) {
+        try {
+          localStorage.setItem(`rt_reprog_${user.uid}`, JSON.stringify({ cola: nueva }));
+        } catch { /* cuota */ }
+        void guardarReprogramados(user.uid, nueva);
+      }
+    },
+    [user]
+  );
+
   // Guardar clientes en ruta_activa Y en V2 (respaldo)
   const guardar = useCallback(async (nuevosClientes: Cliente[]) => {
     if (!user) return;
@@ -195,6 +305,63 @@ export function useClientes() {
     const nuevos = [...clientes, cliente];
     guardar(nuevos);
   }, [clientes, guardar]);
+
+  // ═══ 📅 FASE AD: ACCIONES DE REPROGRAMADOS ═══
+  // (van DESPUÉS de agregarCliente/guardar — las de agregar usan
+  // agregarCliente, que está declarado arriba; antes de esto daba
+  // error de "usada antes de declarar".)
+
+  /** Fecha de HOY en Lima (la misma regla de stats.hoyISO, sin import extra) */
+  const hoyISOLocal = useCallback(
+    () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }),
+    []
+  );
+
+  /** Agenda un pedido para una fecha (botón 🔄 o tilde del reporte MATE) */
+  const agendarReprogramado = useCallback(
+    (cliente: Cliente, para: string) => {
+      if (!cliente || !cliente.nombre) return;
+      const nuevo: Reprogramado = {
+        cliente,
+        para,
+        desde: hoyISOLocal(),
+        creadoAt: new Date().toISOString(),
+      };
+      // si ya estaba agendado para OTRA fecha, se re-agenda (fuera la vieja)
+      const sinVieja = reprogramados.filter((e) => !coinciden(e.cliente, cliente));
+      persistirCola([...sinVieja, nuevo]);
+    },
+    [reprogramados, persistirCola, hoyISOLocal]
+  );
+
+  /** Pasa un agendado de la cola a la ruta de HOY (botón ➕ del banner) */
+  const agregarDeCola = useCallback(
+    (item: Reprogramado) => {
+      const num = clientes.reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
+      agregarCliente(clienteParaRuta(item.cliente, num, item.desde));
+      persistirCola(reprogramados.filter((e) => e !== item));
+    },
+    [clientes, reprogramados, persistirCola, agregarCliente]
+  );
+
+  /** Pasa un NO ENTREGADO de la última ruta cerrada a hoy (➕ del banner B) */
+  const agregarNoEntregado = useCallback(
+    (cliente: Cliente, desde: string) => {
+      const num = clientes.reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
+      agregarCliente(clienteParaRuta(cliente, num, desde));
+      // si por las dudas estaba en la cola, fuera también (misma persona)
+      persistirCola(quitarDeCola(reprogramados, cliente));
+    },
+    [clientes, reprogramados, persistirCola, agregarCliente]
+  );
+
+  /** Descarta un agendado de la cola (✕) */
+  const descartarDeCola = useCallback(
+    (item: Reprogramado) => {
+      persistirCola(reprogramados.filter((e) => e !== item));
+    },
+    [reprogramados, persistirCola]
+  );
 
   // Actualizar un cliente
   // (Fase 2.4: si un valor del cambio es explícitamente `undefined`,
@@ -254,7 +421,10 @@ export function useClientes() {
 
     const nuevos = clientes.map(c => {
       if (c.id === id) {
-        return {
+        // 📅 FASE AD: si quedó ENTREGADO, las marcas de reprogramado
+        // se limpian (ya no viene “mañana”: se entregó HOY) — se
+        // ELIMINAN las claves, nunca undefined (Firestore lo rechaza).
+        const limpio: Record<string, unknown> = {
           ...c,
           st: estado,
           hora,
@@ -262,10 +432,22 @@ export function useClientes() {
           // ruta_activa y en la ficha (no se pierde al reiniciar)
           ...(decision.dispara ? { graciasEnviado: true } : {}),
         };
+        if (esEntregado(estado)) {
+          delete limpio.reprogramadoPara;
+          delete limpio.reprog;
+          delete limpio.reprogDesde;
+        }
+        return limpio as unknown as Cliente;
       }
       return c;
     });
     guardar(nuevos);
+    // 📅 FASE AD: entregado HOY → su agendado en la cola ya no tiene
+    // sentido (nunca va a “volver” mañana) → sale de la cola.
+    if (esEntregado(estado) && previa && reprogramados.length > 0) {
+      const depurada = quitarDeCola(reprogramados, previa);
+      if (depurada.length !== reprogramados.length) persistirCola(depurada);
+    }
     // También actualizar en ruta_activa (optimistic update para que el Modular lo vea al instante)
     if (user) {
       actualizarClienteEnRutaActiva(user.uid, id, {
@@ -315,7 +497,7 @@ export function useClientes() {
         }));
       } catch { /* defensivo */ }
     }
-  }, [clientes, guardar, user, profile]);
+  }, [clientes, guardar, user, profile, reprogramados, persistirCola]);
 
   // Importar desde Excel - sincroniza con ruta_activa automáticamente
   const importarDesdeExcel = useCallback(async (file: File): Promise<number> => {
@@ -375,6 +557,15 @@ export function useClientes() {
 
       const res = await finalizarRuta(user.uid, clientes, tiempoRutaMs || undefined);
 
+      // 📅 FASE AD: los pedidos marcados 🔄 Reprogramado pasan SOLOS
+      // a la cola (para su fecha o mañana si no tenían) — así no se
+      // pierden al limpiar la lista. El snapshot de no entregados de
+      // la ruta lo escribe finalizarRuta en usuarios.ultimaCerrada.
+      try {
+        const colaNueva = autoColaAlCerrar(clientes, hoyISOLocal(), reprogramados);
+        if (colaNueva.length !== reprogramados.length) persistirCola(colaNueva);
+      } catch { /* best-effort: nunca bloquea el cierre */ }
+
       // 🧹 Lista limpia YA (el listener lo confirmará con el doc vacío)
       setClientes([]);
       clientesRutaRef.current = [];
@@ -387,7 +578,7 @@ export function useClientes() {
     } finally {
       setSincronizando(false);
     }
-  }, [user, clientes]);
+  }, [user, clientes, reprogramados, persistirCola, hoyISOLocal]);
 
   // 💾 GUARDAR Y CERRAR RUTA — Fase 2.6 (fix): ahora idéntico a
   // finalizarRutaActual (cerrar() de la v1). Antes guardaba en
@@ -698,8 +889,11 @@ export function useClientes() {
       ['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(c.st)
     ).length;
     const pendientes = clientes.filter(c => c.st === 'pendiente' || !c.st).length;
+    // 📅 FASE AD: 'reprogramar' ahora cuenta como NO entregado — antes
+    // quedaba en un limbo (ni pendiente ni fallido) y el contador del
+    // header no cuadraba con el total. Es verdad: hoy no se entregó.
     const fallidos = clientes.filter(c =>
-      ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta'].includes(c.st)
+      ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta', 'reprogramar'].includes(c.st)
     ).length;
 
     const cobrado = clientes
@@ -733,5 +927,12 @@ export function useClientes() {
     moverCliente,
     editarNumeroOrden,
     guardarFotoEntrega,
+    // 📅 FASE AD: reprogramados
+    reprogramados,
+    ultimaCerrada,
+    agendarReprogramado,
+    agregarDeCola,
+    agregarNoEntregado,
+    descartarDeCola,
   };
 }

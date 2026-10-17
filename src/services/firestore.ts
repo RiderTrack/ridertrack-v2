@@ -29,6 +29,11 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
+// 📅 FASE AD: motor puro de reprogramados (noEntregados para el
+// cierre) + tipos de la cola. `import type` se borra al compilar
+// → sin ciclo runtime firestore↔reprog.
+import { noEntregados } from './reprog';
+import type { Reprogramado, UltimaCerrada } from './reprog';
 import { cargarConfigPagoPedidos, calcularPagoPedidos } from '../utils/pagoPedidosCore'; // 🛵 FASE D
 // 🚀 FASE AB-2: la librería de Excel ya NO viaja en el paquete inicial
 // (se cargaba SIEMPRE aunque nunca importaras un backup): ahora se trae
@@ -74,6 +79,16 @@ export interface Cliente {
    *  lo decide la lista de distritos lejanos de la config. Viaja
    *  con el cliente (ruta_activa + usuarios) → aparece en el cel 2. */
   lejos?: boolean;
+  /** 📅 FASE AD: para cuándo quedó reprogramado (YYYY-MM-DD) — se
+   *  muestra en la tarjeta como “📅 para {fecha}” cuando st=reprogramar */
+  reprogramadoPara?: string;
+  /** 📅 FASE AD: true = este pedido ingresó a la ruta tras un
+   *  reprogramado (agregado con ➕ o porque el Excel nuevo ya lo
+   *  traía) → badge 🔁 en la tarjeta */
+  reprog?: boolean;
+  /** 📅 FASE AD: fecha de la ruta de la que vino (YYYY-MM-DD) —
+   *  para mostrar “fallido el {fecha}” junto al badge */
+  reprogDesde?: string;
 }
 
 export interface RutaActiva {
@@ -189,6 +204,134 @@ export async function guardarClientes(userId: string, clientes: Cliente[]): Prom
     console.log('✅ Clientes guardados en Firestore:', clientes.length);
   } catch (e) {
     console.error('❌ Error guardando clientes:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 📅 FASE AD: COLA DE REPROGRAMADOS + ÚLTIMA RUTA CERRADA
+// Viven en el MISMO doc del usuario (usuarios/{uid}, merge-write
+// → jamás toca `clientes` ni `config`): la cola en `reprogramados`
+// y el snapshot del cierre en `ultimaCerrada`. Cero reglas nuevas:
+// ese doc ya es lectura/escritura del dueño (guardarClientes igual).
+// ═══════════════════════════════════════════════════════════
+
+/** Guarda la cola completa de reprogramados (merge en usuarios) */
+export async function guardarReprogramados(userId: string, items: Reprogramado[]): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    await setDoc(doc(db, 'usuarios', userId), {
+      reprogramados: items,
+      reprogActualizadoEn: serverTimestamp(),
+    }, { merge: true });
+    console.log('✅ Reprogramados guardados:', items.length);
+  } catch (e) {
+    console.error('❌ Error guardando reprogramados:', e);
+  }
+}
+
+/**
+ * 📅 FASE AD: persiste el snapshot de la última ruta cerrada. Se usa
+ * en la MIGRACIÓN: las rutas cerradas con versiones anteriores no
+ * escribieron `ultimaCerrada` — al leerla del historial (respaldo),
+ * se guarda acá para que el snapshot en vivo no la pise con null
+ * en cada escritura del doc (bug encontrado en el E2E: el banner
+ * de "fallidos de ayer" desaparecía al primer guardar).
+ */
+export async function guardarUltimaCerrada(userId: string, ultima: UltimaCerrada): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    await setDoc(doc(db, 'usuarios', userId), { ultimaCerrada: ultima }, { merge: true });
+  } catch (e) {
+    console.error('❌ Error guardando ultimaCerrada:', e);
+  }
+}
+
+/**
+ * Escucha la cola de reprogramados + el snapshot de la última
+ * ruta cerrada en TIEMPO REAL (mismo doc que subscribeToClientes
+ * → el SDK comparte el watch, costo marginal cero).
+ */
+export function subscribeToReprogramados(
+  userId: string,
+  onUpdate: (reprogramados: Reprogramado[], ultimaCerrada: UltimaCerrada | null) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (!db || !userId) {
+    onUpdate([], null);
+    return () => {};
+  }
+  try {
+    const userDocRef = doc(db, 'usuarios', userId);
+    return onSnapshot(
+      userDocRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          onUpdate([], null);
+          return;
+        }
+        const data = snapshot.data();
+        const cola = Array.isArray(data.reprogramados) ? (data.reprogramados as Reprogramado[]) : [];
+        const uc = data.ultimaCerrada;
+        const ultima =
+          uc && typeof uc === 'object' && Array.isArray((uc as any).noEntregados)
+            ? (uc as UltimaCerrada)
+            : null;
+        onUpdate(cola, ultima);
+      },
+      (err) => {
+        console.warn('Error subscribe reprogramados:', err);
+        onError?.(err);
+        onUpdate([], null);
+      }
+    );
+  } catch (e) {
+    console.warn('Excepción subscribe reprogramados:', e);
+    onUpdate([], null);
+    return () => {};
+  }
+}
+
+/**
+ * 📅 FASE AD: la última ruta CERRADA del usuario — respaldo para
+ * el cruce de “fallidos de ayer” cuando `usuarios.ultimaCerrada`
+ * todavía no existe (rutas cerradas con versiones anteriores a
+ * la FASE AD — al leerlo una vez, se migra al doc del usuario).
+ * Light: máx 30 docs + orden local por finalizadaAt (mismo
+ * comparador que leerHistorial, sin índices compuestos).
+ */
+export async function leerUltimaRuta(userId: string): Promise<RegistroHistorial | null> {
+  if (!db || !userId) return null;
+  try {
+    const ref = collection(db, 'historial_rutas');
+    const q = query(ref, where('uid', '==', userId), limit(30));
+    const snap = await getDocs(q);
+    const registros: RegistroHistorial[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data?.uid !== userId && !d.id.startsWith(`${userId}_`)) return;
+      registros.push({
+        id: d.id,
+        uid: data.uid || userId,
+        fecha: data.fecha || '',
+        iniciadaAt: data.iniciadaAt,
+        finalizadaAt: data.finalizadaAt,
+        totalClientes: data.totalClientes || 0,
+        entregados: data.entregados || 0,
+        fallidos: data.fallidos || 0,
+        pendientes: data.pendientes || 0,
+        cobradoTotal: data.cobradoTotal || 0,
+        clientes: data.clientes || [],
+      });
+    });
+    registros.sort((a, b) => {
+      const ka = a.finalizadaAt || a.iniciadaAt || a.fecha || '';
+      const kb = b.finalizadaAt || b.iniciadaAt || b.fecha || '';
+      return kb.localeCompare(ka);
+    });
+    return registros[0] || null;
+  } catch (e) {
+    console.error('❌ Error leyendo última ruta:', e);
+    return null;
   }
 }
 
@@ -520,10 +663,40 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     }, { merge: true });
 
     // 4. Limpiar también el respaldo local de clientes
+    //    📅 FASE AD: en el MISMO merge viaja el snapshot de la última
+    //    ruta cerrada (fecha + no entregados CON coordenadas) — al día
+    //    siguiente Mi Ruta cruza solita quiénes volvieron reprogramados
+    //    en el Excel nuevo (badge 🔁) y quiénes no volvieron (botón ➕
+    //    Pasar a hoy, sin bajar el Excel completo de nuevo).
+    //    Si falla, NO bloquea el cierre (mismo try/catch que antes).
+    const noEntSnap = noEntregados(clientes).map((c) => ({
+      id: c.id,
+      num: c.num || null,
+      nombre: c.nombre || 'Cliente',
+      cel: c.cel || '',
+      prod: c.prod || '',
+      precio: parseFloat(String(c.precio || 0)),
+      cobrar: parseFloat(String(c.cobrar || 0)),
+      dir: c.dir || '',
+      dist: c.dist || '',
+      obs: c.obs || '',
+      st: c.st || 'pendiente',
+      hora: c.hora || '',
+      nota: c.nota || '',
+      ...(typeof c.lat === 'number' && typeof c.lng === 'number'
+        ? { lat: c.lat, lng: c.lng, ...(c.latSrc ? { latSrc: c.latSrc } : {}) }
+        : {}),
+      ...(typeof c.lejos === 'boolean' ? { lejos: c.lejos } : {}),
+      ...(c.reprogramadoPara ? { reprogramadoPara: c.reprogramadoPara } : {}),
+    }));
     try {
       await setDoc(doc(db, 'usuarios', userId), {
         clientes: [],
         rutaLimpiadaAt: new Date().toISOString(),
+        ultimaCerrada: {
+          fecha: fechaHoy,
+          noEntregados: noEntSnap,
+        },
       }, { merge: true });
     } catch (e) {
       console.warn('⚠️ No se pudo limpiar usuarios/{uid}.clientes:', (e as Error).message);
@@ -650,6 +823,12 @@ export function subscribeToRutaActiva(
               ? { lat: c.lat, lng: c.lng }
               : {}),
             ...(c.latSrc ? { latSrc: c.latSrc } : {}),
+            // 📅 FASE AD: la marca de reprogramado VUELVE del doc del
+            // bot (misma lección del lejos — sin leerla de vuelta, el
+            // publish la borra al primer update).
+            ...(c.reprog === true ? { reprog: true } : {}),
+            ...(c.reprogDesde ? { reprogDesde: c.reprogDesde } : {}),
+            ...(c.reprogramadoPara ? { reprogramadoPara: c.reprogramadoPara } : {}),
           }));
           console.log('🔄 Clientes del Modular cargados:', clientes.length);
           onUpdate(clientes, { existe: true });
@@ -805,6 +984,12 @@ export async function publicarClientesEnRutaActiva(
         ? { lat: c.lat, lng: c.lng }
         : {}),
       ...(c.latSrc ? { latSrc: c.latSrc } : {}),
+      // 📅 FASE AD: la marca de reprogramado viaja con el cliente —
+      // sin esto el snapshot del bot la BORRABA en cada update y el
+      // badge 🔁 desaparecía al instante (misma lección del lejos).
+      ...(c.reprog ? { reprog: true } : {}),
+      ...(c.reprogDesde ? { reprogDesde: c.reprogDesde } : {}),
+      ...(c.reprogramadoPara ? { reprogramadoPara: c.reprogramadoPara } : {}),
     }));
 
     await setDoc(rutaRef, {

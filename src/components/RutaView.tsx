@@ -41,6 +41,10 @@ import { FotoEntregaModal } from './FotoEntregaModal';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
+// 📅 FASE AD: panel de reprogramados (agendados + no entregados de
+// la última ruta cerrada) + helpers puros para badges y el modal
+import { ReprogramadosPanel } from './ReprogramadosPanel';
+import { reincidentesDeHoy, sumaDiasISO } from '../services/reprog';
 import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import { Flag, MapPinned, ClipboardList, Copy, Check, Bike, Navigation as NavigationIcon } from 'lucide-react';
@@ -72,7 +76,7 @@ interface RutaViewProps {
 
 export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
-  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion } = useClientes();
+  const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion, reprogramados, ultimaCerrada, agendarReprogramado, agregarDeCola, agregarNoEntregado, descartarDeCola } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
 
   // 💜 FASE Y: QR de cobro por cliente — botoncito en cada fila que
@@ -96,6 +100,25 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // siempre (fila + ruta_activa + caja).
   const [qrMontoEdit, setQrMontoEdit] = useState('');
   const [qrMontoGuardando, setQrMontoGuardando] = useState(false);
+
+  // 📅 FASE AD: reprogramar un pedido — el botón 🔄 de la tarjeta
+  // abre el “¿Para cuándo?” (Mañana / Pasado / fecha) y agenda.
+  const [reprogModalId, setReprogModalId] = useState<string | number | null>(null);
+  const [reprogFecha, setReprogFecha] = useState('');
+  const [reprogOtra, setReprogOtra] = useState('');
+  /** HOY en Lima — la misma regla del resto de la app (stats.hoyISO) */
+  const hoyLima = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  /** clientes de HOY que ya estaban como no entregados en la última
+   *  ruta cerrada (los reprogramados que el Excel nuevo trajo) → 🔁 */
+  const reincidentes = useMemo(
+    () => reincidentesDeHoy(clientes, ultimaCerrada?.noEntregados || []),
+    [clientes, ultimaCerrada]
+  );
+  const clienteReprog = useMemo(
+    () => clientes.find((c) => c.id === reprogModalId) || null,
+    [clientes, reprogModalId]
+  );
+  const fechaParaModal = reprogFecha === 'otra' ? reprogOtra : reprogFecha;
 
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'entregados' | 'fallidos' | 'noentreg' | 'empresa' | 'mzsn'>('todos');
@@ -237,6 +260,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [mateTab, setMateTab] = useState<'estado' | 'mensaje'>('estado');
   const [mateEstadoSel, setMateEstadoSel] = useState<string>('');
   const [mateReprogramar, setMateReprogramar] = useState<string>('');
+  // 📅 FASE AD: tilde “agendar en mi ruta” (aprobado por Rudy) — cuando
+  // el reporte a MATE dice REPROGRAMAR, el mismo envío agenda el pedido
+  // en la cola para que vuelva solo. Prendido por defecto.
+  const [mateAgendar, setMateAgendar] = useState(true);
   const [mateMinutos, setMateMinutos] = useState<number | null>(null);
   const [mateMinutosCustom, setMateMinutosCustom] = useState('');
   const [matePlantillaSel, setMatePlantillaSel] = useState<string>('');
@@ -933,6 +960,21 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         />
       </div>
 
+      {/* 📅 FASE AD: reprogramados — (A) los que agendaste con 🔄 y
+          (B) los no entregados de la última ruta cerrada (quiénes
+          volvieron reprogramados en el Excel nuevo 🔁 y quiénes
+          faltan, con ➕ para pasarlos a hoy sin bajar el Excel). */}
+      <ReprogramadosPanel
+        cola={reprogramados}
+        ultimaCerrada={ultimaCerrada}
+        clientesHoy={clientes}
+        hoy={hoyLima}
+        onAgregarDeCola={agregarDeCola}
+        onAgregarNoEntregado={agregarNoEntregado}
+        onDescartarDeCola={descartarDeCola}
+        onShowToast={onShowToast}
+      />
+
       {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
       <div className="rounded-xl bg-slate-800 border border-slate-700 overflow-hidden">
         <button
@@ -1494,6 +1536,32 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           📝
                         </span>
                       )}
+                      {/* 📅 FASE AD: reprogramado — el pedido ya estuvo en una
+                          ruta anterior (fallido) y volvió: lo agendaste con 🔄 o
+                          lo trajo el Excel nuevo. De un vistazo al deslizar. */}
+                      {(c.reprog || reincidentes.has(c.id)) && (
+                        <span
+                          data-testid="badge-reprog"
+                          className="px-1 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[8px] font-bold shrink-0 leading-none"
+                          title={
+                            c.reprogDesde || ultimaCerrada?.fecha
+                              ? `Reprogramado — venía de la ruta del ${new Date((c.reprogDesde || ultimaCerrada?.fecha || hoyLima) + 'T12:00:00').toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}`
+                              : 'Reprogramado de una ruta anterior'
+                          }
+                        >
+                          🔁
+                        </span>
+                      )}
+                      {/* 📅 FASE AD: agendado para una fecha — visible en la
+                          tarjeta mientras espera su día (st = reprogramar) */}
+                      {(c.st || '') === 'reprogramar' && c.reprogramadoPara && (
+                        <span
+                          data-testid="badge-reprog-para"
+                          className="px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[8px] font-bold shrink-0 leading-none"
+                        >
+                          📅 {new Date(c.reprogramadoPara + 'T12:00:00').toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}
+                        </span>
+                      )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -1639,19 +1707,33 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         <div className="text-[9px] text-slate-500 uppercase mt-1.5 mb-1">No entregado</div>
                         <div className="grid grid-cols-3 gap-1">
                           {/* ⚡ F3.47: el fallido ACTIVO también queda resaltado (anillo rojo + ✓) */}
+                          {/* 📅 FASE AD: el botón 🔄 Reprog. ya NO solo pinta el estado —
+                              AGENDA el pedido para que vuelva a tu ruta ese día (banner
+                              de arriba). Los demás estados quedan igual (un tap). */}
                         {estadosFallidos.map(([id, emoji, label]) => {
                           const activo = (c.st || '') === id;
                           return (
                             <button
                               key={id}
                               onClick={() => {
+                                if (id === 'reprogramar') {
+                                  setReprogModalId(c.id);
+                                  setReprogFecha(sumaDiasISO(hoyLima, 1));
+                                  setReprogOtra('');
+                                  return;
+                                }
                                 cambiarEstado(c.id, id);
                                 onShowToast?.('Estado actualizado', `${c.nombre}: ${label}`, 'warning');
                               }}
+                              data-testid={`btn-estado-${id}-${c.id}`}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
-                                activo
-                                  ? 'bg-red-500/35 text-red-200 ring-2 ring-red-400 shadow-[0_0_10px_rgba(239,68,68,0.45)]'
-                                  : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                id === 'reprogramar'
+                                  ? activo
+                                    ? 'bg-violet-500/35 text-violet-200 ring-2 ring-violet-400 shadow-[0_0_10px_rgba(139,92,246,0.45)]'
+                                    : 'bg-violet-500/15 text-violet-300 border border-violet-500/40 hover:bg-violet-500/25'
+                                  : activo
+                                    ? 'bg-red-500/35 text-red-200 ring-2 ring-red-400 shadow-[0_0_10px_rgba(239,68,68,0.45)]'
+                                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
                               }`}
                             >
                               {activo ? '✓ ' : ''}{emoji} {label}
@@ -2644,6 +2726,23 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block flex items-center gap-1">📅 Reprogramar para <span className="text-slate-500 normal-case font-normal">(opcional)</span></label>
                                   <input type="datetime-local" value={mateReprogramar} onChange={e => setMateReprogramar(e.target.value)} className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-orange-500 outline-none" />
                                   {mateReprogramar && (<button onClick={() => setMateReprogramar('')} className="mt-1 text-[10px] text-red-400 hover:text-red-300">✕ Quitar fecha</button>)}
+                                  {/* 📅 FASE AD: el MISMO reporte agenda el pedido en la
+                                      cola (aprobado por Rudy) — solo visible con estado
+                                      Reprogramar. No toca el st de la ruta (Fase 3.26):
+                                      solo lo anota para que vuelva ese día. */}
+                                  {mateEstadoSel === 'reprogramar' && (
+                                    <label className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/30 cursor-pointer" data-testid="mate-agendar">
+                                      <input
+                                        type="checkbox"
+                                        checked={mateAgendar}
+                                        onChange={e => setMateAgendar(e.target.checked)}
+                                        className="mt-0.5 accent-violet-500 w-3.5 h-3.5"
+                                      />
+                                      <span className="text-[10px] text-violet-300 leading-relaxed">
+                                        <b>➕ Agendar en mi ruta</b> — el pedido entra a la cola de reprogramados y ese día aparece arriba en Mi Ruta con botón ➕ (sin bajar el Excel). <span className="text-slate-400">No cambia su estado en la ruta de hoy.</span>
+                                      </span>
+                                    </label>
+                                  )}
                                 </div>
 
                                 <div>
@@ -2770,6 +2869,19 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     // limpios. El bot v1.6 (f3.60) ya lo respeta.
                                     conImagen: true,
                                   });
+                                  // ═══ 📅 FASE AD: agendar en la cola (tilde
+                                  // aprobado por Rudy) — SOLO cuando el reporte
+                                  // dice Reprogramar. No toca el st de la ruta
+                                  // (Fase 3.26 intacta): únicamente anota el
+                                  // pedido para que ese día vuelva solo arriba. ═══
+                                  let agendadoPara = '';
+                                  if (mateEstadoSel === 'reprogramar' && mateAgendar) {
+                                    const crudo = (mateReprogramar || '').slice(0, 10);
+                                    agendadoPara = /^\d{4}-\d{2}-\d{2}$/.test(crudo)
+                                      ? crudo
+                                      : sumaDiasISO(hoyLima, 1);
+                                    agendarReprogramado(c, agendadoPara);
+                                  }
                                   // ═══ FASE 3.26 — REPORTE DESACOPLADO ═══
                                   // ANTES: al elegir "No contesta/Ausente/etc." en el
                                   // reporte, el cliente cambiaba de estado solo y se iba
@@ -2786,7 +2898,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   setReporteMateModalId(null);
                                   onShowToast?.(
                                     '✅ Reporte enviado',
-                                    'El cliente NO cambió de estado — sigue activo en tu ruta. Si de verdad no se entrega, márcalo tú como fallido en Mi ruta.',
+                                    agendadoPara
+                                      ? `El cliente NO cambió de estado — y quedó agendado para el ${new Date(agendadoPara + 'T12:00:00').toLocaleDateString('es-PE', { day: 'numeric', month: 'long' })} (aparecerá arriba en Mi Ruta ese día).`
+                                      : 'El cliente NO cambió de estado — sigue activo en tu ruta. Si de verdad no se entrega, márcalo tú como fallido en Mi ruta.',
                                     'success'
                                   );
                                 }}
@@ -3163,6 +3277,115 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           onShowToast={onShowToast}
         />
       )}
+
+      {/* ═══ 📅 FASE AD: Modal "¿Para cuándo?" — al tocar 🔄 Reprog. de
+          una tarjeta. Agenda el pedido para ese día (aparecerá en el
+          banner de Reprogramados ese día, sin bajar el Excel) y marca
+          el cliente como reprogramado en la ruta de HOY. ═══ */}
+      {reprogModalId !== null && clienteReprog && (() => {
+        const c = clienteReprog;
+        const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(fechaParaModal || '');
+        const fechaBonita = fechaValida
+          ? new Date(fechaParaModal + 'T12:00:00').toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })
+          : '';
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            onClick={() => setReprogModalId(null)}
+            data-testid="reprog-modal"
+          >
+            <div
+              className="bg-slate-900 border border-violet-500/40 rounded-2xl w-full max-w-sm max-h-[95vh] overflow-y-auto shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between z-10">
+                <div>
+                  <h3 className="text-base font-bold text-white">📅 ¿Para cuándo?</h3>
+                  <p className="text-[10px] text-slate-400">El pedido volverá a tu ruta ese día</p>
+                </div>
+                <button onClick={() => setReprogModalId(null)} className="text-slate-400 hover:text-white p-1">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                <div className="bg-slate-800 rounded-lg p-3 text-xs">
+                  <div className="font-bold text-white text-sm">{c.nombre}</div>
+                  {c.prod && <div className="text-slate-400">📦 {c.prod}</div>}
+                  <div className="mt-1 text-emerald-400 font-bold">💰 S/ {parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}</div>
+                  {c.dir && <div className="text-slate-500 mt-1 text-[10px]">📍 {c.dir} · {c.dist}</div>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => { setReprogFecha(sumaDiasISO(hoyLima, 1)); setReprogOtra(''); }}
+                    className={`py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 border ${reprogFecha === sumaDiasISO(hoyLima, 1) && !reprogOtra ? 'bg-violet-500/25 border-violet-500 text-violet-200 ring-2 ring-violet-400' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                    data-testid="reprog-manana"
+                  >
+                    🌅 Mañana
+                  </button>
+                  <button
+                    onClick={() => { setReprogFecha(sumaDiasISO(hoyLima, 2)); setReprogOtra(''); }}
+                    className={`py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 border ${reprogFecha === sumaDiasISO(hoyLima, 2) && !reprogOtra ? 'bg-violet-500/25 border-violet-500 text-violet-200 ring-2 ring-violet-400' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    ⏭️ Pasado mañana
+                  </button>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">🗓️ Otra fecha</label>
+                  <input
+                    type="date"
+                    value={reprogOtra}
+                    min={hoyLima}
+                    onChange={(e) => { setReprogOtra(e.target.value); if (e.target.value) setReprogFecha('otra'); }}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-violet-500 outline-none"
+                  />
+                </div>
+
+                {fechaValida && (
+                  <div className="px-2 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/30 text-[10px] text-violet-300 leading-relaxed">
+                    📅 Queda <b>reprogramado para {fechaBonita}</b> — ese día aparece en el banner de arriba con botón ➕ para pasarlo a tu ruta. Hoy se marca como 🔄 Reprogramado (NO cuenta como entregado).
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      if (!fechaValida || !fechaParaModal) {
+                        onShowToast?.('📅 Falta la fecha', 'Elige mañana, pasado mañana o una fecha', 'warning');
+                        return;
+                      }
+                      // 1) marcar el pedido como reprogramado con su fecha
+                      //    (un solo guardado: st + reprogramadoPara juntos)
+                      actualizarCliente(c.id, { st: 'reprogramar', hora: '', reprogramadoPara: fechaParaModal });
+                      // 2) agendarlo en la cola (banner de ese día)
+                      agendarReprogramado(c, fechaParaModal);
+                      setReprogModalId(null);
+                      onShowToast?.(
+                        '📅 Reprogramado',
+                        `${c.nombre} — aparecerá en tu ruta el ${fechaBonita}`,
+                        'success'
+                      );
+                    }}
+                    disabled={!fechaValida}
+                    data-testid="reprog-confirmar"
+                    className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-sm font-black transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    📅 Agendar
+                  </button>
+                  <button
+                    onClick={() => setReprogModalId(null)}
+                    className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl text-sm font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
