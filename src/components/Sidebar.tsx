@@ -29,6 +29,7 @@ import {
   Store,
   Smartphone,
   CarTaxiFront,
+  Wallet,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 import { AvatarSvg } from '../data/avatars';
@@ -204,6 +205,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       titulo: 'Análisis',
       items: [
+        // 💰 FASE AC: la pregunta diaria — ¿voy bien o voy bajo?
+        // (inDrive + empresa por semana/mes, meta, gastos, en mano)
+        { id: 'contabilidad', label: 'Contabilidad', icon: Wallet },
         { id: 'stats', label: 'Estadísticas', icon: TrendingUp },
         { id: 'estadisticas', label: 'Resumen del día', icon: PieChart },
         { id: 'historial', label: 'Historial de rutas', icon: History },

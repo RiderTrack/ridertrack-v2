@@ -1660,6 +1660,11 @@ export async function leerHistorial(userId: string, max = 300): Promise<Registro
         v1Id: data.v1Id,
         km: data.km,
         tiempoRuta: data.tiempoRuta,
+        // 💰 FASE AC (contabilidad): el desglose de pago por pedido
+        // (S/9/S/12 del día) ya se guardaba desde la FASE D pero no
+        // se leía — la Contabilidad lo necesita para sumar la plata
+        // de la empresa por semana/mes. Campos viejos sin él → undefined.
+        pagoPedidos: data.pagoPedidos,
       }));
     });
     registros.sort((a, b) => {

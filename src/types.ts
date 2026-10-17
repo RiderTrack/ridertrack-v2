@@ -17,6 +17,7 @@ export type NavigationTab =
   | 'broadcast'
   | 'historial'
   | 'stats'
+  | 'contabilidad'
   | 'galeria'
   | 'backups'
   | 'reportes'

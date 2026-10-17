@@ -96,6 +96,7 @@ const NOMBRES_TAB: Partial<Record<NavigationTab, string>> = {
   broadcast: 'Broadcast',
   historial: 'Historial',
   stats: 'Estadísticas',
+  contabilidad: 'Contabilidad',
   galeria: 'Galería',
   estadisticas: 'Resumen del día',
   backups: 'Backups',
@@ -189,6 +190,9 @@ const DriverTrackView = lazy(() => import('./drivertrack/DriverTrackView'));
 // FASE C: paneles de inDrive en las secciones del trabajo
 const PanelMapaDT = lazy(() => import('./drivertrack/panels/PanelMapaDT'));
 const PanelStatsDT = lazy(() => import('./drivertrack/panels/PanelStatsDT'));
+// 💰 FASE AC: Contabilidad — ¿voy bien o voy bajo? (inDrive + empresa,
+// semanas lun→dom, meta, gastos, en mano) — sección propia, trozo lazy
+const PanelContabilidadDT = lazy(() => import('./drivertrack/panels/PanelContabilidadDT'));
 // Fase 2.5: vistas nuevas — historial, broadcast, backups, stats y galería
 const HistorialView = lazy(() => import('./components/HistorialView').then(m => ({ default: m.HistorialView })));
 const BroadcastView = lazy(() => import('./components/BroadcastView').then(m => ({ default: m.BroadcastView })));
@@ -1211,6 +1215,10 @@ export default function App() {
               </div>
             </>
           )}
+
+          {/* 💰 FASE AC: Contabilidad — inDrive + empresa (pago por pedido),
+              semanas de lunes a sábado, meta y "en mano" de verdad */}
+          {activeTab === 'contabilidad' && <PanelContabilidadDT />}
 
           {/* Fase 2.16: 📸 Galería de evidencias (hoy + histórico) */}
           {activeTab === 'galeria' && <GaleriaView onShowToast={showToast} />}
