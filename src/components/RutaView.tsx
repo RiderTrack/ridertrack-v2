@@ -30,6 +30,8 @@ import {
   Pencil,
   StickyNote,
   QrCode,
+  CalendarClock,
+  History,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
 // 🙏 F3.44: modo de aviso por cliente (automático/manual, como la v1)
@@ -41,10 +43,11 @@ import { FotoEntregaModal } from './FotoEntregaModal';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
-// 📅 FASE AD: panel de reprogramados (agendados + no entregados de
-// la última ruta cerrada) + helpers puros para badges y el modal
-import { ReprogramadosPanel } from './ReprogramadosPanel';
-import { reincidentesDeHoy, sumaDiasISO } from '../services/reprog';
+// 🎛️ FASE AE: paneles de reprogramados DETRÁS de los botoncitos
+// de la barra del buscador (mismo estilo que verificación/obs):
+// 🔁 la cola (agendados + fallidos) y 🕐 la última ruta cerrada.
+import { ColaReprogramados, UltimaCerradaPanel } from './ReprogramadosPanel';
+import { reincidentesDeHoy, sumaDiasISO, dividirCola } from '../services/reprog';
 import { recordarCoordenadasCliente, olvidarCoordenadasCliente } from '../services/geocoding';
 import { compartirQRWhatsApp } from '../utils/shareQR';
 import { Flag, MapPinned, ClipboardList, Copy, Check, Bike, Navigation as NavigationIcon } from 'lucide-react';
@@ -144,18 +147,32 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [mostrarAgregar, setMostrarAgregar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 📋 Listado de verificación (Fase 2.5): mini-listado para cruzar
-  // con la página de la empresa — se filtra con la búsqueda/filtros
-  const [listadoVerifAbierto, setListadoVerifAbierto] = useState(false);
+  // 🎛️ FASE AE: UN solo estado para los 4 botoncitos de la barra —
+  // 🔁 reprogramados, 🕐 última cerrada, 📋 verificación y 📝
+  // observaciones. Solo UNO abierto a la vez (todo armónico, como
+  // pidió Rudy: "serían como cuatro botoncitos").
+  const [panelAbierto, setPanelAbierto] = useState<'reprog' | 'cerrada' | 'verif' | 'obs' | null>(null);
   const [listadoCopiado, setListadoCopiado] = useState(false);
 
   // 📝 FASE W: panel de observaciones — TODAS las obs de la ruta
   // de una (leerlas, copiarlas, saltar al cliente) sin abrir
   // cliente por cliente
-  const [obsPanelAbierto, setObsPanelAbierto] = useState(false);
   const [obsCopiado, setObsCopiado] = useState(false);
   /** cuántos clientes de la ruta tienen obs (para el contador) */
   const nObs = useMemo(() => clientesConObs(clientes).length, [clientes]);
+
+  // 🎛️ FASE AE: cuentas para los badges de los botoncitos 🔁 y 🕐
+  // (la cola y la última cerrada ya NO ocupan espacio arriba — viven
+  // detrás de sus botoncitos, con contador como observaciones)
+  const { paraHoy: reprogHoy, esperando: reprogEsperando, futuro: reprogFuturo, yaEnLista: reprogYaEn } = useMemo(
+    () => dividirCola(reprogramados, hoyLima, clientes),
+    [reprogramados, hoyLima, clientes]
+  );
+  const nColaReprog = reprogHoy.length + reprogEsperando.length + reprogFuturo.length + reprogYaEn.length;
+  const nCerrada = useMemo(
+    () => (ultimaCerrada?.noEntregados || []).filter((c) => c && c.nombre).length,
+    [ultimaCerrada]
+  );
 
   // Estado de optimización en curso (Fase 1.3 — progreso real)
   const [optimizando, setOptimizando] = useState(false);
@@ -627,7 +644,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // abajo (con sus botones de pago) y la lista scrollea hasta él
   const saltarACliente = (id: string | number) => {
     setClienteExpandido(id);
-    setObsPanelAbierto(false);
+    setPanelAbierto(null);
     setTimeout(() => {
       document.getElementById(`cliente-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 150);
@@ -960,21 +977,6 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         />
       </div>
 
-      {/* 📅 FASE AD: reprogramados — (A) los que agendaste con 🔄 y
-          (B) los no entregados de la última ruta cerrada (quiénes
-          volvieron reprogramados en el Excel nuevo 🔁 y quiénes
-          faltan, con ➕ para pasarlos a hoy sin bajar el Excel). */}
-      <ReprogramadosPanel
-        cola={reprogramados}
-        ultimaCerrada={ultimaCerrada}
-        clientesHoy={clientes}
-        hoy={hoyLima}
-        onAgregarDeCola={agregarDeCola}
-        onAgregarNoEntregado={agregarNoEntregado}
-        onDescartarDeCola={descartarDeCola}
-        onShowToast={onShowToast}
-      />
-
       {/* 🚩 Inicio y fin de ruta (Fase 1.4) — autocompletado estilo Circuit */}
       <div className="rounded-xl bg-slate-800 border border-slate-700 overflow-hidden">
         <button
@@ -1123,14 +1125,63 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               className="w-full bg-slate-800 text-white text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none"
             />
           </div>
+          {/* 🎛️ FASE AE: 🔁 reprogramados y fallidos — la listita de la
+              cola DETRÁS de un botoncito, igual que verificación y
+              observaciones (antes era un banner grande siempre abierto
+              que se comía la pantalla). El badge se pone ámbar cuando
+              hay FALLIDOS esperando (los que más importan). */}
+          {nColaReprog > 0 && (
+            <button
+              onClick={() => setPanelAbierto((p) => (p === 'reprog' ? null : 'reprog'))}
+              data-testid="boton-reprog"
+              title={`Reprogramados y fallidos (${nColaReprog}) — agendados con 🔄 y fallidos esperando reprogramación; se ven ~3 y el resto con scroll`}
+              className={`relative px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
+                panelAbierto === 'reprog'
+                  ? 'bg-violet-600 border-violet-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+            >
+              <CalendarClock className="w-4 h-4" />
+              <span
+                data-testid="contador-reprog"
+                className={`absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-black flex items-center justify-center leading-none ${
+                  reprogEsperando.length > 0 ? 'bg-amber-500 text-slate-900' : 'bg-violet-500 text-white'
+                }`}
+              >
+                {nColaReprog > 99 ? '99+' : nColaReprog}
+              </span>
+            </button>
+          )}
+
+          {/* 🎛️ FASE AE: 🕐 última ruta cerrada — los no entregados de
+              ayer detrás del segundo botoncito (naranja, distinto del
+              ámbar de observaciones para no confundirlos). */}
+          {nCerrada > 0 && (
+            <button
+              onClick={() => setPanelAbierto((p) => (p === 'cerrada' ? null : 'cerrada'))}
+              data-testid="boton-cerrada"
+              title={`Última ruta cerrada (${nCerrada} no entregados) — quiénes volvieron solos 🔁 y a quiénes pasar a hoy`}
+              className={`relative px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
+                panelAbierto === 'cerrada'
+                  ? 'bg-orange-500 border-orange-400 text-slate-900'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+            >
+              <History className="w-4 h-4" />
+              <span
+                data-testid="contador-cerrada"
+                className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-slate-900 text-[9px] font-black flex items-center justify-center leading-none"
+              >
+                {nCerrada > 99 ? '99+' : nCerrada}
+              </span>
+            </button>
+          )}
+
           {/* 📋 Listado de verificación (Fase 2.5) — para cruzar con la página de la empresa */}
           <button
-            onClick={() => {
-              setListadoVerifAbierto(!listadoVerifAbierto);
-              if (!listadoVerifAbierto) setObsPanelAbierto(false);
-            }}
+            onClick={() => setPanelAbierto((p) => (p === 'verif' ? null : 'verif'))}
             className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
-              listadoVerifAbierto
+              panelAbierto === 'verif'
                 ? 'bg-blue-600 border-blue-500 text-white'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
             }`}
@@ -1142,14 +1193,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           {/* 📝 FASE W: observaciones de la ruta de UNA — horarios,
               referencias, notas raras: sin abrir cliente por cliente */}
           <button
-            onClick={() => {
-              setObsPanelAbierto(!obsPanelAbierto);
-              if (!obsPanelAbierto) setListadoVerifAbierto(false);
-            }}
+            onClick={() => setPanelAbierto((p) => (p === 'obs' ? null : 'obs'))}
             data-testid="boton-obs-ruta"
             title={`Observaciones de la ruta (${nObs} ${nObs === 1 ? 'cliente' : 'clientes'}) — verlas todas de una`}
             className={`relative px-3 py-2 rounded-lg text-[11px] font-bold transition-all active:scale-95 border ${
-              obsPanelAbierto
+              panelAbierto === 'obs'
                 ? 'bg-amber-500 border-amber-400 text-slate-900'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
             }`}
@@ -1197,11 +1245,37 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           ))}
         </div>
 
+        {/* 🎛️ FASE AE: panel 🔁 de reprogramados y fallidos — la
+            listita (con scroll, ~3 visibles) detrás del botoncito,
+            en el MISMO lugar que verificación/observaciones. */}
+        {panelAbierto === 'reprog' && nColaReprog > 0 && (
+          <ColaReprogramados
+            cola={reprogramados}
+            clientesHoy={clientes}
+            hoy={hoyLima}
+            onAgregarDeCola={agregarDeCola}
+            onDescartarDeCola={descartarDeCola}
+            onShowToast={onShowToast}
+          />
+        )}
+
+        {/* 🎛️ FASE AE: panel 🕐 de la última ruta cerrada — los no
+            entregados de ayer detrás del segundo botoncito. */}
+        {panelAbierto === 'cerrada' && nCerrada > 0 && ultimaCerrada && (
+          <UltimaCerradaPanel
+            ultimaCerrada={ultimaCerrada}
+            clientesHoy={clientes}
+            cola={reprogramados}
+            onAgregarNoEntregado={agregarNoEntregado}
+            onShowToast={onShowToast}
+          />
+        )}
+
         {/* 📋 Panel de verificación (Fase 2.5) — mini-listado para
             contrastar con la página de la empresa; se filtra igual que la lista.
             ✅ Fase 2.6: checks por cliente (como el "Registro en la Web"
             de la v1) — toca la fila y queda marcado en verde. */}
-        {listadoVerifAbierto && (() => {
+        {panelAbierto === 'verif' && (() => {
           const nVerif = clientesFiltrados.filter((c) => c.webReg).length;
           const pct = clientesFiltrados.length > 0 ? Math.round((nVerif / clientesFiltrados.length) * 100) : 0;
           return (
@@ -1324,7 +1398,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         {/* 📝 FASE W: PANEL DE OBSERVACIONES — todas las obs de la
             ruta de una (sigue los filtros activos). Tocá una fila y
             el cliente se abre abajo con sus botones de pago. */}
-        {obsPanelAbierto && (() => {
+        {panelAbierto === 'obs' && (() => {
           const lista = clientesConObs(clientesFiltrados);
           return (
           <div className="rounded-xl bg-slate-800 border border-amber-500/30 overflow-hidden" data-testid="panel-obs">
