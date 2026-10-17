@@ -28,9 +28,11 @@ import {
   uploadBytes,
   getDownloadURL,
 } from 'firebase/storage';
-import * as XLSX from 'xlsx';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
 import { cargarConfigPagoPedidos, calcularPagoPedidos } from '../utils/pagoPedidosCore'; // 🛵 FASE D
+// 🚀 FASE AB-2: la librería de Excel ya NO viaja en el paquete inicial
+// (se cargaba SIEMPRE aunque nunca importaras un backup): ahora se trae
+// SOLO cuando importarExcel() de verdad la necesita (import() dinámico).
 import { montosConRespaldo, parseMonedaPeru } from '../utils/moneda'; // 💰 FASE Z — parseo S/ robusto
 
 // ═══════════════════════════════════════════════════════════
@@ -1339,9 +1341,15 @@ export function calcularEstadisticas(clientes: Cliente[]) {
 export function importarExcel(file: File): Promise<Cliente[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        // 🚀 FASE AB-2: Excel bajo demanda — el trozo se trae recién
+        // acá (solo al importar un .xlsx). El patrón default ?? mod
+        // funciona igual en el navegador (Vite) que en Node (tests
+        // con stub), que empaquetan el módulo distinto.
+        const modXLSX: any = await import('xlsx');
+        const XLSX = modXLSX.default ?? modXLSX;
         const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -13,37 +13,12 @@ import { TEXTO_MOTIVO, type MotivoSkip } from './utils/avisoEntrega';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
-import { OrdersView } from './components/OrdersView';
-import { CustomersView } from './components/CustomersView';
-import { DriversView } from './components/DriversView';
-import { LiveMap } from './components/LiveMap';
-import { MotorizadosView } from './components/MotorizadosView';
 import { AvatarPicker } from './components/AvatarPicker';
 import { WhatsAppModal } from './components/WhatsAppModal';
-// Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
-import { ChatBaileysView } from './components/ChatBaileysView';
-// Fase 3.15: RiderChat (WhatsApp Oficial Meta) acoplado al panel —
-// la app RiderChat V2 completa ahora vive en la pestaña chatapi
-import { RiderChatView } from './components/riderchat/RiderChatView';
-// Fase 4.1: 📱 WhatsApp PERSONAL (celular 2 · bot-personal) — tus
-// chats privados en el panel con todo lo del Chat Baileys
-import { WhatsAppPersonalView } from './components/WhatsAppPersonalView';
-import { CatalogoView } from './components/CatalogoView';
-import { BotControlView } from './components/BotControlView';
-import { ResumenView } from './components/ResumenView';
-import { SettingsView } from './components/SettingsView';
-import { ProfileView } from './components/ProfileView';
-import { MediosView } from './components/MediosView';
 // Fase 3.11: Medios — radio/Spotify/YouTube globales (siguen sonando al cambiar de pestaña)
 import { MediosProvider } from './components/medios/MediosProvider';
 import { MiniPlayerReproductor } from './components/medios/MiniPlayerReproductor';
 import { NewOrderModal } from './components/NewOrderModal';
-// FASE A: 🏍️ DriverTrack (trabajo libre inDrive) integrado como
-// sección — mismo código del APK standalone, datos propios (dt_*)
-import DriverTrackView from './drivertrack/DriverTrackView';
-// FASE C: paneles de inDrive que viven en las secciones del trabajo
-import PanelMapaDT from './drivertrack/panels/PanelMapaDT';
-import PanelStatsDT from './drivertrack/panels/PanelStatsDT';
 // FASE C: ☁️ sync de los datos de inDrive con la cuenta (multi-cel)
 import { iniciarSyncDT } from './drivertrack/services/syncDT';
 // FASE C: 🏍️ lo que ganás en libre — tarjeta para Dashboard/Resumen
@@ -66,15 +41,6 @@ import { useClientes } from './hooks/useClientes';
 // prop al header de inDrive, al Dashboard y al Resumen del día
 import { cargarConfigPagoPedidos, calcularPagoPedidos, ConfigPagoPedidos } from './utils/pagoPedidosCore';
 import { LoginScreen } from './components/LoginScreen';
-import { RutaView } from './components/RutaView';
-import { SeguimientoView } from './components/SeguimientoView';
-import { YapeQRView } from './components/YapeQRView';
-// Fase 2.5: vistas nuevas — historial, broadcast y backups
-import { HistorialView } from './components/HistorialView';
-import { BroadcastView } from './components/BroadcastView';
-import { BackupsView } from './components/BackupsView';
-import { EstadisticasView } from './components/EstadisticasView';
-import { GaleriaView } from './components/GaleriaView';
 import { guardarAvatarRider } from './services/firestore';
 // Fase 3.35: 🛣️ motor del odómetro GPS — 1 solo mount a nivel App:
 // cuenta km en TODAS las pestañas mientras el cronómetro de ruta corre
@@ -184,6 +150,64 @@ class VistaBoundary extends ReactComponentBase {
   }
 }
 
+// ═════════════════════════════════════════════════════════
+// 🚀 FASE AB-2: ARRANQUE LIGERO — las secciones pesadas (chats,
+// mapas, estadísticas, catálogo, inDrive, radio…) ya NO viajan en
+// el paquete inicial de 4.4 MB: cada una es un TROZO aparte que se
+// trae del APK JUSTO cuando la abrís (archivo local, sin red →
+// casi instantáneo; solo la PRIMERA vez se ve un instante el
+// placeholder). El Dashboard (pantalla inicial), el login, el
+// header/sidebar y los modales del header siguen en el paquete
+// base. El keep-alive de inDrive (FASE A) y el boundary por
+// pestaña (Fase 3.5) quedan INTACTOS — solo cambia CÓMO se
+// empaqueta, no CÓMO funciona.
+// ═════════════════════════════════════════════════════════
+const RutaView = lazy(() => import('./components/RutaView').then(m => ({ default: m.RutaView })));
+const SeguimientoView = lazy(() => import('./components/SeguimientoView').then(m => ({ default: m.SeguimientoView })));
+const YapeQRView = lazy(() => import('./components/YapeQRView').then(m => ({ default: m.YapeQRView })));
+const OrdersView = lazy(() => import('./components/OrdersView').then(m => ({ default: m.OrdersView })));
+const CustomersView = lazy(() => import('./components/CustomersView').then(m => ({ default: m.CustomersView })));
+const DriversView = lazy(() => import('./components/DriversView').then(m => ({ default: m.DriversView })));
+const LiveMap = lazy(() => import('./components/LiveMap').then(m => ({ default: m.LiveMap })));
+const MotorizadosView = lazy(() => import('./components/MotorizadosView').then(m => ({ default: m.MotorizadosView })));
+// Fase 3.1: Chat de Baileys estilo WhatsApp Web (mudanza ClienteTrack)
+const ChatBaileysView = lazy(() => import('./components/ChatBaileysView').then(m => ({ default: m.ChatBaileysView })));
+// Fase 3.15: RiderChat (WhatsApp Oficial Meta) — la app completa en la pestaña chatapi
+const RiderChatView = lazy(() => import('./components/riderchat/RiderChatView').then(m => ({ default: m.RiderChatView })));
+// Fase 4.1: 📱 WhatsApp PERSONAL (celular 2 · bot-personal)
+const WhatsAppPersonalView = lazy(() => import('./components/WhatsAppPersonalView').then(m => ({ default: m.WhatsAppPersonalView })));
+const CatalogoView = lazy(() => import('./components/CatalogoView').then(m => ({ default: m.CatalogoView })));
+const BotControlView = lazy(() => import('./components/BotControlView').then(m => ({ default: m.BotControlView })));
+const ResumenView = lazy(() => import('./components/ResumenView').then(m => ({ default: m.ResumenView })));
+const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
+const ProfileView = lazy(() => import('./components/ProfileView').then(m => ({ default: m.ProfileView })));
+const MediosView = lazy(() => import('./components/MediosView').then(m => ({ default: m.MediosView })));
+// FASE A: 🏍️ DriverTrack (trabajo libre inDrive) — LAZY pero con su
+// keep-alive INTACTO: se monta la PRIMERA vez que entrás y queda
+// vivo oculto (la grabación GPS NO se corta al cambiar de sección)
+const DriverTrackView = lazy(() => import('./drivertrack/DriverTrackView'));
+// FASE C: paneles de inDrive en las secciones del trabajo
+const PanelMapaDT = lazy(() => import('./drivertrack/panels/PanelMapaDT'));
+const PanelStatsDT = lazy(() => import('./drivertrack/panels/PanelStatsDT'));
+// Fase 2.5: vistas nuevas — historial, broadcast, backups, stats y galería
+const HistorialView = lazy(() => import('./components/HistorialView').then(m => ({ default: m.HistorialView })));
+const BroadcastView = lazy(() => import('./components/BroadcastView').then(m => ({ default: m.BroadcastView })));
+const BackupsView = lazy(() => import('./components/BackupsView').then(m => ({ default: m.BackupsView })));
+const EstadisticasView = lazy(() => import('./components/EstadisticasView').then(m => ({ default: m.EstadisticasView })));
+const GaleriaView = lazy(() => import('./components/GaleriaView').then(m => ({ default: m.GaleriaView })));
+
+// 🚀 FASE AB-2: placeholder mientras llega el trozo de la sección
+// (vuelta local del APK — un instante solo la primera vez; mismo
+// look del "Cargando RiderTrack V2..." para que se sienta nativo)
+function CargandoVista({ nombre }: { nombre?: string }) {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4">
+      <div className="w-12 h-12 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin" />
+      <p className="text-slate-400 text-sm">Abriendo {nombre || 'la sección'}…</p>
+    </div>
+  );
+}
+
 export default function App() {
   // 🔐 Autenticación
   const { user, profile, loading: authLoading } = useAuth();
@@ -202,6 +226,21 @@ export default function App() {
   // En navegador/web es un no-op inofensivo (impl. web vacía).
   useEffect(() => {
     SplashScreen.hide({ fadeOutDuration: 250 }).catch(() => {/* web o ya oculto */});
+  }, []);
+
+  // 🚀 FASE AB-2: precarga en la sombra — 1.2 s después del primer
+  // paint, mientras mirás el Dashboard, ya se están trayendo los
+  // trozos de las secciones de TRABAJO (Mi Ruta, Seguimiento,
+  // Pedidos e inDrive): cuando las abras ya están en memoria.
+  // Fire & forget — solo calienta la caché de módulos del APK.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      import('./components/RutaView');
+      import('./components/SeguimientoView');
+      import('./components/OrdersView');
+      import('./drivertrack/DriverTrackView');
+    }, 1200);
+    return () => clearTimeout(t);
   }, []);
 
   // 📋 Datos REALES de la ruta (Firestore: ruta_activa + clientes_registrados)
@@ -963,6 +1002,10 @@ export default function App() {
           {/* Fase 3.5: boundary por pestaña — un crash de vista no tumba
               la app ni deja la pantalla en blanco */}
           <VistaBoundary key={activeTab} nombre={NOMBRES_TAB[activeTab] || String(activeTab)}>
+          {/* 🚀 FASE AB-2: Suspense DENTRO del boundary — si un trozo
+              tarda, se ve "Abriendo…" un instante; el manejo de
+              errores de la Fase 3.5 queda INTACTO por encima */}
+          <Suspense fallback={<CargandoVista nombre={NOMBRES_TAB[activeTab]} />}>
           {activeTab === 'dashboard' && (
             <>
               <DashboardView
@@ -1187,6 +1230,7 @@ export default function App() {
           {activeTab === 'medios' && <MediosView />}
 
           {activeTab === 'perfil' && <ProfileView />}
+          </Suspense>
           </VistaBoundary>
 
           {/* ═══ FASE A: 🏍️ DRIVERTRACK (inDrive) — keep-alive ═══
@@ -1199,12 +1243,17 @@ export default function App() {
           {dtMontada && (
             <VistaBoundary key="drivertrack-keepalive" nombre="Viajes inDrive">
               <div className={activeTab === 'drivertrack' ? '' : 'hidden'}>
+                {/* 🚀 FASE AB-2: Suspense dentro del keep-alive — el
+                    trozo llega la primera vez y la vista queda montada
+                    igual que siempre (GPS vivo, sin remount) */}
+                <Suspense fallback={<CargandoVista nombre="Viajes inDrive" />}>
                 <DriverTrackView
                   activa={activeTab === 'drivertrack'}
                   pagoTrabajoHoy={cfgPago.activo ? pagoTrabajoHoy : null}
                   onIrAYape={() => setActiveTab('yape')}
                   onIrAAjustes={() => setActiveTab('configuracion')}
                 />
+                </Suspense>
               </div>
             </VistaBoundary>
           )}
