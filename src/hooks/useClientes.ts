@@ -21,6 +21,8 @@ import {
   guardarAutoBackupVivo,
   // 📅 FASE AD: cola de reprogramados + última ruta cerrada
   guardarReprogramados,
+  // 🆕 AE-2: la ✕ toca cola+última en UNA escritura (sin re-migración)
+  guardarColaYUltima,
   subscribeToReprogramados,
   leerUltimaRuta,
   guardarUltimaCerrada,
@@ -38,6 +40,8 @@ import {
   // 🆕 FASE AD-2: fallidos a la listita + auto-limpieza
   purgarCola,
   migrarFallidos,
+  // 🆕 FASE AE-2: fecha Lima del historial (heal del respaldo)
+  fechaLimaDe,
 } from '../services/reprog';
 import {
   batchGeocodificar,
@@ -249,22 +253,32 @@ export function useClientes() {
     // última del historial UNA vez, se muestra y se MIGRA al doc (el
     // snapshot posterior la sostiene; sin migrar, cada escritura del
     // doc la borraba de la pantalla — bug real encontrado en el E2E).
-    if (!ultimaCerradaRef.current) {
-      void (async () => {
-        try {
-          const reg = await leerUltimaRuta(user.uid);
-          if (!reg || !(reg.clientes || []).length) return;
-          const noEnt = reg.clientes.filter((c) => c && c.nombre && !esEntregado(c.st));
-          if (noEnt.length === 0) return;
-          if (ultimaCerradaRef.current) return; // llegó del snapshot mientras leíamos
-          const uc: UltimaCerrada = { fecha: reg.fecha, noEntregados: noEnt };
-          ultimaCerradaRef.current = uc;
-          setUltimaCerrada(uc);
-          // 📅 migración: persistir para que el snapshot la sostenga
-          void guardarUltimaCerrada(user.uid, uc);
-        } catch { /* respaldo best-effort */ }
-      })();
-    }
+    // 🆕 AE-2 — HEAL: TAMBIÉN cuando el doc YA tiene una ultimaCerrada
+    // VIEJA (más antigua que la última ruta del historial) se corrige:
+    // el respaldo viejo ordenaba por UTC y podía quedar "una ruta
+    // atrás" (Rudy: "registra del 15 y mi historial llega al 16") o
+    // un cierre pudo escribir el historial y fallar la escritura del
+    // doc (offline). Mismo costo: una lectura light al abrir la app.
+    void (async () => {
+      try {
+        const reg = await leerUltimaRuta(user.uid);
+        if (!reg || !(reg.clientes || []).length) return;
+        const noEnt = reg.clientes.filter((c) => c && c.nombre && !esEntregado(c.st));
+        if (noEnt.length === 0) return;
+        // fecha Lima REAL del cierre (finalizadaAt miente por UTC:
+        // 22:00 Lima = 03:00 UTC del día siguiente)
+        const regFecha = fechaLimaDe(reg.finalizadaAt || reg.iniciadaAt) || reg.fecha || '';
+        if (!regFecha) return;
+        const docFecha = ultimaCerradaRef.current?.fecha || '';
+        // solo si NO hay doc, o si el doc quedó VIEJO (una ruta atrás)
+        if (ultimaCerradaRef.current && regFecha <= docFecha) return;
+        const uc: UltimaCerrada = { fecha: regFecha, noEntregados: noEnt };
+        ultimaCerradaRef.current = uc;
+        setUltimaCerrada(uc);
+        // 📅 migración: persistir para que el snapshot la sostenga
+        void guardarUltimaCerrada(user.uid, uc);
+      } catch { /* respaldo best-effort */ }
+    })();
 
     return unsub;
     // CLAVE_REPROG intencional: solo re-suscribir al cambiar de usuario
@@ -392,12 +406,46 @@ export function useClientes() {
     [clientes, reprogramados, persistirCola, agregarCliente]
   );
 
-  /** Descarta un agendado de la cola (✕) */
+  /** Descarta un agendado de la cola (✕)
+   * 🆕 AE-2 (Rudy, 18 oct: "aprieto la x y no acciona nada… el nombre
+   * desaparece y vuelve a aparecer en el mismo lugar"): el fallido
+   * también vive en ultimaCerrada.noEntregados y el efecto de
+   * auto-cuidado lo RE-MIGRABA apenas salía de la cola. Ahora la ✕
+   * lo saca de las DOS (cola + snapshot de la última cerrada) y
+   * persiste en UNA escritura atómica — el efecto nunca ve el
+   * estado a medias. Si el mismo cliente falla de nuevo en una
+   * ruta FUTURA, vuelve a entrar (correcto: es un fallo nuevo). */
   const descartarDeCola = useCallback(
     (item: Reprogramado) => {
-      persistirCola(reprogramados.filter((e) => e !== item));
+      const cola = reprogramados.filter((e) => e !== item);
+      const ultima = ultimaCerradaRef.current;
+      let nuevaUltima: UltimaCerrada | null = ultima;
+      if (ultima && (ultima.noEntregados || []).length) {
+        const quedan = (ultima.noEntregados || []).filter(
+          (c) => !c || !coinciden(c, item.cliente)
+        );
+        if (quedan.length !== (ultima.noEntregados || []).length) {
+          nuevaUltima = { ...ultima, noEntregados: quedan };
+        }
+      }
+      // los dos estados cambian EN BATCH (React 18): el efecto de
+      // auto-cuidado ve la cola Y la última cerrada ya actualizadas
+      setReprogramados(cola);
+      reprogSyncedRef.current = true; // optimista: lo local manda hasta el snapshot
+      if (user) {
+        try {
+          localStorage.setItem(`rt_reprog_${user.uid}`, JSON.stringify({ cola }));
+        } catch { /* cuota */ }
+        if (nuevaUltima !== ultima) {
+          setUltimaCerrada(nuevaUltima);
+          ultimaCerradaRef.current = nuevaUltima;
+          void guardarColaYUltima(user.uid, cola, nuevaUltima);
+        } else {
+          void guardarReprogramados(user.uid, cola);
+        }
+      }
     },
-    [reprogramados, persistirCola]
+    [reprogramados, user]
   );
 
   // Actualizar un cliente
@@ -600,7 +648,10 @@ export function useClientes() {
       // la ruta lo escribe finalizarRuta en usuarios.ultimaCerrada.
       try {
         const colaNueva = autoColaAlCerrar(clientes, hoyISOLocal(), reprogramados);
-        if (colaNueva.length !== reprogramados.length) persistirCola(colaNueva);
+        // 🆕 AE-2: MISMA referencia cuando no hay nada que tocar (el
+        // dedupe ciego de antes escribía igual; el refresh de desde
+        // NO cambia el largo — el chequeo por largo se lo saltaba)
+        if (colaNueva !== reprogramados) persistirCola(colaNueva);
       } catch { /* best-effort: nunca bloquea el cierre */ }
 
       // 🧹 Lista limpia YA (el listener lo confirmará con el doc vacío)

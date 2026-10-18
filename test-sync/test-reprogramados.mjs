@@ -57,6 +57,8 @@ const {
   dividirNoEntregados, reincidentesDeHoy, dividirCola,
   fusionarCola, quitarDeCola, autoColaAlCerrar, clienteParaRuta,
   esFallido, purgarCola, migrarFallidos, EXPIRA_DIAS,
+  // 🆕 AE-2: fecha del último fallo + orden Lima del historial
+  fechaLimaDe, claveHistorial,
 } = R;
 
 let pass = 0, fail = 0;
@@ -321,6 +323,59 @@ check('R10j EXPIRA_DIAS = 5 (Rudy: "tres cinco días")', EXPIRA_DIAS === 5);
   check('R14j ultima sin noEntregados → misma referencia', migrarFallidos({ fecha: '2026-10-17', noEntregados: [] }, cola) === cola);
 }
 
+// ── R15: autoColaAlCerrar — AE-2: fecha del ÚLTIMO fallo ──
+// Rudy (18 oct): "registra del 15 y yo tengo en mi historial hasta
+// el viernes 16" — si el fallido de la listita volvió a fallar HOY,
+// su entrada se reemplaza con desde = HOY (antes el dedupe ciego
+// dejaba la fecha vieja para siempre).
+{
+  const hoy = '2026-10-16';
+  const viejo = { cliente: cli(1, 'Reincidente', 'fallida', { cel: '999888777' }), para: '', desde: '2026-10-15', origen: 'fallido' };
+  const clientesHoy = [cli(1, 'Reincidente', 'fallida', { cel: '999888777' })];
+  const nueva = autoColaAlCerrar(clientesHoy, hoy, [viejo]);
+  check('R15a una sola entrada (no duplica)', nueva.length === 1, `dio ${nueva.length}`);
+  check('R15b desde REFRESCADO al 16 (el ÚLTIMO fallo, no el primero)', nueva[0] && nueva[0].desde === '2026-10-16', `dio ${nueva[0] && nueva[0].desde}`);
+  const misma = autoColaAlCerrar([cli(3, 'Otro Pagó', 'efectivo', { cel: '123123123' })], hoy, nueva);
+  check('R15c ruta sin fallidos/agendados → MISMA referencia (no dispara escrituras)', misma === nueva);
+  const colaConVieja = [{ cliente: cli(4, 'Se Entregó', 'fallida', { cel: '444444444' }), para: '', desde: '2026-10-15', origen: 'fallido' }];
+  const trasEntrega = autoColaAlCerrar([cli(4, 'Se Entregó', 'efectivo', { cel: '444444444' })], hoy, colaConVieja);
+  check('R15d el entregado de verdad SACA su entrada vieja', trasEntrega.length === 0, `dio ${trasEntrega.length}`);
+}
+
+// ── R16: migrarFallidos — AE-2: refresca la fecha ──
+// la listita quedó "una ruta atrás": fallido del 15, pero la última
+// cerrada (16) lo trae fallido de nuevo → el badge se corrige solo.
+{
+  const cola = [{ cliente: cli(1, 'Atrasado', 'fallida', { cel: '111222333' }), para: '', desde: '2026-10-15', origen: 'fallido' }];
+  const ultima = { fecha: '2026-10-16', noEntregados: [cli(1, 'ATRASADO', 'fallida', { cel: '111-222-333' })] };
+  const nueva = migrarFallidos(ultima, cola);
+  check('R16a refresca la fecha del fallido existente (15 → 16)', nueva[0] && nueva[0].desde === '2026-10-16', `dio ${nueva[0] && nueva[0].desde}`);
+  check('R16b sin duplicar', nueva.length === 1, `dio ${nueva.length}`);
+  check('R16c re-migrar con la misma fecha → MISMA referencia', migrarFallidos(ultima, nueva) === nueva);
+  const sinEl = { fecha: '2026-10-16', noEntregados: [cli(9, 'Otro', 'fallida', { cel: '999888777' })] };
+  check('R16d fallido nuevo (fuera de la cola) SÍ se agrega', migrarFallidos(sinEl, []).length === 1);
+  // el agendado NO se refresca (solo los fallidos de la listita)
+  const colaAgendado = [{ cliente: cli(5, 'Agendado', 'pendiente', { cel: '555666777' }), para: '2026-10-20', desde: '2026-10-15' }];
+  const conAgendado = migrarFallidos({ fecha: '2026-10-16', noEntregados: [cli(5, 'AGENDADO', 'fallida', { cel: '555-666-777' })] }, colaAgendado);
+  check('R16e el agendado NO se toca (solo entradas de fallido)', conAgendado[0].desde === '2026-10-15', `dio ${conAgendado[0] && conAgendado[0].desde}`);
+}
+
+// ── R17: claveHistorial — orden en HORA LIMA (AE-2) ──
+// cierre de la ruta del JUEVES 15 a las 22:00 Lima → finalizadaAt
+// en UTC dice "16" (03:00Z) — el orden viejo por UTC podía elegir
+// esa ruta vieja por encima de la del VIERNES 16 (sin timestamp)
+// → la listita quedaba "una ruta atrás".
+{
+  const jue15Noche = { fecha: '2026-10-15', finalizadaAt: '2026-10-16T03:00:00.000Z' };
+  const vie16 = { fecha: '2026-10-16' };
+  check('R17a fechaLimaDe traduce el UTC a Lima (22:00 del 15)', fechaLimaDe('2026-10-16T03:00:00.000Z') === '2026-10-15');
+  check('R17b la clave del jue-15-noche dice 15 (no 16)', claveHistorial(jue15Noche).startsWith('2026-10-15'), claveHistorial(jue15Noche));
+  check('R17c el vie-16 ORDENA por encima del jue-15-noche (el caso de Rudy)', claveHistorial(vie16) > claveHistorial(jue15Noche), `${claveHistorial(vie16)} vs ${claveHistorial(jue15Noche)}`);
+  check('R17d un cierre del mismo día con hora gana al medianoche', claveHistorial({ fecha: '2026-10-16', finalizadaAt: '2026-10-16T20:00:00.000Z' }) > claveHistorial(vie16));
+  check('R17e sin timestamp vale la fecha a medianoche', claveHistorial(vie16) === '2026-10-16 00:00:00');
+  check('R17f fechaLimaDe sin ts → vacío', fechaLimaDe(undefined) === '' && fechaLimaDe('') === '');
+}
+
 // ── resultado ──────────────────────────────────────────────
-console.log(`\n═══ FASE AD-2 (reprogramados + fallidos + auto-limpieza): ${pass} ✓ / ${fail} ✗ ═══`);
+console.log(`\n═══ FASE AE-2 (reprogramados + fallidos + fecha real + ✕): ${pass} ✓ / ${fail} ✗ ═══`);
 process.exit(fail === 0 ? 0 : 1);

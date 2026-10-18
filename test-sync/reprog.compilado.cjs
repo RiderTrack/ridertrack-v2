@@ -21,6 +21,7 @@ var reprog_exports = {};
 __export(reprog_exports, {
   EXPIRA_DIAS: () => EXPIRA_DIAS,
   autoColaAlCerrar: () => autoColaAlCerrar,
+  claveHistorial: () => claveHistorial,
   clienteParaRuta: () => clienteParaRuta,
   coinciden: () => coinciden,
   dividirCola: () => dividirCola,
@@ -28,6 +29,7 @@ __export(reprog_exports, {
   esEntregado: () => esEntregado,
   esFallido: () => esFallido,
   estaEnLista: () => estaEnLista,
+  fechaLimaDe: () => fechaLimaDe,
   fusionarCola: () => fusionarCola,
   migrarFallidos: () => migrarFallidos,
   noEntregados: () => noEntregados,
@@ -87,6 +89,25 @@ function coinciden(a, b) {
 function estaEnLista(c, lista) {
   return lista.some((h) => coinciden(c, h));
 }
+function fechaLimaDe(ts) {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleDateString("en-CA", { timeZone: "America/Lima" });
+  } catch {
+    return "";
+  }
+}
+function claveHistorial(reg) {
+  const ts = reg.finalizadaAt || reg.iniciadaAt;
+  if (ts) {
+    try {
+      const k = new Date(ts).toLocaleString("sv-SE", { timeZone: "America/Lima" });
+      if (k) return k;
+    } catch {
+    }
+  }
+  return `${reg.fecha || ""} 00:00:00`;
+}
 function noEntregados(clientes) {
   return (clientes || []).filter((c) => {
     if (!normalizar(c.nombre)) return false;
@@ -137,7 +158,9 @@ function quitarDeCola(cola, cliente) {
   return (cola || []).filter((e) => !coinciden(e.cliente, cliente));
 }
 function autoColaAlCerrar(clientes, hoy, colaActual) {
+  const base = colaActual || [];
   const nuevos = [];
+  const entregados = [];
   for (const c of clientes || []) {
     if (!normalizar(c.nombre)) continue;
     const st = (c.st || "").trim();
@@ -156,9 +179,22 @@ function autoColaAlCerrar(clientes, hoy, colaActual) {
         creadoAt: (/* @__PURE__ */ new Date()).toISOString(),
         origen: "fallido"
       });
+    } else if (esEntregado(st)) {
+      entregados.push(c);
     }
   }
-  return fusionarCola(colaActual, nuevos);
+  const quitarVarios = (cola, quitar) => {
+    if (!quitar.length) return cola;
+    const quedan = cola.filter(
+      (e) => e && e.cliente && !quitar.some((q) => coinciden(e.cliente, q))
+    );
+    return quedan.length === cola.length ? cola : quedan;
+  };
+  if (!nuevos.length) {
+    return quitarVarios(base, entregados);
+  }
+  const sinViejos = quitarVarios(base, [...nuevos.map((n) => n.cliente), ...entregados]);
+  return [...sinViejos, ...nuevos];
 }
 function purgarCola(cola, hoy, hoyLista) {
   let expirados = 0;
@@ -182,21 +218,35 @@ function purgarCola(cola, hoy, hoyLista) {
 }
 function migrarFallidos(ultima, cola) {
   if (!ultima || !(ultima.noEntregados || []).length) return cola || [];
-  const yaEstan = (c) => (cola || []).some((e) => e && e.cliente && coinciden(e.cliente, c));
+  let refresco = false;
+  const out = (cola || []).map((item) => {
+    if (!item || !item.cliente) return item;
+    const esDeListita = item.origen === "fallido" || !(item.para || "");
+    if (!esDeListita) return item;
+    const falloOtraVez = (ultima.noEntregados || []).some(
+      (c) => c && esFallido(c.st) && coinciden(c, item.cliente)
+    );
+    if (falloOtraVez && (ultima.fecha || "") > (item.desde || "")) {
+      refresco = true;
+      return { ...item, desde: ultima.fecha };
+    }
+    return item;
+  });
+  const yaEstan = (c) => out.some((e) => e && e.cliente && coinciden(e.cliente, c));
   const faltantes = (ultima.noEntregados || []).filter(
     (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c)
   );
-  if (!faltantes.length) return cola || [];
-  return fusionarCola(
-    cola || [],
-    faltantes.map((c) => ({
+  if (!faltantes.length && !refresco) return cola || [];
+  return [
+    ...out,
+    ...faltantes.map((c) => ({
       cliente: c,
       para: "",
       desde: ultima.fecha,
       creadoAt: (/* @__PURE__ */ new Date()).toISOString(),
       origen: "fallido"
     }))
-  );
+  ];
 }
 function clienteParaRuta(c, num, desde) {
   const {
@@ -228,6 +278,7 @@ function clienteParaRuta(c, num, desde) {
 0 && (module.exports = {
   EXPIRA_DIAS,
   autoColaAlCerrar,
+  claveHistorial,
   clienteParaRuta,
   coinciden,
   dividirCola,
@@ -235,6 +286,7 @@ function clienteParaRuta(c, num, desde) {
   esEntregado,
   esFallido,
   estaEnLista,
+  fechaLimaDe,
   fusionarCola,
   migrarFallidos,
   noEntregados,

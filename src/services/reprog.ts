@@ -149,6 +149,44 @@ export function estaEnLista(c: ClavesCliente, lista: Cliente[]): boolean {
   return lista.some((h) => coinciden(c, h));
 }
 
+// ── 🆕 AE-2: orden del historial en HORA LIMA ─────────────
+// Rudy (18 oct): "registra del 15 y yo tengo en mi historial
+// hasta el viernes 16" — el respaldo elegía "la última ruta
+// cerrada" ordenando por timestamps UTC: una ruta cerrada a las
+// 22:00 Lima lleva finalizadaAt = 03:00 UTC DEL DÍA SIGUIENTE y
+// le ganaba a la fecha de una ruta más nueva → la listita quedaba
+// UNA RUTA ATRÁS ("fallido del 15"). Estas claves traducen cada
+// timestamp a SU momento Lima real; sin timestamp vale la fecha
+// del doc a medianoche (límite inferior justo).
+
+/** Fecha Lima (YYYY-MM-DD) de un timestamp ISO — cerrar 22:00
+ *  Lima NO es el día siguiente aunque UTC lo diga. */
+export function fechaLimaDe(ts: string | undefined): string {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  } catch {
+    return '';
+  }
+}
+
+/** Clave de orden del historial (mayor = más reciente), en Lima:
+ *  'YYYY-MM-DD HH:mm:ss' (sv-SE da año-mes-día 24h, ordenable). */
+export function claveHistorial(reg: {
+  finalizadaAt?: string;
+  iniciadaAt?: string;
+  fecha?: string;
+}): string {
+  const ts = reg.finalizadaAt || reg.iniciadaAt;
+  if (ts) {
+    try {
+      const k = new Date(ts).toLocaleString('sv-SE', { timeZone: 'America/Lima' });
+      if (k) return k;
+    } catch { /* ts inválido → fecha del doc */ }
+  }
+  return `${reg.fecha || ''} 00:00:00`;
+}
+
 // ── No entregados de una ruta cerrada ──────────────────────
 
 /**
@@ -268,15 +306,25 @@ export function quitarDeCola(
  * SIN fecha (origen 'fallido', "esperando") porque Rudy no sabe
  * si ventas los reprogramará: quedan a la vista hasta que
  * vuelvan en el Excel, él los pase con ➕ o se limpien solos.
- * Dedupe contra lo que ya esté en la cola — cerrar la ruta dos
- * veces no duplica nada.
+ * 🆕 AE-2 (Rudy: "registra del 15 y mi historial llega al 16"):
+ *   · si el fallido YA vivía en la listita (volvió a fallar HOY)
+ *     su entrada se REEMPLAZA con desde = HOY — la fecha que se
+ *     muestra es la del ÚLTIMO fallo, no la primera (antes el
+ *     dedupe ciego de fusionarCola dejaba la vieja para siempre).
+ *   · una sola entrada por cliente (la vieja sale, entra la nueva).
+ *   · los ENTREGADOS de verdad sacan su entrada vieja: ya no
+ *     esperamos reprogramación de algo que se entregó.
+ *   · sin cambios devuelve la MISMA referencia (no dispara
+ *     escrituras en el cierre).
  */
 export function autoColaAlCerrar(
   clientes: Cliente[],
   hoy: string,
   colaActual: Reprogramado[]
 ): Reprogramado[] {
+  const base = colaActual || [];
   const nuevos: Reprogramado[] = [];
+  const entregados: Cliente[] = [];
   for (const c of clientes || []) {
     if (!normalizar(c.nombre)) continue;
     const st = (c.st || '').trim();
@@ -296,9 +344,26 @@ export function autoColaAlCerrar(
         creadoAt: new Date().toISOString(),
         origen: 'fallido',
       });
+    } else if (esEntregado(st)) {
+      entregados.push(c);
     }
   }
-  return fusionarCola(colaActual, nuevos);
+  // quita las entradas de estos clientes (misma ref si no toca nada)
+  const quitarVarios = (cola: Reprogramado[], quitar: Cliente[]): Reprogramado[] => {
+    if (!quitar.length) return cola;
+    const quedan = cola.filter(
+      (e) => e && e.cliente && !quitar.some((q) => coinciden(e.cliente, q))
+    );
+    return quedan.length === cola.length ? cola : quedan;
+  };
+  if (!nuevos.length) {
+    // nada nuevo: solo sacar entradas de clientes que sí se entregaron
+    return quitarVarios(base, entregados);
+  }
+  // hay nuevos: la entrada vieja del mismo cliente sale y entra la
+  // nueva (con la fecha de HOY) — nunca dos entradas por cliente
+  const sinViejos = quitarVarios(base, [...nuevos.map((n) => n.cliente), ...entregados]);
+  return [...sinViejos, ...nuevos];
 }
 
 // ── 🆕 AD-2: la listita se limpia SOLA ─────────────────────
@@ -348,28 +413,50 @@ export function purgarCola(
  * dependen de que la última ruta cerrada los recuerde. Devuelve
  * la MISMA referencia si no hay nada que migrar (para no
  * disparar escrituras en un efecto).
+ * 🆕 AE-2 (Rudy: "registra del 15 y mi historial llega al 16"):
+ * los fallidos que YA viven en la listita y volvieron a fallar en
+ * esta ruta cerrada se les REFRESCA la fecha — el badge dice
+ * "fallido del [ÚLTIMO fallo]", no el primero. (El ✕ los
+ * respeta: descartarDeCola también los saca de ultimaCerrada.)
  */
 export function migrarFallidos(
   ultima: UltimaCerrada | null,
   cola: Reprogramado[]
 ): Reprogramado[] {
   if (!ultima || !(ultima.noEntregados || []).length) return cola || [];
+  // 1) REFRESCAR la fecha de los fallidos que ya viven en la
+  //    listita y fallaron OTRA VEZ en esta ruta cerrada
+  let refresco = false;
+  const out = (cola || []).map((item) => {
+    if (!item || !item.cliente) return item;
+    const esDeListita = item.origen === 'fallido' || !(item.para || '');
+    if (!esDeListita) return item;
+    const falloOtraVez = (ultima.noEntregados || []).some(
+      (c) => c && esFallido(c.st) && coinciden(c, item.cliente)
+    );
+    if (falloOtraVez && (ultima.fecha || '') > (item.desde || '')) {
+      refresco = true;
+      return { ...item, desde: ultima.fecha };
+    }
+    return item;
+  });
+  // 2) AGREGAR los fallidos que aún no viven en la listita
   const yaEstan = (c: Cliente) =>
-    (cola || []).some((e) => e && e.cliente && coinciden(e.cliente, c));
+    out.some((e) => e && e.cliente && coinciden(e.cliente, c));
   const faltantes = (ultima.noEntregados || []).filter(
     (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c)
   );
-  if (!faltantes.length) return cola || [];
-  return fusionarCola(
-    cola || [],
-    faltantes.map((c) => ({
+  if (!faltantes.length && !refresco) return cola || [];
+  return [
+    ...out,
+    ...faltantes.map((c) => ({
       cliente: c,
       para: '',
       desde: ultima.fecha,
       creadoAt: new Date().toISOString(),
       origen: 'fallido' as const,
-    }))
-  );
+    })),
+  ];
 }
 
 // ── Convertir un pedido viejo en cliente de la ruta de hoy ──

@@ -32,7 +32,7 @@ import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; 
 // 📅 FASE AD: motor puro de reprogramados (noEntregados para el
 // cierre) + tipos de la cola. `import type` se borra al compilar
 // → sin ciclo runtime firestore↔reprog.
-import { noEntregados } from './reprog';
+import { noEntregados, claveHistorial } from './reprog';
 import type { Reprogramado, UltimaCerrada } from './reprog';
 import { cargarConfigPagoPedidos, calcularPagoPedidos } from '../utils/pagoPedidosCore'; // 🛵 FASE D
 // 🚀 FASE AB-2: la librería de Excel ya NO viaja en el paquete inicial
@@ -230,6 +230,34 @@ export async function guardarReprogramados(userId: string, items: Reprogramado[]
 }
 
 /**
+ * 🆕 AE-2: guarda la cola Y el snapshot de la última cerrada en
+ * UNA sola escritura atómica (merge). La ✕ de la listita necesita
+ * tocar las DOS a la vez: si iban por separado, el efecto de
+ * auto-cuidado veía el estado a medias (cola sin el ítem pero
+ * ultimaCerrada todavía lo recuerda) y lo RE-MIGRABA al toque —
+ * "apretás la ✕, desaparece el nombre y vuelve a aparecer en el
+ * mismo lugar" (Rudy, 18 oct).
+ */
+export async function guardarColaYUltima(
+  userId: string,
+  items: Reprogramado[],
+  ultima: UltimaCerrada | null
+): Promise<void> {
+  if (!db || !userId) return;
+  try {
+    const body: Record<string, unknown> = {
+      reprogramados: items,
+      reprogActualizadoEn: serverTimestamp(),
+    };
+    if (ultima) body.ultimaCerrada = ultima;
+    await setDoc(doc(db, 'usuarios', userId), body, { merge: true });
+    console.log('✅ Cola + última cerrada guardadas juntas:', items.length);
+  } catch (e) {
+    console.error('❌ Error guardando cola+última:', e);
+  }
+}
+
+/**
  * 📅 FASE AD: persiste el snapshot de la última ruta cerrada. Se usa
  * en la MIGRACIÓN: las rutas cerradas con versiones anteriores no
  * escribieron `ultimaCerrada` — al leerla del historial (respaldo),
@@ -296,8 +324,11 @@ export function subscribeToReprogramados(
  * el cruce de “fallidos de ayer” cuando `usuarios.ultimaCerrada`
  * todavía no existe (rutas cerradas con versiones anteriores a
  * la FASE AD — al leerlo una vez, se migra al doc del usuario).
- * Light: máx 30 docs + orden local por finalizadaAt (mismo
- * comparador que leerHistorial, sin índices compuestos).
+ * Light: máx 30 docs + orden local por HORA LIMA (🆕 AE-2: antes
+ * ordenaba por timestamps UTC y una ruta cerrada a las 22:00 Lima
+ * llevaba finalizadaAt del día siguiente en UTC → el respaldo
+ * podía elegir UNA RUTA VIEJA y la listita quedaba atrás:
+ * "registra del 15" con historial hasta el 16).
  */
 export async function leerUltimaRuta(userId: string): Promise<RegistroHistorial | null> {
   if (!db || !userId) return null;
@@ -323,11 +354,7 @@ export async function leerUltimaRuta(userId: string): Promise<RegistroHistorial 
         clientes: data.clientes || [],
       });
     });
-    registros.sort((a, b) => {
-      const ka = a.finalizadaAt || a.iniciadaAt || a.fecha || '';
-      const kb = b.finalizadaAt || b.iniciadaAt || b.fecha || '';
-      return kb.localeCompare(ka);
-    });
+    registros.sort((a, b) => claveHistorial(b).localeCompare(claveHistorial(a)));
     return registros[0] || null;
   } catch (e) {
     console.error('❌ Error leyendo última ruta:', e);
