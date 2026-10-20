@@ -459,6 +459,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   // Obtener clase de color según estado
   const getEstadoClase = (st: string) => {
     if (!st || st === 'pendiente') return 'border-l-amber-500 bg-amber-500/5';
+    // 🏪 FASE AF: lo que YA pagó el cliente a la empresa se separa de lo
+    // tuyo con AZUL fuerte — es la plata que NO tenés que cobrar ni
+    // pasar por tu POS (antes se pintaba verde como todo lo entregado
+    // y a la hora del pos no se distinguía de lo tuyo → descuadre).
+    if (esPagoEmpresa(st)) return 'border-l-blue-500 bg-blue-500/10';
     if (['efectivo', 'yape-rudy', 'yape-efectivo', 'mixto', 'pos', 'transferencia', 'yape-plin', 'pago-link', 'jose-smith', 'empresa', 'cambio'].includes(st))
       return 'border-l-emerald-500 bg-emerald-500/5';
     if (['fallida', 'rechazado', 'cancelado'].includes(st)) return 'border-l-red-500 bg-red-500/5';
@@ -1315,6 +1320,22 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               </div>
             )}
 
+            {/* 🏪 FASE AF: aviso de fondo azul — los pedidos que YA pagaron
+                a la empresa, juntos y con su total: es la lista que mirás
+                justo antes de pasar todo por el pos de la empresa. */}
+            {(() => {
+              const emp = clientesFiltrados.filter((c) => esPagoEmpresa(c.st));
+              const total = emp.reduce((s, c) => s + parseFloat(String(c.cobrar || 0)), 0);
+              return emp.length > 0 ? (
+                <div
+                  data-testid="banner-empresa-checks"
+                  className="mx-2.5 mt-2 px-2 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/50 text-[10px] font-black text-blue-300 leading-snug"
+                >
+                  🏪 {emp.length} {emp.length === 1 ? 'pedido YA PAGADO a la empresa' : 'pedidos YA PAGADOS a la empresa'} (S/ {total.toFixed(2)}) — NO los cobres ni los pases por tu pos
+                </div>
+              ) : null;
+            })()}
+
             {/* Lista con checks — fila entera tocable, verde al marcar */}
             <div className="max-h-56 overflow-y-auto custom-scrollbar divide-y divide-slate-700/40 py-1">
               {clientesFiltrados.length === 0 ? (
@@ -1331,8 +1352,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     <div
                       key={String(c.id)}
                       onClick={() => toggleVerificado(c)}
-                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 cursor-pointer transition-colors ${
-                        verif ? 'bg-emerald-500/10' : 'hover:bg-slate-700/30'
+                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 cursor-pointer transition-colors border-l-2 ${
+                        deEmpresa
+                          ? 'bg-blue-500/10 border-l-blue-500'
+                          : verif
+                          ? 'bg-emerald-500/10 border-l-transparent'
+                          : 'hover:bg-slate-700/30 border-l-transparent'
                       }`}
                     >
                       <div className="min-w-0 flex-1 flex items-center gap-2">
@@ -1350,10 +1375,21 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         <span className={`text-[11px] font-bold truncate ${verif ? 'text-emerald-400' : 'text-white'}`}>
                           {c.num ? `${c.num}. ` : ''}{c.nombre || 'Cliente'}
                         </span>
+                        {/* 🏪 FASE AF: chip en la propia fila — la bolita azul
+                            de 3px no se veía en la calle; esto sí. */}
+                        {deEmpresa && (
+                          <span
+                            data-testid={`chip-empresa-${c.id}`}
+                            className="px-1 py-0.5 rounded bg-blue-500/30 border border-blue-400 text-blue-300 text-[8px] font-black shrink-0 leading-none"
+                            title="Ya pagado a la empresa — NO lo cobres ni lo pases por tu pos"
+                          >
+                            🏪 EMPRESA
+                          </span>
+                        )}
                         {c.hora && <span className="text-[9px] text-slate-500 shrink-0">{c.hora}</span>}
                       </div>
                       <div className="text-right shrink-0">
-                        <span className={`text-[11px] font-black ${verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</span>
+                        <span className={`text-[11px] font-black ${deEmpresa ? 'text-blue-300' : verif ? 'text-emerald-300' : 'text-slate-200'}`}>S/ {parseFloat(String(c.cobrar || 0)).toFixed(2)}</span>
                         <span className={`ml-1.5 text-[9px] font-bold ${deEmpresa ? 'text-blue-400' : entregado ? 'text-emerald-400' : fallido ? 'text-red-400' : 'text-amber-400'}`}>
                           {getEstadoTexto(c.st).replace(/^\S+\s/, '')}
                         </span>
@@ -1368,7 +1404,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
             {clientesFiltrados.length > 0 && (
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-2.5 py-1.5 border-t border-slate-700/50 text-[8px] text-slate-500">
                 <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />cobrado por mí</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />cobra la empresa</span>
+                <span className="flex items-center gap-1 font-bold text-blue-400"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />🏪 ya pagado a la empresa — NO cobrar</span>
                 <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />fallido</span>
                 <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />pendiente</span>
               </div>
@@ -1636,6 +1672,18 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           📅 {new Date(c.reprogramadoPara + 'T12:00:00').toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}
                         </span>
                       )}
+                      {/* 🏪 FASE AF: YA PAGADO A LA EMPRESA — bien visible para
+                          que NUNCA más se te escape a la hora del pos: este
+                          pedido ya lo cobró la empresa, NO es plata tuya. */}
+                      {esPagoEmpresa(c.st) && (
+                        <span
+                          data-testid={`badge-empresa-${c.id}`}
+                          className="px-1.5 py-0.5 rounded bg-blue-500/30 border border-blue-400 text-blue-300 text-[8px] font-black shrink-0 leading-none tracking-wide"
+                          title={`Ya pagado a la empresa (${getEstadoTexto(c.st)}) — NO lo cobres de nuevo ni lo pases por tu POS`}
+                        >
+                          🏪 EMPRESA
+                        </span>
+                      )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -1649,8 +1697,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     {/* 💰 FASE Z: respaldo cobrar→precio — si la carga dejó
                         cobrar vacío pero precio llegó, la fila muestra la
                         plata igual (antes: S/ 0.00 mentiroso) */}
-                    <div className="text-xs font-black text-emerald-400">S/ {parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}</div>
-                    <div className="text-[9px] text-slate-500">{getEstadoTexto(c.st)}</div>
+                    {/* 🏪 FASE AF: el monto de la empresa va AZUL — verde
+                        significa "plata que cobro yo"; azul es "ya está
+                        cobrada por la empresa, ni la toques". */}
+                    <div className={`text-xs font-black ${esPagoEmpresa(c.st) ? 'text-blue-400' : 'text-emerald-400'}`}>S/ {parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}</div>
+                    <div className={`text-[9px] ${esPagoEmpresa(c.st) ? 'text-blue-300 font-black' : 'text-slate-500'}`}>{getEstadoTexto(c.st)}</div>
                   </div>
 
                   {/* 💜 FASE Y: botoncito QR — abre tu QR de cobro con el
@@ -1659,6 +1710,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      // 🏪 FASE AF: si el cliente YA pagó a la empresa, el QR
+                      // de cobro NI se abre — te avisa. Es la trampa del doble
+                      // cobro: no hay nada que cobrarle a este cliente.
+                      if (esPagoEmpresa(c.st)) {
+                        try { navigator.vibrate?.([70, 40, 70]); } catch { /* web: no-op */ }
+                        onShowToast?.('🏪 Ya pagó a la empresa', `${c.nombre || 'Este cliente'} ya le pagó directo a la empresa — no hace falta cobrarle`, 'warning');
+                        return;
+                      }
                       setQrCliente(c);
                       // default inteligente: Yape salvo que solo haya Plin
                       setQrWallet(!hayYape && hayPlin ? 'plin' : 'yape');
@@ -1666,9 +1725,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       setQrMontoEdit('');
                     }}
                     data-testid={`btn-qr-${c.id}`}
-                    title={`Mostrar mi QR de cobro — ${c.nombre || 'cliente'} debe S/ ${parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}`}
+                    title={esPagoEmpresa(c.st)
+                      ? '🏪 Ya pagado a la empresa — no hace falta cobrarle'
+                      : `Mostrar mi QR de cobro — ${c.nombre || 'cliente'} debe S/ ${parseFloat(String(c.cobrar || c.precio || 0)).toFixed(2)}`}
                     className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md border transition-all active:scale-90 ${
-                      hayYape || hayPlin
+                      esPagoEmpresa(c.st)
+                        ? 'bg-blue-500/15 border-blue-500/50 text-blue-400 hover:bg-blue-500/25'
+                        : hayYape || hayPlin
                         ? 'bg-purple-500/15 border-purple-500/40 text-purple-400 hover:bg-purple-500/25'
                         : 'bg-slate-700/50 border-slate-600 text-slate-500 hover:bg-slate-700'
                     }`}
@@ -1716,6 +1779,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 {/* Panel expandido */}
                 {expandido && (
                   <div className="px-2 pb-2 space-y-2 border-t border-slate-700/50 pt-2">
+                    {/* 🏪 FASE AF: el grito grande — cuando abrís al cliente
+                        (a la hora de cuadrar el pos) es IMPOSIBLE no ver
+                        que ya pagó a la empresa. */}
+                    {esPagoEmpresa(c.st) && (
+                      <div
+                        data-testid={`banner-empresa-${c.id}`}
+                        className="px-2 py-2 rounded-md bg-blue-500/20 border border-blue-400 text-blue-300 text-[10px] font-black leading-snug text-center"
+                      >
+                        🏪 ESTE PEDIDO YA ESTÁ PAGADO A LA EMPRESA — NO lo cobres de nuevo ni lo pases por tu pos
+                      </div>
+                    )}
                     {/* Datos del cliente */}
                     <div className="grid grid-cols-1 gap-1 text-[11px]">
                       {c.dir && (
@@ -1758,7 +1832,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               onClick={() => {
                                 cambiarEstado(c.id, id);
                                 sonarPago(); // 🔔 Fase 3.14
-                                onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
+                                // 🏪 FASE AF: marcar "de la empresa" suena y
+                                // avisa DISTINTO — doble vibración + cartel:
+                                // este pedido NO entra a tu caja ni a tu pos.
+                                if (esPagoEmpresa(id)) {
+                                  try { navigator.vibrate?.([70, 40, 70]); } catch { /* web: no-op */ }
+                                  onShowToast?.('🏪 Pago de la EMPRESA', `${c.nombre}: ya le pagaron directo a la empresa — NO lo cobres de nuevo`, 'warning');
+                                } else {
+                                  onShowToast?.('Pago registrado', `${c.nombre}: ${label}`, 'success');
+                                }
                               }}
                               className={`px-1.5 py-1.5 rounded-md text-[10px] font-bold transition-all active:scale-95 ${
                                 activo
