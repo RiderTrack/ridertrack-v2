@@ -101,7 +101,7 @@ async function copiarTexto(texto: string): Promise<boolean> {
 // 🎨 Tema por billetera (clases completas para Tailwind JIT)
 // ═══════════════════════════════════════════════════════════
 
-type WalletId = 'yape' | 'plin';
+type WalletId = 'yape' | 'plin' | 'empresa';
 
 interface WalletTema {
   id: WalletId;
@@ -170,6 +170,31 @@ const TEMAS: Record<WalletId, WalletTema> = {
     ayudaPaso2: 'Busca “Recibir dinero” / “Cobrar” y tu código QR',
     notaBot: '🔐 El bot (index.js en Termux) necesita el pequeño handler “enviar_plin” para mandar este QR solo — tus datos ya quedan listos en Firebase mientras tanto. También puedes compartirlo al toque con el botón verde.',
   },
+  // 🏪 FASE AG: el QR que le DIO la empresa a Rudy — los clientes del
+  // trabajo le pagan DIRECTO a la empresa. NO viaja al bot (el bot manda
+  // TU Yape/Plin del trabajo); se muestra desde el modal del QR por
+  // cliente de Mi Ruta o se comparte por WhatsApp con el número.
+  empresa: {
+    id: 'empresa',
+    nombre: 'Empresa',
+    emoji: '🏪',
+    gradHeader: 'bg-gradient-to-br from-blue-600/20 via-slate-800 to-slate-800 border border-blue-500/30 shadow-xl',
+    iconBg: 'bg-blue-500/20 border border-blue-500/40',
+    iconColor: 'text-blue-300',
+    accentText: 'text-blue-400',
+    inputFocus: 'focus:border-blue-500',
+    inputOk: 'border-emerald-600/50 focus:border-emerald-500',
+    qrBorder: 'border-blue-500/40',
+    btnMain: 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-600/30',
+    btnWa: 'bg-green-600/15 hover:bg-green-600/25 border border-green-600/30 text-green-400',
+    stepChip: 'bg-blue-500/20 text-blue-300',
+    tipBox: 'bg-blue-500/10 border border-blue-500/20',
+    titulo: '🏪 QR de la Empresa',
+    subtitulo: 'El QR que te dio tu empresa — el cliente le paga DIRECTO a la empresa',
+    accionBoton: '🏪 Empresa',
+    ayudaPaso2: 'Pídele a tu jefe el screenshot del QR de la empresa (o sacale foto al QR impreso, que se vea nítido)',
+    notaBot: '🏪 Este QR NO lo manda el bot — lo mostrás vos en la puerta desde Mi Ruta (botoncito QR del cliente → chip 🏪 Empresa) o lo compartís por WhatsApp con el botón verde. Lo que paguen por acá va directo a la cuenta de tu empresa: marcá “📲 Pagó con el QR” y queda pintado azul de empresa (FASE AF).',
+  },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -183,6 +208,9 @@ interface WalletPanelProps {
 
 const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
   const T = TEMAS[wallet];
+  // 🏪 FASE AG: la billetera EMPRESA se guarda en config_empresa.qrEmpresa
+  // y NO viaja al bot (el bot manda TU Yape/Plin del trabajo)
+  const ES_EMPRESA = wallet === 'empresa';
   const { user } = useAuth();
   const { config, loading, guardando, guardar } = useConfig();
 
@@ -204,7 +232,7 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Leer de la config según la billetera activa
-  const cfgWallet = wallet === 'yape' ? config?.yape : config?.plin;
+  const cfgWallet = wallet === 'yape' ? config?.yape : wallet === 'plin' ? config?.plin : config?.qrEmpresa;
 
   // Cargar datos de config_empresa al montar / cambiar config
   useEffect(() => {
@@ -218,6 +246,12 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
   // Ver estado de sincronización con el bot
   const verificarSyncBot = useCallback(async () => {
     if (!user) return;
+    // 🏪 FASE AG: la empresa NO se sincroniza con el bot — nada que verificar
+    if (ES_EMPRESA) {
+      setBotSync('sincronizado');
+      setBotDatos(null);
+      return;
+    }
     setBotSync('cargando');
     const botCfg = wallet === 'yape'
       ? await obtenerYapeDelBot(user.uid)
@@ -239,7 +273,6 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user, wallet]);
-
   // Marcar cambios pendientes
   useEffect(() => {
     if (loading || !config) return;
@@ -293,7 +326,16 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
     try {
       // 1. Guardar en config_empresa/{uid} (fuente de verdad de v2)
       const nuevaConfig: ConfigCuentas = { ...config };
-      if (wallet === 'yape') {
+      if (ES_EMPRESA) {
+        // 🏪 FASE AG: billetera de la EMPRESA — misma forma que yape/plin
+        nuevaConfig.qrEmpresa = {
+          ...config.qrEmpresa,
+          nombre: titular.trim(),
+          telefono: numLimpio,
+          qrBase64: qrBase64,
+          qrUrl: '',
+        };
+      } else if (wallet === 'yape') {
         nuevaConfig.yape = {
           ...config.yape,
           nombre: titular.trim(),
@@ -312,6 +354,18 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
       }
       await guardar(nuevaConfig);
       // 2. Sincronizar a ruta_activa/{uid}.{wallet} (lo que lee el bot)
+      //    🏪 FASE AG: la EMPRESA no viaja al bot — el bot manda tu
+      //    Yape/Plin del trabajo; el QR de la empresa se muestra desde
+      //    Mi Ruta o se comparte con el botón verde de arriba.
+      if (ES_EMPRESA) {
+        onShowToast?.(
+          '🏪 QR de la Empresa guardado',
+          qrBase64 ? 'Ya sale en Mi Ruta: botoncito QR del cliente → chip 🏪 Empresa' : 'Datos guardados (sin imagen de QR)',
+          'success'
+        );
+        setHayCambios(false);
+        return;
+      }
       if (wallet === 'yape') {
         await sincronizarYapeAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
       } else {
@@ -359,6 +413,12 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
   // ── Eliminar QR ──
   const handleEliminarQR = () => {
     if (!qrBase64) return;
+    if (ES_EMPRESA) {
+      if (!confirm('¿Eliminar el QR de la Empresa?\n\nVa a dejar de salir en Mi Ruta.')) return;
+      setQrBase64('');
+      onShowToast?.('🗑️ QR eliminado', 'Guarda para que deje de salir en Mi Ruta', 'info');
+      return;
+    }
     if (!confirm(`¿Eliminar tu QR de ${T.nombre}?\n\nEl bot volverá a enviar SOLO el mensaje de texto (sin imagen).`)) return;
     setQrBase64('');
     onShowToast?.('🗑️ QR eliminado', 'Guarda para que el bot deje de usar la imagen', 'info');
@@ -425,6 +485,21 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
           </div>
         </div>
 
+        {/* 🏪 FASE AG: para la EMPRESA el 3er indicador no es el bot — es
+            si ya está LISTA para mostrarse en Mi Ruta */}
+        {ES_EMPRESA ? (
+          <div className={`p-3.5 rounded-xl border flex items-center gap-3 ${numero && titular && qrBase64 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+            {numero && titular && qrBase64
+              ? <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              : <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />}
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase font-bold text-slate-400">En Mi Ruta</div>
+              <div className={`text-xs font-bold truncate ${numero && titular && qrBase64 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {numero && titular && qrBase64 ? 'Listo para cobrar' : 'Falta configurar'}
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className={`p-3.5 rounded-xl border flex items-center gap-3 ${
           botSync === 'sincronizado' ? 'bg-emerald-500/10 border-emerald-500/30'
           : botSync === 'desactualizado' ? 'bg-amber-500/10 border-amber-500/30'
@@ -448,6 +523,7 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* ═══ CUERPO: 2 columnas ═══ */}
@@ -544,7 +620,7 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={subiendo}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 ${wallet === 'yape' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-cyan-600 hover:bg-cyan-700'} text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50`}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 ${wallet === 'yape' ? 'bg-purple-600 hover:bg-purple-700' : wallet === 'empresa' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-cyan-600 hover:bg-cyan-700'} text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50`}
               >
                 {subiendo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
                 {qrBase64 ? 'Cambiar QR' : 'Subir QR'}
@@ -574,7 +650,7 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
                 hayCambios ? T.btnMain : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
               }`}
             >
-              {guardandoTodo ? (<><Loader2 className="w-4 h-4 animate-spin" /> Guardando…</>) : (<><Save className="w-4 h-4" /> Guardar y sincronizar</>)}
+              {guardandoTodo ? (<><Loader2 className="w-4 h-4 animate-spin" /> Guardando…</>) : (<><Save className="w-4 h-4" /> {ES_EMPRESA ? 'Guardar' : 'Guardar y sincronizar'}</>)}
             </button>
             {hayCambios && (
               <p className="text-[10px] text-amber-400 text-center font-medium">⚠️ Tienes cambios sin guardar</p>
@@ -584,7 +660,8 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
 
         {/* ═══ COLUMNA DERECHA: Bot + ayuda ═══ */}
         <div className="space-y-4">
-          {/* ── Estado del bot ── */}
+          {/* ── Estado del bot (yape/plin — la empresa NO viaja al bot) ── */}
+          {!ES_EMPRESA && (
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center gap-2">
               <Bot className={`w-4 h-4 ${T.accentText}`} />
@@ -641,6 +718,27 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
               </button>
             </div>
           </div>
+          )}
+
+          {/* ── 🏪 FASE AG: cómo se usa el QR de la EMPRESA ── */}
+          {ES_EMPRESA && (
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3" data-testid="empresa-como-se-usa">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-400" />
+              <h3 className="text-sm font-bold text-white">Cómo se usa</h3>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3 space-y-2 text-xs text-slate-300 leading-relaxed">
+              <p>🚪 <b>En la puerta:</b> Mi Ruta → botoncito <b>QR</b> del cliente → chip <b>🏪 Empresa</b> — el cliente escanea y le paga directo a tu empresa.</p>
+              <p>📲 <b>A distancia:</b> el mismo botón dice <b>“Mandar por WhatsApp”</b> y le llega el número de la empresa con el monto.</p>
+              <p>✅ <b>Al pagar:</b> marcá <b>“📲 Pagó con el QR”</b> — queda pintado AZUL de empresa (FASE AF), nunca lo cobrás de nuevo.</p>
+            </div>
+            <div className={`${T.tipBox} rounded-lg p-2.5`}>
+              <p className="text-[10px] text-slate-300/90 leading-relaxed">
+                {T.notaBot}
+              </p>
+            </div>
+          </div>
+          )}
 
           {/* ── Cómo conseguir tu QR ── */}
           <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
@@ -696,9 +794,9 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
             <div className="bg-white rounded-2xl p-4">
               <img src={qrBase64} alt={`QR ${T.nombre} ampliado`} className="w-full block rounded-lg" />
               <div className="text-center mt-3 pb-1">
-                <p className="text-sm font-black text-slate-900">{titular || T.nombre}</p>
-                <p className={`text-xl font-black font-mono tracking-wider ${wallet === 'yape' ? 'text-purple-700' : 'text-cyan-700'}`}>{numero}</p>
-                <p className="text-[10px] text-slate-500 mt-1">Escanea con tu app de {T.nombre} para pagar</p>
+                <p className="text-sm font-black text-slate-900">{titular || (ES_EMPRESA ? 'Empresa' : T.nombre)}</p>
+                <p className={`text-xl font-black font-mono tracking-wider ${wallet === 'yape' ? 'text-purple-700' : wallet === 'empresa' ? 'text-blue-700' : 'text-cyan-700'}`}>{numero}</p>
+                <p className="text-[10px] text-slate-500 mt-1">{ES_EMPRESA ? 'Escanea con tu app del banco — le pagas DIRECTO a la empresa' : `Escanea con tu app de ${T.nombre} para pagar`}</p>
               </div>
             </div>
           </div>
@@ -884,15 +982,16 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl font-black text-white">Mis QR de cobro</h1>
-            <p className="text-xs text-slate-400">Trabajo e inDrive — configúralos una vez y el bot los envía por WhatsApp</p>
+            <p className="text-xs text-slate-400">Trabajo, 🏪 empresa e inDrive — configuralos una vez y listo</p>
           </div>
         </div>
 
-        {/* Pestañas de billetera — FASE A2: + 🏍️ inDrive (personales) */}
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        {/* Pestañas de billetera — FASE A2: + 🏍️ inDrive · FASE AG: + 🏪 Empresa */}
+        <div className="mt-4 grid grid-cols-4 gap-2" data-testid="tabs-qr">
           <button
             onClick={() => setWallet('yape')}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+            data-testid="tab-qr-yape"
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
               wallet === 'yape'
                 ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
                 : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
@@ -902,7 +1001,8 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           </button>
           <button
             onClick={() => setWallet('plin')}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+            data-testid="tab-qr-plin"
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
               wallet === 'plin'
                 ? 'bg-cyan-600 border-cyan-500 text-white shadow-lg shadow-cyan-600/30'
                 : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
@@ -910,9 +1010,21 @@ export const YapeQRView: React.FC<YapeQRViewProps> = ({ onShowToast }) => {
           >
             🔷 Plin
           </button>
+          {/* 🏪 FASE AG: el QR que le dio la EMPRESA — tercera billetera del trabajo */}
+          <button
+            onClick={() => setWallet('empresa')}
+            data-testid="tab-qr-empresa"
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+              wallet === 'empresa'
+                ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-600/30'
+                : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+            }`}
+          >
+            🏪 Empresa
+          </button>
           <button
             onClick={() => setWallet('indrive')}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 border ${
               wallet === 'indrive'
                 ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30'
                 : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'

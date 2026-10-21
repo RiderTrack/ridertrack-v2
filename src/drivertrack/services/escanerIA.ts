@@ -401,8 +401,11 @@ interface ResultadoIA {
   proveedor: ProveedorIA;
 }
 
+// FASE AG: exportada para el escáner de Mi Ruta (escanerRuta.ts) —
+// el motor Gemini/Claude YA validado de inDrive, ahora con el prompt
+// del TRABAJO. Cero cambios de comportamiento, solo visibilidad.
 /** Enruta a Gemini o Claude según el prefijo de la key. */
-async function llamarIA(apiKey: string, p: PeticionIA): Promise<ResultadoIA> {
+export async function llamarIA(apiKey: string, p: PeticionIA): Promise<ResultadoIA> {
   const proveedor = detectarProveedor(apiKey);
   if (!proveedor) throw new ErrorOcr('formato-key');
   if (proveedor === 'gemini') {
@@ -442,8 +445,9 @@ async function llamarIA(apiKey: string, p: PeticionIA): Promise<ResultadoIA> {
   return { ...r, proveedor };
 }
 
+// FASE AG: exportado para el escáner de Mi Ruta (parser robusto compartido)
 /** Extrae el JSON de la respuesta (por si viene envuelto en texto/markdown). */
-function parsearJsonTexto(texto: string): Record<string, string> {
+export function parsearJsonTexto(texto: string): Record<string, string> {
   try {
     return JSON.parse(texto) as Record<string, string>;
   } catch {

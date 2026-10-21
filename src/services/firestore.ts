@@ -1061,6 +1061,13 @@ export interface ConfigCuentas {
   interbank?: { titular: string; cci: string; numero: string; };
   /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
   plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
+  /** 🏪 FASE AG: QR de la EMPRESA — el que le dieron a Rudy para que
+   *  los clientes del TRABAJO le paguen directo a la empresa. Se carga
+   *  una vez en “Mi QR Yape/Plin → 🏪 Empresa” y sale en el modal del
+   *  QR por cliente de Mi Ruta como tercera billetera. Distinto del
+   *  Yape/Plin del trabajo (esa plata la cobra/transferita Rudy): lo que
+   *  entra por acá va DIRECTO a la cuenta de la empresa. */
+  qrEmpresa?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   empresa?: { nombre: string; telefono: string; direccion: string; };
   /** Fase 3.10: equipo de ventas — contactos que envía el bot (chicos_venta) */
   ventas?: {
@@ -1101,6 +1108,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
   plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
+  qrEmpresa: { nombre: '', telefono: '', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
   ventas: {
     fabiana: { nombre: 'Fabiana', celular: '' },
@@ -1138,6 +1146,7 @@ function fusionarConfig(data: any): ConfigCuentas {
     bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
     interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
     plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
+    qrEmpresa: { ...CONFIG_CUENTAS_DEFAULT.qrEmpresa, ...data?.qrEmpresa },
     empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
     ventas: {
       fabiana: { ...CONFIG_CUENTAS_DEFAULT.ventas!.fabiana, ...data?.ventas?.fabiana },

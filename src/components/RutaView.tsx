@@ -32,8 +32,14 @@ import {
   QrCode,
   CalendarClock,
   History,
+  ImageUp,
 } from 'lucide-react';
 import { Cliente, encolarAccionBot, _botCel, subirFotoPago, ConfigRuta } from '../services/firestore';
+// 📷 FASE AG: escáner de EXTRA de WhatsApp — la foto del chat del
+// cliente la lee la IA y llena el formulario de agregar ordenadito
+import { escanearClienteWhatsApp } from '../services/escanerRuta';
+// Las keys de IA son las MISMAS del escáner de inDrive (dt_config_v1)
+import { cargarConfig as cargarConfigDT, guardarConfig as guardarConfigDT, normalizarConfig as normalizarConfigDT } from '../drivertrack/storage';
 // 🙏 F3.44: modo de aviso por cliente (automático/manual, como la v1)
 import { ModoAvisoEntrega, ETIQUETA_MODO, modoAvisoDe, claveAviso, registrarAvisoEnviado } from '../utils/avisoEntrega';
 import { useClientes } from '../hooks/useClientes';
@@ -95,8 +101,20 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   /** hay ALGO de esa billetera (imagen o número) para mostrar */
   const hayYape = !!(yapeQR || yapeNum);
   const hayPlin = !!(plinQR || plinNum);
+  // 🏪 FASE AG: TERCERA billetera del trabajo — el QR que le dio la
+  // empresa, para que el cliente le pague DIRECTO a la empresa
+  // (se configura en “Mi QR Yape/Plin → 🏪 Empresa”).
+  const empresaQR = (config?.qrEmpresa?.qrBase64 || '').trim();
+  const empresaNum = (config?.qrEmpresa?.telefono || '').replace(/\D/g, '');
+  const empresaTit = (config?.qrEmpresa?.nombre || '').trim();
+  const hayEmpresa = !!(empresaQR || empresaNum);
+  /** cuántas billeteras del trabajo tienen algo — los chips salen
+   * con DOS o más (FASE AG: antes eran solo yape/plin) */
+  const nWalletsQR = [hayYape, hayPlin, hayEmpresa].filter(Boolean).length;
+  /** billetera por defecto al abrir el QR: la primera con algo */
+  const walletDefault: 'yape' | 'plin' | 'empresa' = hayYape ? 'yape' : hayPlin ? 'plin' : 'empresa';
   const [qrCliente, setQrCliente] = useState<Cliente | null>(null);
-  const [qrWallet, setQrWallet] = useState<'yape' | 'plin'>('yape');
+  const [qrWallet, setQrWallet] = useState<'yape' | 'plin' | 'empresa'>('yape');
   // 💰 FASE Z: editor de monto de emergencia — si el cliente
   // llegó sin monto (Excel con columna renombrada, carga vieja),
   // lo anotás ACÁ mismo en la puerta y queda guardado para
@@ -331,6 +349,29 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [nuevoMonto, setNuevoMonto] = useState('');
   const [nuevoDir, setNuevoDir] = useState('');
   const [nuevoDist, setNuevoDist] = useState('');
+  // 📷 FASE AG: referencia del pedido ("frente a la bodega"…) — la
+  // llena el escáner y queda en la obs del cliente (viaja con él)
+  const [nuevoObs, setNuevoObs] = useState('');
+
+  // ═══ 📷 FASE AG: ESCÁNER DE EXTRA DE WHATSAPP ═══
+  // La función que tiene "viaje sin driver" (escáner IA de inDrive),
+  // ahora en Mi Ruta: el cliente manda por WhatsApp el nombre, la
+  // dirección, el celular… (un EXTRA que NO está en el Excel) → le
+  // sacás foto al chat con la CÁMARA (o galería) → la IA lo lee →
+  // ESTE formulario se llena ordenadito → ✅ Agregar y queda en la
+  // ruta de hoy. Las keys son las mismas del escáner de inDrive.
+  const [scanEscaneando, setScanEscaneando] = useState(false);
+  const [scanOk, setScanOk] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const [scanDetalle, setScanDetalle] = useState('');
+  const inputScanCam = useRef<HTMLInputElement>(null);
+  const inputScanGal = useRef<HTMLInputElement>(null);
+  /** keys de IA (dt_config_v1 — compartidas con el escáner de inDrive) */
+  const [keysIA, setKeysIA] = useState(() => cargarConfigDT());
+  const [keyGeminiInput, setKeyGeminiInput] = useState(() => (cargarConfigDT().geminiKey || ''));
+  const [keyClaudeInput, setKeyClaudeInput] = useState(() => (cargarConfigDT().claudeKey || ''));
+  const [verConfigKey, setVerConfigKey] = useState(false);
+  const hayKeyIA = !!((keysIA.geminiKey || '').trim() || (keysIA.claudeKey || '').trim());
 
   // 🚩 Guardar cambios parciales de la config de ruta (inicio/fin)
   const guardarRuta = async (parcial: Partial<ConfigRuta>) => {
@@ -507,6 +548,80 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
   };
 
+  // ═══ 📷 FASE AG: escanear el EXTRA de WhatsApp con la cámara ═══
+  // Igualito que el "viaje sin driver": cámara (o galería, que la IA
+  // lee mejor las capturas) → IA → formulario llenito. Sin key → el
+  // mini-panel de keys se abre acá mismo (una vez sola y sirve para
+  // inDrive también: son la MISMA configuración).
+  function abrirEscanerWA(desdeCamara: boolean) {
+    if (scanEscaneando) return;
+    setMostrarAgregar(true);
+    const cfg = cargarConfigDT(); // fresco — puede haberla configurado en Ajustes inDrive
+    setKeysIA(cfg);
+    if (!(cfg.geminiKey || '').trim() && !(cfg.claudeKey || '').trim()) {
+      setVerConfigKey(true);
+      setScanOk(false);
+      setScanError('Configurá tu key de IA — gratis en aistudio.google.com/apikey (1 minuto) y sirve también para el escáner de inDrive');
+      onShowToast?.('📷 Falta tu key de IA', 'Gemini gratis en aistudio.google.com/apikey — se configura una vez', 'warning');
+      return;
+    }
+    setScanError('');
+    setScanDetalle('');
+    setScanOk(false);
+    (desdeCamara ? inputScanCam : inputScanGal).current?.click();
+  }
+
+  async function alElegirFotoScan(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const cfg = cargarConfigDT();
+    setKeysIA(cfg);
+    setScanEscaneando(true);
+    setScanError('');
+    setScanDetalle('');
+    setScanOk(false);
+    try {
+      // comprime la foto para que viaje liviano por la red del cel
+      const { comprimirImagenParaOCR } = await import('../drivertrack/utils');
+      const b64 = await comprimirImagenParaOCR(file);
+      const datos = await escanearClienteWhatsApp(b64, cfg.geminiKey, cfg.claudeKey);
+      // “que lo ponga en orden”: cada dato a SU campo — todo
+      // editable antes de Agregar, como el escáner de inDrive
+      if (datos.cliente) setNuevoNombre(datos.cliente);
+      if (datos.telefono) setNuevoCel(datos.telefono);
+      if (datos.producto) setNuevoProd(datos.producto);
+      if (datos.cobrar !== null) setNuevoMonto(String(datos.cobrar));
+      if (datos.direccion) setNuevoDir(datos.direccion);
+      if (datos.distrito) setNuevoDist(datos.distrito);
+      if (datos.referencia) setNuevoObs(datos.referencia);
+      setScanOk(true);
+      try { navigator.vibrate?.(80); } catch { /* web: no-op */ }
+      onShowToast?.('📷 Extra leído', 'Revisá los datos y dale ✅ Agregar Cliente', 'success');
+    } catch (err) {
+      const e2 = err as Error & { detalle?: string };
+      setScanError(e2.message || 'Algo falló escaneando — probá de nuevo o escribí a mano');
+      setScanDetalle(e2.detalle ?? '');
+    } finally {
+      setScanEscaneando(false);
+    }
+  }
+
+  /** Guarda las keys de IA (dt_config_v1 — las mismas del escáner de inDrive) */
+  function guardarKeysIA() {
+    const cfg = normalizarConfigDT({
+      ...cargarConfigDT(),
+      geminiKey: keyGeminiInput.trim(),
+      claudeKey: keyClaudeInput.trim(),
+    });
+    guardarConfigDT(cfg);
+    setKeysIA(cfg);
+    setVerConfigKey(false);
+    setScanError('');
+    setScanDetalle('');
+    onShowToast?.('🤖 Key guardada', 'Ya podés escanear — sirve también para el escáner de inDrive', 'success');
+  }
+
   // Agregar cliente manual
   const handleAgregar = () => {
     if (!nuevoNombre.trim()) {
@@ -524,12 +639,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       cobrar: parseFloat(nuevoMonto) || 0,
       dir: nuevoDir.trim(),
       dist: nuevoDist.trim(),
-      obs: '',
+      // 📷 FASE AG: la referencia que leyó el escáner viaja en la obs
+      obs: nuevoObs.trim(),
       st: 'pendiente',
       mEf: 0, mYp: 0, mEmp: 0, mVt: 0, mEM: '', hora: '', nota: '',
     });
     setNuevoNombre(''); setNuevoCel(''); setNuevoProd('');
     setNuevoMonto(''); setNuevoDir(''); setNuevoDist('');
+    setNuevoObs('');
+    setScanOk(false); setScanError(''); setScanDetalle('');
     setMostrarAgregar(false);
     onShowToast?.('Cliente agregado', nuevoNombre, 'success');
   };
@@ -937,6 +1055,19 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
               <NavigationIcon className="w-3.5 h-3.5 flex-shrink-0" />
               <span className="truncate">GPS</span>
             </button>
+            {/* 📷 FASE AG: escanear el EXTRA de WhatsApp — la misma IA
+                del "viaje sin driver" lee el mensaje del cliente (nombre,
+                dirección, celular…) y llena el formulario solito */}
+            <button
+              onClick={() => abrirEscanerWA(true)}
+              data-testid="boton-escanear-wa"
+              disabled={scanEscaneando}
+              className="flex items-center justify-center gap-1 px-1.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0 disabled:opacity-60"
+              title="Escanear el WhatsApp del cliente: le sacás foto al mensaje (o captura de la galería) y la IA llena nombre, celular, dirección, distrito y monto — dale ✅ Agregar y queda en tu ruta"
+            >
+              {scanEscaneando ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <Camera className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{scanEscaneando ? 'Leyendo…' : 'Escanear'}</span>
+            </button>
             <button
               onClick={() => setMostrarAgregar(!mostrarAgregar)}
               className="flex items-center justify-center gap-1 px-1.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition-all active:scale-95 min-w-0"
@@ -1095,24 +1226,129 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         )}
       </div>
 
-      {/* Formulario agregar manual */}
+      {/* 📷 FASE AG: inputs de cámara/galería del escáner — viven FUERA
+          del formulario para que los refs existan SIEMPRE (el botón 📷
+          de la barra abre el form y dispara la cámara en el mismo toque) */}
+      <input
+        ref={inputScanCam}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={alElegirFotoScan}
+        className="absolute w-px h-px opacity-0 pointer-events-none"
+        data-testid="input-scan-camara"
+        aria-label="Foto del WhatsApp del cliente (cámara)"
+      />
+      <input
+        ref={inputScanGal}
+        type="file"
+        accept="image/*"
+        onChange={alElegirFotoScan}
+        className="absolute w-px h-px opacity-0 pointer-events-none"
+        data-testid="input-scan-galeria"
+        aria-label="Captura del WhatsApp del cliente (galería)"
+      />
+
+      {/* Formulario agregar manual (📷 FASE AG: con escáner de WhatsApp) */}
       {mostrarAgregar && (
-        <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4 space-y-3">
+        <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4 space-y-3" data-testid="form-agregar">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white">Agregar Cliente Manual</h3>
             <button onClick={() => setMostrarAgregar(false)} className="text-slate-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} placeholder="Nombre *" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
-            <input value={nuevoCel} onChange={e => setNuevoCel(e.target.value)} placeholder="Celular" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
-            <input value={nuevoProd} onChange={e => setNuevoProd(e.target.value)} placeholder="Producto" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
-            <input value={nuevoMonto} onChange={e => setNuevoMonto(e.target.value)} type="number" placeholder="Monto S/" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
-            <input value={nuevoDir} onChange={e => setNuevoDir(e.target.value)} placeholder="Dirección" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
-            <input value={nuevoDist} onChange={e => setNuevoDist(e.target.value)} placeholder="Distrito" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+
+          {/* ═══ 📷 FASE AG: escanear el EXTRA de WhatsApp ═══ */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => abrirEscanerWA(true)}
+              disabled={scanEscaneando}
+              data-testid="btn-scan-camara"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-sky-600 hover:bg-sky-500 border border-sky-400/50 text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-60"
+              title="Le sacás foto al mensaje de WhatsApp y la IA llena este formulario"
+            >
+              {scanEscaneando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+              {scanEscaneando ? 'Leyendo el chat…' : '📷 Escanear WhatsApp'}
+            </button>
+            <button
+              onClick={() => abrirEscanerWA(false)}
+              disabled={scanEscaneando}
+              data-testid="btn-scan-galeria"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-60"
+              title="Una CAPTURA de pantalla se lee mejor que una foto — elegila de la galería"
+            >
+              <ImageUp className="w-4 h-4" />
+              Galería
+            </button>
+            <button
+              onClick={() => setVerConfigKey(v => !v)}
+              data-testid="btn-scan-key"
+              className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 border ${
+                hayKeyIA
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+              }`}
+              title={hayKeyIA ? 'Tu key de IA está lista (la misma del escáner de inDrive)' : 'Configurá tu key de IA — gratis, 1 minuto'}
+            >
+              🤖 IA {hayKeyIA ? '🟢' : '🔴'}
+            </button>
           </div>
-          <button onClick={handleAgregar} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold">
+          {/* inputs OCULTOS de cámara/galería: viven ARRIBA, fuera del
+              formulario — ver el comentario del bloque de inputs */}
+
+          {/* estado del escaneo: error con detalle técnico / el exito */}
+          {scanError && (
+            <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-2" data-testid="scan-error">
+              <p className="text-[11px] text-rose-300 font-bold">📷 {scanError}</p>
+              {scanDetalle && <p className="text-[9px] text-rose-400/70 mt-0.5">{scanDetalle}</p>}
+            </div>
+          )}
+          {scanOk && !scanEscaneando && (
+            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2" data-testid="scan-ok">
+              <p className="text-[11px] text-emerald-300 font-bold">✓ Extra leído — revisá los datos y dale Agregar Cliente (todo se puede editar)</p>
+            </div>
+          )}
+
+          {/* mini-panel de keys de IA (dt_config_v1 — compartido con inDrive) */}
+          {verConfigKey && (
+            <div className="rounded-xl bg-slate-900 border border-slate-700 p-3 space-y-2" data-testid="panel-keys-ia">
+              <p className="text-[11px] font-bold text-slate-300">🤖 Key de IA — la misma del escáner de inDrive (se guarda una vez)</p>
+              <input
+                value={keyGeminiInput}
+                onChange={e => setKeyGeminiInput(e.target.value)}
+                placeholder="Key de Gemini — gratis en aistudio.google.com/apikey (empieza con AIza)"
+                className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-sky-500 outline-none"
+                data-testid="input-key-gemini"
+              />
+              <input
+                value={keyClaudeInput}
+                onChange={e => setKeyClaudeInput(e.target.value)}
+                placeholder="Token de Claude (opcional, respaldo) — empieza con sk-ant-"
+                className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:border-sky-500 outline-none"
+                data-testid="input-key-claude"
+              />
+              <button
+                onClick={guardarKeysIA}
+                className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition-all active:scale-95"
+                data-testid="btn-guardar-keys"
+              >
+                Guardar key
+              </button>
+              <p className="text-[9px] text-slate-500 leading-relaxed">💡 Gemini es GRATIS: entra a aistudio.google.com/apikey con tu Google, crea la key (AIza…) y pégala acá. Si un día se queda sin créditos, configurá la de Claude de respaldo y el escáner la usa solo.</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} placeholder="Nombre *" data-testid="agregar-nombre" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoCel} onChange={e => setNuevoCel(e.target.value)} placeholder="Celular" data-testid="agregar-cel" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoProd} onChange={e => setNuevoProd(e.target.value)} placeholder="Producto" data-testid="agregar-prod" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoMonto} onChange={e => setNuevoMonto(e.target.value)} type="number" placeholder="Monto S/" data-testid="agregar-monto" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoDir} onChange={e => setNuevoDir(e.target.value)} placeholder="Dirección" data-testid="agregar-dir" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoDist} onChange={e => setNuevoDist(e.target.value)} placeholder="Distrito" data-testid="agregar-dist" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none" />
+            <input value={nuevoObs} onChange={e => setNuevoObs(e.target.value)} placeholder="Referencia / obs (ej: frente a la bodega)" data-testid="agregar-obs" className="bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:border-emerald-500 outline-none sm:col-span-2" />
+          </div>
+          <button onClick={handleAgregar} data-testid="btn-agregar-cliente" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold">
             ✅ Agregar Cliente
           </button>
         </div>
@@ -1719,8 +1955,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         return;
                       }
                       setQrCliente(c);
-                      // default inteligente: Yape salvo que solo haya Plin
-                      setQrWallet(!hayYape && hayPlin ? 'plin' : 'yape');
+                      // 🏪 FASE AG: default inteligente — la primera billetera
+                      // con algo (yape → plin → empresa)
+                      setQrWallet(walletDefault);
                       // 💰 FASE Z: editor de monto siempre arranca limpio
                       setQrMontoEdit('');
                     }}
@@ -3225,13 +3462,17 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           (4) mandarlo por WhatsApp y marcar cobrado SIN salir. */}
       {qrCliente && (() => {
         const esYape = qrWallet === 'yape';
+        // 🏪 FASE AG: tercera billetera — el QR de la EMPRESA (el cliente
+        // le paga directo a la empresa; marcar "Pagó con el QR" lo
+        // deja azul de empresa, FASE AF)
+        const esEmpresa = qrWallet === 'empresa';
         // 💰 FASE Z — cliente VIVO: buscado por id en la lista
         // ACTUAL (si el doc del bot se reescribió mientras el
         // modal estaba abierto, el monto se actualiza solo).
         const live = clientes.find((c) => String(c.id) === String(qrCliente.id)) || qrCliente;
-        const walletQR = (esYape ? yapeQR : plinQR);
-        const walletNum = esYape ? yapeNum : plinNum;
-        const walletTit = esYape ? yapeTit : plinTit;
+        const walletQR = esEmpresa ? empresaQR : esYape ? yapeQR : plinQR;
+        const walletNum = esEmpresa ? empresaNum : esYape ? yapeNum : plinNum;
+        const walletTit = esEmpresa ? empresaTit : esYape ? yapeTit : plinTit;
         // 💰 FASE Z — doble respaldo: cobrar → precio
         const monto = parseFloat(String(live.cobrar || live.precio || 0)) || 0;
         const numBonito = walletNum ? walletNum.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : '';
@@ -3250,9 +3491,11 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 <X className="w-5 h-5" />
               </button>
 
-              {/* Chips de billetera — solo si las DOS tienen algo */}
-              {hayYape && hayPlin && (
+              {/* Chips de billetera — con DOS o más con algo (FASE AG:
+                  ahora también 🏪 Empresa, la tercera del trabajo) */}
+              {nWalletsQR >= 2 && (
                 <div className="flex justify-center gap-2 mb-2.5">
+                  {hayYape && (
                   <button
                     onClick={() => setQrWallet('yape')}
                     data-testid="qr-chip-yape"
@@ -3264,17 +3507,34 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   >
                     💜 Yape
                   </button>
+                  )}
+                  {hayPlin && (
                   <button
                     onClick={() => setQrWallet('plin')}
                     data-testid="qr-chip-plin"
                     className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                      !esYape
+                      !esYape && !esEmpresa
                         ? 'bg-cyan-600 border-cyan-400 text-white'
                         : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
                     🔷 Plin
                   </button>
+                  )}
+                  {hayEmpresa && (
+                  <button
+                    onClick={() => setQrWallet('empresa')}
+                    data-testid="qr-chip-empresa"
+                    title="El QR de tu EMPRESA — lo que paguen por acá va directo a la empresa"
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                      esEmpresa
+                        ? 'bg-blue-600 border-blue-400 text-white'
+                        : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🏪 Empresa
+                  </button>
+                  )}
                 </div>
               )}
 
@@ -3326,16 +3586,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 {walletQR ? (
                   <img
                     src={walletQR}
-                    alt={`QR ${esYape ? 'Yape' : 'Plin'}`}
+                    alt={`QR ${esEmpresa ? 'de la Empresa' : esYape ? 'Yape' : 'Plin'}`}
                     data-testid="qr-imagen"
-                    className={`w-full max-w-[280px] mx-auto block rounded-lg border-2 ${esYape ? 'border-purple-300' : 'border-cyan-300'}`}
+                    className={`w-full max-w-[280px] mx-auto block rounded-lg border-2 ${esEmpresa ? 'border-blue-300' : esYape ? 'border-purple-300' : 'border-cyan-300'}`}
                   />
                 ) : (
                   <div className="rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 text-center max-w-[280px] mx-auto">
                     <QrCode className="w-9 h-9 text-zinc-400 mx-auto mb-1.5" />
-                    <p className="text-xs text-zinc-600 font-bold">Sin QR de {esYape ? 'Yape' : 'Plin'} cargado</p>
+                    <p className="text-xs text-zinc-600 font-bold">{esEmpresa ? 'Sin QR de la Empresa' : `Sin QR de ${esYape ? 'Yape' : 'Plin'} cargado`}</p>
                     <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                      Subilo en <b>Mi QR {esYape ? 'Yape' : 'Plin'}</b> → pestaña {esYape ? '💜 Yape' : '🔷 Plin'} y va a aparecer acá
+                      {esEmpresa ? 'Subilo en Mi QR Yape/Plin → pestaña 🏪 Empresa y va a aparecer acá' : <>Subilo en <b>Mi QR {esYape ? 'Yape' : 'Plin'}</b> → pestaña {esYape ? '💜 Yape' : '🔷 Plin'} y va a aparecer acá</>}
                     </p>
                   </div>
                 )}
@@ -3344,13 +3604,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                 <div className="text-center mt-3 pb-0.5">
                   {walletTit && <p className="text-sm font-black text-zinc-900">{walletTit}</p>}
                   {numBonito && (
-                    <p className={`text-xl font-black font-mono tracking-wider ${esYape ? 'text-purple-700' : 'text-cyan-700'}`}>
+                    <p className={`text-xl font-black font-mono tracking-wider ${esEmpresa ? 'text-blue-700' : esYape ? 'text-purple-700' : 'text-cyan-700'}`}>
                       {numBonito}
                     </p>
                   )}
                   {walletQR && (
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Escaneá con {esYape ? 'Yape' : 'tu app de banco con Plin'} para pagar
+                      {esEmpresa ? 'Escaneá con tu app del banco — le paga DIRECTO a la empresa' : `Escaneá con ${esYape ? 'Yape' : 'tu app de banco con Plin'} para pagar`}
                     </p>
                   )}
                 </div>
@@ -3364,6 +3624,26 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   QR — y el modal cierra solo (dispara el "gracias
                   por su compra" y la caja como siempre). */}
               <div className="mt-3 space-y-2">
+                {/* 🏪 FASE AG: el QR de la EMPRESA va por wa.me DIRECTO (texto
+                    con el número de la empresa) — no encola acción al bot
+                    porque el bot manda TU Yape/Plin del trabajo. */}
+                {esEmpresa ? (
+                  <button
+                    onClick={() => {
+                      const tel = _botCel(live.cel || '');
+                      const msg = `Hola ${live.nombre || ''} 👋 Para pagar tu pedido${monto > 0 ? ` de S/ ${monto.toFixed(2)}` : ''} podes transferirle directo a la empresa${empresaTit ? ` ${empresaTit}` : ''} al número ${walletNum}. ¡Gracias!`;
+                      if (tel) window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank');
+                      else window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                      onShowToast?.('📲 Mensaje listo', `Número de la empresa enviado${live.nombre ? ` a ${live.nombre}` : ''}`, 'info');
+                    }}
+                    data-testid="qr-btn-wsp-empresa"
+                    className="w-full py-2.5 rounded-xl font-bold text-sm border flex items-center justify-center gap-2 transition-all active:scale-95 bg-blue-600 border-blue-400 text-white hover:bg-blue-700"
+                    title={`Le llega por WhatsApp el número de la empresa${empresaTit ? ` (${empresaTit})` : ''} con el monto — la plata va directo a la empresa`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    Mandar por WhatsApp{monto > 0 ? ` — S/ ${monto.toFixed(2)}` : ''}
+                  </button>
+                ) : (
                 <button
                   onClick={() => { void enviarAccionBot(live, esYape ? 'enviar_yape' : 'enviar_plin'); }}
                   data-testid="qr-btn-wsp"
@@ -3377,6 +3657,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                   <Bot className="w-4 h-4" />
                   Mandar por WhatsApp{monto > 0 ? ` — S/ ${monto.toFixed(2)}` : ''}
                 </button>
+                )}
                 {live.st === 'pendiente' || !live.st ? (
                   <div className="flex gap-2">
                     <button
@@ -3391,11 +3672,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       onClick={() => { cambiarEstado(live.id, 'yape-plin'); setQrCliente(null); }}
                       data-testid="qr-marcar-qr"
                       className={`flex-1 py-2 rounded-xl font-bold text-xs border transition-all active:scale-95 ${
-                        esYape
+                        esEmpresa
+                          ? 'bg-blue-600/20 border-blue-500/50 text-blue-300 hover:bg-blue-600/30'
+                          : esYape
                           ? 'bg-purple-600/20 border-purple-500/50 text-purple-300 hover:bg-purple-600/30'
                           : 'bg-cyan-600/20 border-cyan-500/50 text-cyan-300 hover:bg-cyan-600/30'
                       }`}
-                      title="Pagó escaneando ese QR (lo cobra la empresa — caja 🏢) — cierra el QR y sigue la ruta"
+                      title={esEmpresa ? 'Pagó escaneando el QR DE LA EMPRESA — la plata fue directo a la empresa (queda AZUL, caja 🏢) — cierra el QR y sigue la ruta' : 'Pagó escaneando ese QR (lo cobra la empresa — caja 🏢) — cierra el QR y sigue la ruta'}
                     >
                       📲 Pagó con el QR
                     </button>
