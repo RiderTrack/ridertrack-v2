@@ -498,7 +498,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
 
           {/* Detalles en vivo del latido */}
           {estadoBot && (
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
               <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">WhatsApp</div>
                 <div data-testid="bot-whatsapp" className={`text-xs font-bold ${estadoBot.whatsapp === 'conectado' ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -511,12 +511,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
                   {estadoBot.enCola} {estadoBot.procesando ? '✍️' : ''}
                 </div>
               </div>
+              {/* 🏍️ v0.11.8: el parche del robot de inDrive — la lección del
+                  22/10: el bot v3 lo desconectó sin que nadie lo viera y
+                  TODOS los botones del robot de inDrive quedaron "en cola" */}
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
+                <div className="text-[9px] uppercase tracking-wide text-slate-500">inDrive</div>
+                <div
+                  data-testid="bot-dt"
+                  className={`text-xs font-bold ${estadoBot.dtParche ? 'text-emerald-400' : 'text-red-400'}`}
+                  title={estadoBot.dtParche ? 'Parche del robot de inDrive cargado' : 'Sin el parche de inDrive — los botones del robot quedan en cola'}
+                >
+                  {estadoBot.dtParche ? '🟢 activo' : '🔴 apagado'}
+                </div>
+              </div>
               <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Versión</div>
                 <div data-testid="bot-version" className="text-xs font-bold text-slate-300 truncate" title={estadoBot.version}>
                   {estadoBot.version}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* 🌡️ v0.11.8: modo calentamiento ACTIVO → el bot NO manda a
+              clientes — mejor GRITARLO acá que sufrirlo en silencio */}
+          {estadoBot?.calentamiento && (
+            <div data-testid="bot-calentamiento" className="mt-2 rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2 text-[11px] text-amber-300 leading-snug">
+              🌡️ <b>MODO CALENTAMIENTO ACTIVO</b> — el bot está recibiendo pero NO manda mensajes a clientes (QR, avisos, cobros). Si querés que mande: apagá <b>modo_calentamiento</b> en el bot_config.json de Termux y hacé <b>pm2 restart rudy-bot</b>.
+            </div>
+          )}
+
+          {/* 🏍️ v0.11.8: parche de inDrive desconectado → aviso con fix */}
+          {estadoBot && !estadoBot.dtParche && (
+            <div data-testid="bot-dt-aviso" className="mt-2 rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2 text-[11px] text-amber-300 leading-snug">
+              🏍️ El robot de <b>inDrive</b> está DESCONECTADO — sus botones (mandar QR, mensaje, ubicación, avisos) van a quedar "en cola". Arreglo: bajá el zip del bot nuevo, en Termux <b>unzip -o</b> + <b>pm2 restart rudy-bot</b>.
             </div>
           )}
 

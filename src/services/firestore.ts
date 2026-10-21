@@ -1539,11 +1539,19 @@ export async function encolarAccionBot(
 export interface EstadoBot {
   vivo: boolean;
   lastSeen: string;      // ISO del último latido
-  version: string;      // 'v3-blindado'
+  version: string;      // 'v3.1-DT'
   whatsapp: string;     // 'conectado' | 'desconectado'
   listenerAcciones: string; // 'vivo' | 'muerto'
   enCola: number;       // acciones esperando en la cola del bot
   procesando: string;   // tipo de la acción que está saliendo ahora
+  // 🏍️ v0.11.8: ¿está cargado el parche del robot de inDrive?
+  // (dt_cobro/dt_aviso/dt_ubicacion/dt_texto — si false, los botones
+  // del robot de inDrive quedan "en cola" para siempre: el bot v3
+  // desconectó el parche al reemplazar index.js — nunca más a ciegas)
+  dtParche: boolean;
+  // 🌡️ v0.11.8: modo calentamiento del bot (si true, el bot NO manda
+  // mensajes a clientes — la tarjeta lo AVISA en vez de sufrirlo)
+  calentamiento: boolean;
 }
 
 /**
@@ -1570,6 +1578,9 @@ export function subscribeEstadoBot(
           listenerAcciones: typeof d.listenerAcciones === 'string' ? d.listenerAcciones : '?',
           enCola: typeof d.enCola === 'number' ? d.enCola : 0,
           procesando: typeof d.procesando === 'string' ? d.procesando : '',
+          // v0.11.8: ausentes en bots v3.0 → false (defaults sanos)
+          dtParche: d.dtParche === true,
+          calentamiento: d.calentamiento === true,
         });
       },
       () => { cb(null); }

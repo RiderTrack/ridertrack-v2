@@ -1,12 +1,12 @@
 // ─────────────────────────────────────────────────────────────
-// 🧪 TEST — v0.11.7: 🩺 subscribeEstadoBot + probarBot
+// 🧪 TEST — v0.11.8: 🩺 subscribeEstadoBot + probarBot (+ dtParche/calentamiento)
 //
-// El bot v3-blindado escribe estado_bot/{uid} cada 60s. La app LEE
+// El bot v3.1-DT escribe estado_bot/{uid} cada 60s. La app LEE
 // ese doc en Configuración → "Bot de WhatsApp (RudyBot)" para
 // mostrar 🟢 vivo / 🔴 caído. Este test compila el
 // services/firestore.ts REAL con esbuild + stubs (patrón FASE Z)
 // y prueba:
-//   S1. Latido completo → mapeo EXACTO a EstadoBot (7 campos).
+//   S1. Latido completo → mapeo EXACTO a EstadoBot (9 campos).
 //   S2. Doc inexistente → null (la UI muestra "Sin señal").
 //   S3. Doc con campos faltantes → defaults sanos ('?', 0, '').
 //   S4. Unsubscribe → devuelve la función de limpieza y no revienta.
@@ -14,6 +14,8 @@
 //       telefono: ''} en acciones_bot/{uid}/pendientes (el bot v3
 //       le manda la prueba al número de avisos de Rudy).
 //   S6. Sin uid → no se suscribe y no revienta (devuelve no-op).
+//   S7. v0.11.8: dtParche/calentamiento → mapeo booleano exacto
+//       (false si faltan — un bot v3.0 viejo no los escribe).
 // ─────────────────────────────────────────────────────────────
 import { createRequire } from 'module';
 import path from 'path';
@@ -69,7 +71,7 @@ const check = (nombre, cond, extra = '') => {
   else { fail++; console.log(`  ✗ ${nombre} ${extra}`); }
 };
 
-console.log('═══ TEST ESTADO BOT (v0.11.7) ═══');
+console.log('═══ TEST ESTADO BOT (v0.11.8) ═══');
 
 // ── S1: latido COMPLETO → mapeo exacto ──
 console.log('S1: latido completo → mapeo EXACTO');
@@ -79,11 +81,13 @@ console.log('S1: latido completo → mapeo EXACTO');
     data: () => ({
       vivo: true,
       lastSeen: '2026-10-21T15:00:00.000Z',
-      version: 'v3-blindado',
+      version: 'v3.1-DT',
       whatsapp: 'conectado',
       listenerAcciones: 'vivo',
       enCola: 4,
       procesando: 'enviar_yape',
+      dtParche: true,
+      calentamiento: false,
     }),
   };
   let recibido = undefined;
@@ -92,11 +96,13 @@ console.log('S1: latido completo → mapeo EXACTO');
   check('llega el estado del bot', !!recibido, JSON.stringify(recibido));
   check('vivo: true', recibido && recibido.vivo === true);
   check('lastSeen ISO exacto', recibido && recibido.lastSeen === '2026-10-21T15:00:00.000Z');
-  check('version v3-blindado', recibido && recibido.version === 'v3-blindado');
+  check('version v3.1-DT', recibido && recibido.version === 'v3.1-DT');
   check('whatsapp conectado', recibido && recibido.whatsapp === 'conectado');
   check('listenerAcciones vivo', recibido && recibido.listenerAcciones === 'vivo');
   check('enCola: 4 (number)', recibido && recibido.enCola === 4);
   check('procesando: enviar_yape', recibido && recibido.procesando === 'enviar_yape');
+  check('S7: dtParche: true (parche inDrive cargado)', recibido && recibido.dtParche === true);
+  check('S7: calentamiento: false', recibido && recibido.calentamiento === false);
   check('unsub es función', typeof unsub === 'function');
   unsub();
 }
@@ -126,6 +132,8 @@ console.log('S3: campos faltantes → defaults sanos');
   check("whatsapp default '?'", recibido && recibido.whatsapp === '?');
   check('enCola default 0 (number)', recibido && recibido.enCola === 0);
   check("procesando default ''", recibido && recibido.procesando === '');
+  check('S7: dtParche default false (bot v3.0 viejo)', recibido && recibido.dtParche === false);
+  check('S7: calentamiento default false', recibido && recibido.calentamiento === false);
 }
 
 // ── S4: vivos los tipos ──
@@ -141,6 +149,21 @@ console.log('S4: tipos del latido');
   check('vivo: false se respeta', recibido && recibido.vivo === false);
   check("version número → '?' (string saneado)", recibido && recibido.version === '?');
   check("enCola string '7' → 0 (número saneado)", recibido && recibido.enCola === 0);
+  check('S7: dtParche string/basura → false (saneado)', recibido && recibido.dtParche === false);
+}
+
+// ── S7b: calentamiento: true → la UI lo va a gritar ──
+console.log('S7b: calentamiento activo');
+{
+  T.snapActual = {
+    exists: () => true,
+    data: () => ({ vivo: true, lastSeen: '2026-10-22T15:00:00.000Z', calentamiento: true, dtParche: true }),
+  };
+  let recibido = undefined;
+  subscribeEstadoBot('uid-rudy', (e) => { recibido = e; });
+  await esperarTick();
+  check('S7b: calentamiento: true llega entero', recibido && recibido.calentamiento === true);
+  check('S7b: dtParche: true llega entero', recibido && recibido.dtParche === true);
 }
 
 // ── S5: probarBot → acción probar_bot en la cola ──
