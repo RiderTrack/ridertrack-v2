@@ -1527,6 +1527,75 @@ export async function encolarAccionBot(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 🩺 v0.11.7 — ESTADO DEL BOT (el latido que escribe el bot v3)
+//
+// El bot v3-blindado escribe estado_bot/{uid} cada 60 s con su
+// señal de vida. La app solo LEE su propio doc y muestra 🟢/🔴 en
+// Configuración → "Bot de WhatsApp" — así Rudy DEJA DE ADIVINAR
+// si es su cel, la red o el robot (el fantasma del 21/10: el bot
+// recibía mensajes de clientes pero la cola de acciones estaba
+// muerta y nadie lo veía).
+// ═══════════════════════════════════════════════════════════
+export interface EstadoBot {
+  vivo: boolean;
+  lastSeen: string;      // ISO del último latido
+  version: string;      // 'v3-blindado'
+  whatsapp: string;     // 'conectado' | 'desconectado'
+  listenerAcciones: string; // 'vivo' | 'muerto'
+  enCola: number;       // acciones esperando en la cola del bot
+  procesando: string;   // tipo de la acción que está saliendo ahora
+}
+
+/**
+ * Suscripción EN VIVO al latido del bot. Devuelve la función de
+ * limpieza. Llama con null si el doc no existe (bot nunca corrió
+ * la v3 o permisos del doc) para que la UI muestre "sin señal".
+ */
+export function subscribeEstadoBot(
+  userId: string,
+  cb: (estado: EstadoBot | null) => void
+): () => void {
+  if (!db || !userId) return () => {};
+  try {
+    const unsub = onSnapshot(
+      doc(db, 'estado_bot', userId),
+      (snap) => {
+        if (!snap.exists()) { cb(null); return; }
+        const d = snap.data() as Record<string, unknown>;
+        cb({
+          vivo: d.vivo === true,
+          lastSeen: typeof d.lastSeen === 'string' ? d.lastSeen : '',
+          version: typeof d.version === 'string' ? d.version : '?',
+          whatsapp: typeof d.whatsapp === 'string' ? d.whatsapp : '?',
+          listenerAcciones: typeof d.listenerAcciones === 'string' ? d.listenerAcciones : '?',
+          enCola: typeof d.enCola === 'number' ? d.enCola : 0,
+          procesando: typeof d.procesando === 'string' ? d.procesando : '',
+        });
+      },
+      () => { cb(null); }
+    );
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * 🧪 "Probar el bot": encola una acción probar_bot — el bot v3 le
+ * manda un mensajito al WhatsApp de Rudy. Si llega, TODO el
+ * circuito app → cola → bot → WhatsApp anda perfecto. Sin teléfono
+ * en la acción: el bot usa el número de avisos de su config.
+ */
+export async function probarBot(userId: string): Promise<void> {
+  await encolarAccionBot(userId, {
+    tipo: 'probar_bot',
+    clienteId: 'prueba',
+    telefono: '',
+    nombre: 'Rudy',
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
 // 📊 ESTADÍSTICAS
 // ═══════════════════════════════════════════════════════════
 

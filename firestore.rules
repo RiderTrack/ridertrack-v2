@@ -171,6 +171,19 @@ service cloud.firestore {
       }
     }
 
+    // 🩺 v0.11.7 (bot v3-blindado): latido del bot de WhatsApp — el
+    // bot escribe estado_bot/{uid} con firebase-admin (las reglas NO
+    // lo frenan); la app LEE su propio doc para mostrar 🟢 vivo /
+    // 🔴 caído en Configuración → "Bot de WhatsApp". Cualquier rider
+    // logueado puede leer (multi-rider como ruta_activa); escritura
+    // solo del dueño (para las pruebas E2E con cuenta test).
+    // ⚠️ Si tocás este bloque, corré también actualizar_reglas.js v4
+    // del bot para que las reglas VIVAS queden igual que este archivo.
+    match /estado_bot/{userId} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId);
+    }
+
     // FASE B: acciones del robot para DriverTrack (inDrive) — misma
     // estructura que acciones_bot pero cola SEPARADA para que el
     // index.js del bot (que marca processed TODO lo de acciones_bot)

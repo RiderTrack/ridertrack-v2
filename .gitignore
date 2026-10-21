@@ -16,3 +16,4 @@ test-sync/firestore.compilado.cjs
 test-sync/pagoCore.compilado.cjs
 test-sync/firestore-fz.cjs
 test-sync/moneda.compilada.cjs
+test-sync/firestore-eb.cjs

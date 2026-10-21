@@ -28,6 +28,7 @@ import {
   Mail,
   CarTaxiFront,
   Image as ImageIcon,
+  Bot,
   Plus,
   X,
 } from 'lucide-react';
@@ -42,6 +43,9 @@ import {
   cargarConfigCuentas,
   guardarConfigCuentas,
   ConfigCuentas,
+  subscribeEstadoBot,
+  probarBot,
+  EstadoBot,
 } from '../services/firestore';
 import {
   getGoogleApiKey,
@@ -84,6 +88,11 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavigateTab }) => {
   const { user, profile } = useAuth();
   const [modalAbierto, setModalAbierto] = useState<'cuentas' | 'whatsapp' | null>(null);
+
+  // ── 🩺 v0.11.7: estado del bot de WhatsApp (el latido del bot v3) ──
+  const [estadoBot, setEstadoBot] = useState<EstadoBot | null>(null);
+  const [tickReloj, setTickReloj] = useState(0); // recomponer "hace Xs" sin re-abrir
+  const [probandoBot, setProbandoBot] = useState(false);
 
   // ── Mapas y Rutas (Fase 1.3) ──
   const [mapasAbierto, setMapasAbierto] = useState(false);
@@ -183,6 +192,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
       })
       .catch(() => { /* sin conexión — queda lo local */ });
   }, [iconoAbierto, user]);
+
+  // ── 🩺 v0.11.7: suscripción EN VIVO al latido del bot ──
+  // (el bot v3-blindado escribe estado_bot/{uid} cada 60s; acá lo
+  // escuchamos y con un mini reloj recomponemos el "hace Xs" y el
+  // punto 🟢/🔴 sin que Rudy tenga que cerrar y re-abrir la app)
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = subscribeEstadoBot(user.uid, setEstadoBot);
+    const reloj = setInterval(() => setTickReloj((t) => t + 1), 15000);
+    return () => { unsub(); clearInterval(reloj); };
+  }, [user?.uid]);
+
+  // 🩺 helpers de presentación del estado del bot
+  const UMBRAL_VIVO_MS = 3 * 60 * 1000; // latido cada 60s → 3min sin señal = caído
+  const haceTexto = (ms: number): string => {
+    if (ms < 60_000) return `hace ${Math.max(1, Math.round(ms / 1000))}s`;
+    if (ms < 3_600_000) return `hace ${Math.round(ms / 60_000)} min`;
+    if (ms < 86_400_000) return `hace ${Math.round(ms / 3_600_000)} h`;
+    return `hace ${Math.round(ms / 86_400_000)} día(s)`;
+  };
+  const edadLatido = estadoBot?.lastSeen ? Date.now() - Date.parse(estadoBot.lastSeen) : -1;
+  const botVivo = !!(estadoBot && edadLatido >= 0 && edadLatido < UMBRAL_VIVO_MS);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _ = tickReloj; // el tick solo fuerza el re-render del "hace Xs"
+
+  const manejarProbarBot = async () => {
+    if (!user?.uid || probandoBot) return;
+    setProbandoBot(true);
+    try {
+      await probarBot(user.uid);
+      onShowToast?.(
+        '🧪 Prueba en camino',
+        botVivo
+          ? 'El bot te manda un mensajito a tu WhatsApp — tiene que llegar en segundos'
+          : 'La prueba quedó en la cola — pero el bot parece CAÍDO: no la va a mandar hasta que lo reinicies',
+        botVivo ? 'success' : 'warning'
+      );
+    } catch (e: any) {
+      onShowToast?.('❌ No se pudo encolar', e?.message || 'Revisa tu conexión', 'error');
+    } finally {
+      setProbandoBot(false);
+    }
+  };
 
   // Comprime una imagen a JPEG base64 (mismo approach del QR de Yape/Plin)
   const comprimirLogo = (file: File): Promise<string> =>
@@ -408,6 +460,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-orange-400 transition-colors ${iconoAbierto ? 'rotate-90' : ''}`} />
           </div>
         </button>
+
+        {/* 🩺 v0.11.7: BOT DE WHATSAPP (RudyBot) — el estado en vivo del
+            robot de Termux. El bot v3 escribe su latido en
+            estado_bot/{uid} cada 60s y acá se VE: si tus QR, reportes
+            y ubicaciones no llegan, mirás esto y sabés al instante si
+            el bot está 🟢 vivo o 🔴 caído — sin adivinar (el fantasma
+            del 21/10: el bot recibía mensajes pero la cola estaba
+            muerta y no había forma de verlo). */}
+        <div
+          data-testid="card-estado-bot"
+          className="text-left p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 sm:col-span-2"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-white text-sm flex items-center gap-2">
+                Bot de WhatsApp (RudyBot)
+                <span
+                  data-testid="bot-dot"
+                  className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
+                    botVivo ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'
+                  }`}
+                />
+              </div>
+              <div data-testid="bot-estado-texto" className="text-[11px] text-slate-400 leading-snug">
+                {!estadoBot
+                  ? 'Sin señal todavía — actualizá el bot con el zip nuevo (una sola vez) y acá va a aparecer su estado en vivo.'
+                  : botVivo
+                    ? `🟢 Vivo — señal ${haceTexto(edadLatido)}${estadoBot.whatsapp === 'desconectado' ? ' · WhatsApp desconectado' : ''}`
+                    : `🔴 Sin señal ${haceTexto(edadLatido)} — el bot está caído o sin internet`}
+              </div>
+            </div>
+          </div>
+
+          {/* Detalles en vivo del latido */}
+          {estadoBot && (
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
+                <div className="text-[9px] uppercase tracking-wide text-slate-500">WhatsApp</div>
+                <div data-testid="bot-whatsapp" className={`text-xs font-bold ${estadoBot.whatsapp === 'conectado' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {estadoBot.whatsapp === 'conectado' ? '🟢' : '🔴'} {estadoBot.whatsapp}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
+                <div className="text-[9px] uppercase tracking-wide text-slate-500">En cola</div>
+                <div data-testid="bot-enCola" className="text-xs font-bold text-white">
+                  {estadoBot.enCola} {estadoBot.procesando ? '✍️' : ''}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-900/60 border border-slate-700 px-2 py-2">
+                <div className="text-[9px] uppercase tracking-wide text-slate-500">Versión</div>
+                <div data-testid="bot-version" className="text-xs font-bold text-slate-300 truncate" title={estadoBot.version}>
+                  {estadoBot.version}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-col sm:flex-row gap-2">
+            <button
+              data-testid="btn-probar-bot"
+              onClick={manejarProbarBot}
+              disabled={probandoBot}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
+            >
+              {probandoBot ? <Loader2 className="w-4 h-4 animate-spin" /> : '🧪'} Probar el bot
+            </button>
+            {!estadoBot && (
+              <div data-testid="bot-pasos" className="flex-1 text-[11px] text-slate-400 leading-relaxed px-1 py-1.5 min-w-0">
+                <span className="block text-slate-300 font-bold">Cómo actualizar el bot (una vez):</span>
+                <span className="block">1. Bajá el zip del bot y pasalo a Termux</span>
+                <span className="block">2. Descomprimilo encima de la carpeta: <b className="text-slate-300">unzip -o</b></span>
+                <span className="block">3. <b className="text-slate-300">node actualizar_reglas.js</b></span>
+                <span className="block">4. <b className="text-slate-300">pm2 restart rudy-bot</b></span>
+              </div>
+            )}
+            {estadoBot && !botVivo && (
+              <div className="flex-1 text-[11px] text-slate-400 flex items-center px-1 py-2 min-w-0">
+                Para revivirlo: Termux → <b className="text-slate-300 mx-1">pm2 restart rudy-bot</b>
+              </div>
+            )}
+            {estadoBot?.listenerAcciones === 'muerto' && botVivo && (
+              <div className="flex-1 text-[11px] text-amber-400 flex items-center px-1 py-2">
+                ⚠️ El listener de acciones está muerto — reinicialo para que mande QR/reportes.
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* WhatsApp API (Fase 3.14: YA vivo — configuración del
             canal oficial de Meta con prueba de conexión real) */}
