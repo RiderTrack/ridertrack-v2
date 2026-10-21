@@ -212,7 +212,7 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
   // y NO viaja al bot (el bot manda TU Yape/Plin del trabajo)
   const ES_EMPRESA = wallet === 'empresa';
   const { user } = useAuth();
-  const { config, loading, guardando, guardar } = useConfig();
+  const { config, loading, guardando, guardar, fuente, recargar } = useConfig();
 
   // Datos de la billetera (config_empresa)
   const [numero, setNumero] = useState('');
@@ -352,30 +352,51 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
           qrUrl: '',
         };
       }
-      await guardar(nuevaConfig);
+      // 🩺 FASE AJ: el guardado ahora dice CÓMO terminó. 'local' = el
+      // write quedó encolado en el SDK (optimista): si el WebView muere
+      // antes de sincronizar, se pierde — el usuario tenía que saberlo
+      // (antes decía «✅ guardado» mintiendo y el QR «desaparecía»).
+      const comoGuardo = await guardar(nuevaConfig);
       // 2. Sincronizar a ruta_activa/{uid}.{wallet} (lo que lee el bot)
       //    🏪 FASE AG: la EMPRESA no viaja al bot — el bot manda tu
       //    Yape/Plin del trabajo; el QR de la empresa se muestra desde
       //    Mi Ruta o se comparte con el botón verde de arriba.
       if (ES_EMPRESA) {
-        onShowToast?.(
-          '🏪 QR de la Empresa guardado',
-          qrBase64 ? 'Ya sale en Mi Ruta: botoncito QR del cliente → chip 🏪 Empresa' : 'Datos guardados (sin imagen de QR)',
-          'success'
-        );
+        if (comoGuardo === 'local') {
+          onShowToast?.(
+            '⚠️ Guardado LOCAL',
+            'El guardado no llegó al servidor (conexión lenta) — se sincroniza solo cuando vuelva la señal. Si cerrás la app ahora, se puede PERDER.',
+            'warning'
+          );
+        } else {
+          onShowToast?.(
+            '🏪 QR de la Empresa guardado',
+            qrBase64 ? 'Ya sale en Mi Ruta: botoncito QR del cliente → chip 🏪 Empresa' : 'Datos guardados (sin imagen de QR)',
+            'success'
+          );
+        }
         setHayCambios(false);
         return;
       }
+      let comoSync: 'servidor' | 'local' = 'servidor';
       if (wallet === 'yape') {
-        await sincronizarYapeAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
+        comoSync = await sincronizarYapeAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
       } else {
-        await sincronizarPlinAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
+        comoSync = await sincronizarPlinAlBot(user.uid, { qrBase64, qrUrl: '', numero: numLimpio, titular: titular.trim() });
       }
-      onShowToast?.(
-        `${T.emoji} ${T.nombre} sincronizado`,
-        qrBase64 ? 'El bot ya puede enviar tu QR por WhatsApp' : 'Datos guardados (sin imagen de QR)',
-        'success'
-      );
+      if (comoGuardo === 'local' || comoSync === 'local') {
+        onShowToast?.(
+          '⚠️ Guardado LOCAL — falta sincronizar',
+          'El servidor no contesta (conexión lenta). El guardado quedó encolado y sale cuando vuelva la señal. Si cerrás la app ahora, se puede PERDER — esperá un momentito y tocá 🔄 en el aviso de arriba.',
+          'warning'
+        );
+      } else {
+        onShowToast?.(
+          `${T.emoji} ${T.nombre} sincronizado`,
+          qrBase64 ? 'El bot ya puede enviar tu QR por WhatsApp' : 'Datos guardados (sin imagen de QR)',
+          'success'
+        );
+      }
       setHayCambios(false);
       await verificarSyncBot();
     } catch (e: any) {
@@ -459,6 +480,30 @@ const WalletPanel: React.FC<WalletPanelProps> = ({ wallet, onShowToast }) => {
 
   return (
     <div className="space-y-4">
+      {/* 🩺 FASE AJ (v0.11.9): LA CONFIG YA NO MIENTE — si ni la caché ni
+          el servidor contestaron (red débil), AVISA en vez de mostrar un
+          vacío mudo que parece «QR borrado», y ofrece reintentar. */}
+      {fuente === 'error' && (
+        <div className="p-3.5 rounded-xl border flex items-start gap-3 bg-amber-500/10 border-amber-500/40" data-testid="banner-config-error">
+          <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-amber-300">
+              No pude leer tu config del servidor{(T.emoji ? ` — ${T.emoji}` : '')}
+            </div>
+            <div className="text-[11px] text-amber-200/80 mt-0.5">
+              Tus QRs <b>NO se perdieron</b> (están en la nube) — es la conexión que no alcanza para bajarlos ahora. Si ves esta pantalla vacía, es por eso.
+            </div>
+          </div>
+          <button
+            onClick={recargar}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold hover:bg-amber-500/30 transition-all active:scale-95 flex-shrink-0"
+            data-testid="banner-config-reintentar"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+          </button>
+        </div>
+      )}
+
       {/* ═══ ESTADO GENERAL (3 indicadores) ═══ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className={`p-3.5 rounded-xl border flex items-center gap-3 ${numero && titular ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>

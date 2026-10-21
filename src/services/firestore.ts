@@ -1136,6 +1136,67 @@ function conTimeout<T>(promesa: Promise<T>, ms: number, mensaje = 'sin-conexion'
   });
 }
 
+// ═══════════════════════════════════════════════════════════
+// 🩺 FASE AJ (v0.11.9): LA CONFIG YA NO MIENTE
+//
+// REPORTE de Rudy (22 oct): «el QR en la sección QR no aparece…
+// guardo la imagen, cambio de sección, vuelvo y desaparece».
+// Los QR estaban SANOS en Firestore (verificado) — lo que fallaba
+// era el TRANSPORTE: el doc de config pesa ~300KB (3 QR en base64)
+// y TODAS estas operaciones tenían 9s de tope. En red móvil débil:
+//   · leer  → 9s se pasan → DEFAULTS EN SILENCIO («no aparece el QR»)
+//   · guardar → 9s se pasan → 'guardado-local' optimista → si el
+//     WebView muere antes de sincronizar, EL GUARDADO SE PIERDE
+//     («guardo, salgo, vuelvo y desaparece»)
+// Arreglo: 30s + UN reintento + la fuente del dato queda EXPUESTA
+// para que la UI avise en vez de mentir. Los timeouts viven en un
+// objeto mutable para que los tests puedan acelerarlos.
+// ═══════════════════════════════════════════════════════════
+
+/** Límites del flujo config/QR — mutables para los tests */
+export const LIMITES_CONFIG = {
+  /** tope por intento de red (el doc pesa ~300KB) */
+  timeoutMs: 30_000,
+  /** espera entre el 1er intento fallido y el reintento */
+  reintentoMs: 2_000,
+};
+
+/** Cómo terminó la última operación de config ('servidor' llegó al
+ * servidor; 'local' quedó encolada en el SDK (optimista). */
+export type FuenteOperacion = 'servidor' | 'local';
+
+/** FASE AJ: qué pasó en la última CARGA de config — la UI lo usa
+ * para avisar «no pude leer del servidor» en vez de mostrar un
+ * vacío mudo que parece «QR borrado».
+ *   'servidor' → datos frescos del servidor
+ *   'cache'    → servidos por la caché local
+ *   'vacio'    → el doc no existe (defaults legítimos)
+ *   'error'    → ni caché ni servidor (defaults de emergencia) */
+export const estadoCargaConfig: { fuente: 'servidor' | 'cache' | 'vacio' | 'error'; error: string } = {
+  fuente: 'servidor',
+  error: '',
+};
+
+/** Reintenta UNA vez una operación que falló de forma plausiblemente
+ * temporal (red). Los errores definitivos (permission-denied y los
+ * centinelas como 'guardado-local') NO se reintentan: reintentar un
+ * write que el SDK ya dejó encolado lo duplicaría. */
+async function conReintento<T>(
+  fn: () => Promise<T>,
+  msEntreReintentos: number,
+  noReintentar: string[],
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (e1: any) {
+    const msg = String(e1?.message || e1 || '');
+    if (noReintentar.includes(msg)) throw e1;
+    if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) throw e1;
+    await new Promise(r => setTimeout(r, msEntreReintentos));
+    return await fn();
+  }
+}
+
 /** Fusiona un doc crudo de config_empresa con los defaults */
 function fusionarConfig(data: any): ConfigCuentas {
   return {
@@ -1162,7 +1223,7 @@ function fusionarConfig(data: any): ConfigCuentas {
 /**
  * Carga la config (Fase 2.1 — NUNCA se cuelga):
  *   1. Caché local de Firestore (instantáneo, funciona SIN internet)
- *   2. Servidor con tope de 9 s
+ *   2. Servidor con tope de 30 s y UN reintento (FASE AJ)
  *   3. Defaults — la pantalla siempre se muestra
  */
 export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas> {
@@ -1173,43 +1234,54 @@ export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas
   // 1) Caché local primero — instantáneo y offline
   try {
     const snapCache = await getDocFromCache(ref);
-    if (snapCache.exists()) return fusionarConfig(snapCache.data());
+    if (snapCache.exists()) { estadoCargaConfig.fuente = 'cache'; return fusionarConfig(snapCache.data()); }
   } catch {
     // No está en caché todavía (primera vez) — seguir al servidor
   }
 
-  // 2) Servidor con tope de tiempo
+  // 2) Servidor — FASE AJ: 30s + UN reintento (antes: 9s y a
+  //    defaults EN SILENCIO — el doc de ~300KB no llegaba nunca en
+  //    red débil y la pantalla mostraba «sin QR» mintiendo)
+  const leer = () => conTimeout(getDoc(ref), LIMITES_CONFIG.timeoutMs, 'sin-conexion');
   try {
-    const snap = await conTimeout(getDoc(ref), 9000);
+    const snap = await conReintento(leer, LIMITES_CONFIG.reintentoMs, []);
+    estadoCargaConfig.fuente = snap.exists() ? 'servidor' : 'vacio';
+    estadoCargaConfig.error = '';
     if (snap.exists()) return fusionarConfig(snap.data());
     return CONFIG_CUENTAS_DEFAULT;
   } catch (e: any) {
+    estadoCargaConfig.fuente = 'error';
+    estadoCargaConfig.error = String(e?.message || e);
     console.warn('⚠️ Config sin conexión al servidor (usando defaults):', e?.message || e);
     return CONFIG_CUENTAS_DEFAULT;
   }
 }
 
 /**
- * Guarda la config (Fase 2.1): con red muerta el setDoc queda
- * pendiente indefinidamente → tope de 9 s. Firestore encola la
- * escritura localmente (IndexedDB) y la sincroniza solo cuando
- * vuelve la conexión, así que tras el tope el guardado SE CONSIDERA
- * hecho (llegará al servidor al reconectar).
+ * Guarda la config — FASE AJ: 30s por intento + UN reintento si el
+ * write revienta. Si se pasa del tope, Firestore ya dejó el write
+ * encolado en el SDK: se devuelve 'local' para que la UI AVISE que
+ * el guardado es optimista (antes decía «guardado» mintiendo — y
+ * si el WebView moría antes de sincronizar, el QR «desaparecía»).
  */
-export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<void> {
-  if (!db || !userId) return;
+export async function guardarConfigCuentas(userId: string, config: ConfigCuentas): Promise<FuenteOperacion> {
+  if (!db || !userId) return 'local';
+  const ref = doc(db, 'config_empresa', userId);
+  const escribir = () => conTimeout(
+    setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true }),
+    LIMITES_CONFIG.timeoutMs,
+    'guardado-local'
+  );
   try {
-    const ref = doc(db, 'config_empresa', userId);
-    await conTimeout(
-      setDoc(ref, { ...config, actualizadoEn: serverTimestamp() }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
+    // FASE AJ: reintenta 1 vez si el write REVENTÓ (no si hizo
+    // timeout — en ese caso el SDK ya lo dejó encolado)
+    await conReintento(escribir, LIMITES_CONFIG.reintentoMs, ['guardado-local']);
     console.log('🏦 Config de cuentas guardada');
+    return 'servidor';
   } catch (e: any) {
     if (e?.message === 'guardado-local') {
       console.warn('🏦 Config guardada LOCALMENTE — se sincronizará al reconectar');
-      return; // optimista: Firestore la envía cuando haya red
+      return 'local'; // optimista: Firestore la envía cuando haya red
     }
     console.error('❌ Error guardando config de cuentas:', e);
     throw e;
@@ -1239,28 +1311,30 @@ export interface YapeBotConfig {
  * Usa merge:true → NO toca clientes ni otros campos de la ruta.
  * Fase 2.1: con tope de tiempo — offline queda encolada localmente.
  */
-export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<void> {
+export async function sincronizarYapeAlBot(userId: string, yape: YapeBotConfig): Promise<FuenteOperacion> {
   if (!db || !userId) throw new Error('Firebase no disponible');
+  const escribir = () => conTimeout(
+    setDoc(doc(db, 'ruta_activa', userId), {
+      yape: {
+        qrBase64: yape.qrBase64 || '',
+        qrUrl: yape.qrUrl || '',
+        numero: yape.numero || '',
+        titular: yape.titular || '',
+        cci: yape.cci || '',
+        bancos: yape.bancos || '',
+      },
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true }),
+    LIMITES_CONFIG.timeoutMs,
+    'guardado-local'
+  );
   try {
-    await conTimeout(
-      setDoc(doc(db, 'ruta_activa', userId), {
-        yape: {
-          qrBase64: yape.qrBase64 || '',
-          qrUrl: yape.qrUrl || '',
-          numero: yape.numero || '',
-          titular: yape.titular || '',
-          cci: yape.cci || '',
-          bancos: yape.bancos || '',
-        },
-        actualizadaAt: new Date().toISOString(),
-      }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
+    await conReintento(escribir, LIMITES_CONFIG.reintentoMs, ['guardado-local']);
+    return 'servidor';
   } catch (e: any) {
     if (e?.message === 'guardado-local') {
       console.warn('💜 Yape sincronizado LOCALMENTE — llegará al bot al reconectar');
-      return; // optimista: se envía cuando vuelva la red
+      return 'local'; // optimista: se envía cuando vuelva la red
     }
     console.error('❌ Error sincronizando Yape al bot:', e);
     throw e;
@@ -1300,9 +1374,11 @@ export async function obtenerYapeDelBot(userId: string): Promise<YapeBotConfig |
     // sin caché todavía
   }
 
-  // 2) Servidor con tope de tiempo
+  // 2) Servidor con tope de tiempo — FASE AJ: 30s (el doc de la
+  //    ruta pesa ~240KB; con 9s en red débil el estado de sync
+  //    quedaba en «no sincronizado» mintiendo)
   try {
-    const snap = await conTimeout(getDoc(ref), 9000);
+    const snap = await conTimeout(getDoc(ref), LIMITES_CONFIG.timeoutMs);
     return extraer(snap.exists() ? snap.data() : null);
   } catch (e: any) {
     console.warn('⚠️ Yape del bot no disponible (sin conexión):', e?.message || e);
@@ -1330,26 +1406,28 @@ export interface PlinBotConfig {
  * Usa merge:true → NO toca clientes ni otros campos de la ruta.
  * Fase 2.2: con tope de tiempo — offline queda encolada localmente.
  */
-export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<void> {
+export async function sincronizarPlinAlBot(userId: string, plin: PlinBotConfig): Promise<FuenteOperacion> {
   if (!db || !userId) throw new Error('Firebase no disponible');
+  const escribir = () => conTimeout(
+    setDoc(doc(db, 'ruta_activa', userId), {
+      plin: {
+        qrBase64: plin.qrBase64 || '',
+        qrUrl: plin.qrUrl || '',
+        numero: plin.numero || '',
+        titular: plin.titular || '',
+      },
+      actualizadaAt: new Date().toISOString(),
+    }, { merge: true }),
+    LIMITES_CONFIG.timeoutMs,
+    'guardado-local'
+  );
   try {
-    await conTimeout(
-      setDoc(doc(db, 'ruta_activa', userId), {
-        plin: {
-          qrBase64: plin.qrBase64 || '',
-          qrUrl: plin.qrUrl || '',
-          numero: plin.numero || '',
-          titular: plin.titular || '',
-        },
-        actualizadaAt: new Date().toISOString(),
-      }, { merge: true }),
-      9000,
-      'guardado-local'
-    );
+    await conReintento(escribir, LIMITES_CONFIG.reintentoMs, ['guardado-local']);
+    return 'servidor';
   } catch (e: any) {
     if (e?.message === 'guardado-local') {
       console.warn('🔷 Plin sincronizado LOCALMENTE — llegará al bot al reconectar');
-      return; // optimista: se envía cuando vuelva la red
+      return 'local'; // optimista: se envía cuando vuelva la red
     }
     console.error('❌ Error sincronizando Plin al bot:', e);
     throw e;
@@ -1384,9 +1462,9 @@ export async function obtenerPlinDelBot(userId: string): Promise<PlinBotConfig |
     // sin caché todavía
   }
 
-  // 2) Servidor con tope de tiempo
+  // 2) Servidor con tope de tiempo — FASE AJ: 30s (ídem Yape)
   try {
-    const snap = await conTimeout(getDoc(ref), 9000);
+    const snap = await conTimeout(getDoc(ref), LIMITES_CONFIG.timeoutMs);
     return extraer(snap.exists() ? snap.data() : null);
   } catch (e: any) {
     console.warn('⚠️ Plin del bot no disponible (sin conexión):', e?.message || e);
