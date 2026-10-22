@@ -53,6 +53,29 @@ import {
   Cell,
   Legend,
 } from 'recharts';
+
+// 📉 FASE AL: vacuna contra «Minified React error #185» (recharts#7563) —
+// props de recharts HOISTED (objetos inline en cada render = dispatch
+// anidado bajo re-renders rápidos → crash del Resumen del 21-oct).
+const TOOLTIP_ESTAD: any = { backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff', fontSize: '12px' };
+const TOOLTIP_ESTAD_PIE: any = { backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff', fontSize: '12px' };
+const MARGEN_CURVA = { top: 10, right: 10, left: -18, bottom: 5 };
+const MARGEN_BARRAS_A = { top: 5, right: 5, left: -18, bottom: 5 };
+const MARGEN_BARRAS_B = { top: 5, right: 5, left: -22, bottom: 5 };
+const ESTILO_LEYENDA_ESTAD: any = { fontSize: '10px', color: '#94a3b8' };
+const RADIO_ESTAD: [number, number, number, number] = [4, 4, 0, 0];
+const FORMATEAR_SOLES_ESTAD = (value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Monto'];
+const FORMATEAR_DIA_ESTAD = (v: any, _n: any, p: any) => {
+  const d: DiaAgregado = p?.payload;
+  return [`${fmtSoles(Number(v))}${d?.enCurso ? ' (en curso)' : ''}`, 'Cobrado'];
+};
+const FORMATEAR_ENTREGAS_ESTAD = (v: any, _n: any, p: any) => {
+  const d: DiaAgregado = p?.payload;
+  return [`${v} entrega${Number(v) === 1 ? '' : 's'}${d?.enCurso ? ' (en curso)' : ''}`, 'Entregas'];
+};
+
+const ETIQUETA_PORCENTAJE_ESTAD = ({ percent }: { percent?: number }) =>
+  percent && percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : '';
 import { useAuth } from '../hooks/useAuth';
 import { useClientes } from '../hooks/useClientes';
 import { leerHistorial, RegistroHistorial } from '../services/firestore';
@@ -363,7 +386,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
             {/* key={periodo} en el wrapper → la curva se re-dibuja animada al cambiar de periodo */}
             <div key={periodo} style={{ height: 220 }} className="w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartDias} margin={{ top: 10, right: 10, left: -18, bottom: 5 }}>
+                <AreaChart data={chartDias} margin={MARGEN_CURVA}>
                 <defs>
                   <linearGradient id="curvaSoles" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
@@ -382,11 +405,8 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
                 />
                 <YAxis stroke="#94a3b8" fontSize={10} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  formatter={(v: any, _n: any, p: any) => {
-                    const d: DiaAgregado = p?.payload;
-                    return [`${fmtSoles(Number(v))}${d?.enCurso ? ' (en curso)' : ''}`, 'Cobrado'];
-                  }}
+                  contentStyle={TOOLTIP_ESTAD}
+                  formatter={FORMATEAR_DIA_ESTAD}
                 />
                 <Area
                   type="monotone"
@@ -415,18 +435,15 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
               </p>
             )}
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartDias} margin={{ top: 5, right: 5, left: -18, bottom: 5 }}>
+              <BarChart data={chartDias} margin={MARGEN_BARRAS_A}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="etiqueta" stroke="#94a3b8" fontSize={10} interval="preserveStartEnd" angle={chartDias.length > 12 ? -45 : 0} textAnchor={chartDias.length > 12 ? 'end' : 'middle'} height={chartDias.length > 12 ? 40 : 30} />
                 <YAxis stroke="#94a3b8" fontSize={10} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  formatter={(v: any, _n: any, p: any) => {
-                    const d: DiaAgregado = p?.payload;
-                    return [`${fmtSoles(Number(v))}${d?.enCurso ? ' (en curso)' : ''}`, 'Cobrado'];
-                  }}
+                  contentStyle={TOOLTIP_ESTAD}
+                  formatter={FORMATEAR_DIA_ESTAD}
                 />
-                <Bar dataKey="soles" name="S/" radius={[4, 4, 0, 0]}>
+                <Bar dataKey="soles" name="S/" radius={RADIO_ESTAD}>
                   {chartDias.map((d, i) => (
                     <Cell key={`cell-${i}`} fill={d.enCurso ? '#6ee7b7' : '#10b981'} />
                   ))}
@@ -442,18 +459,15 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
               Entregas por día
             </h3>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartDias} margin={{ top: 5, right: 5, left: -22, bottom: 5 }}>
+              <BarChart data={chartDias} margin={MARGEN_BARRAS_B}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="etiqueta" stroke="#94a3b8" fontSize={10} interval="preserveStartEnd" angle={chartDias.length > 12 ? -45 : 0} textAnchor={chartDias.length > 12 ? 'end' : 'middle'} height={chartDias.length > 12 ? 40 : 30} />
                 <YAxis stroke="#94a3b8" fontSize={10} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  formatter={(v: any, _n: any, p: any) => {
-                    const d: DiaAgregado = p?.payload;
-                    return [`${v} entrega${Number(v) === 1 ? '' : 's'}${d?.enCurso ? ' (en curso)' : ''}`, 'Entregas'];
-                  }}
+                  contentStyle={TOOLTIP_ESTAD}
+                  formatter={FORMATEAR_ENTREGAS_ESTAD}
                 />
-                <Bar dataKey="entregas" name="Entregas" radius={[4, 4, 0, 0]}>
+                <Bar dataKey="entregas" name="Entregas" radius={RADIO_ESTAD}>
                   {chartDias.map((d, i) => (
                     <Cell key={`cell-e-${i}`} fill={d.enCurso ? '#93c5fd' : '#3b82f6'} />
                   ))}
@@ -476,7 +490,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ percent }: any) => percent && percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : ''}
+                    label={ETIQUETA_PORCENTAJE_ESTAD}
                     outerRadius={90}
                     fill="#8884d8"
                     dataKey="value"
@@ -486,10 +500,10 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({ onShowToast 
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                    formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Monto']}
+                    contentStyle={TOOLTIP_ESTAD_PIE}
+                    formatter={FORMATEAR_SOLES_ESTAD}
                   />
-                  <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
+                  <Legend wrapperStyle={ESTILO_LEYENDA_ESTAD} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

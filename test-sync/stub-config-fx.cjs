@@ -7,6 +7,10 @@
 const T = globalThis.__CFG_T__ || (globalThis.__CFG_T__ = {
   getDoc: { modo: 'ok', fallos: 0, data: {} },
   setDoc: { modo: 'ok', fallos: 0 },
+  // 🌤️ FASE AL: getDocFromCache configurable (default 'tira' = el
+  // comportamiento de siempre, memoria sin caché → respetado por los
+  // tests S1-S16 de la FASE AJ)
+  getDocFromCache: null,
 });
 
 function anotar(map, clave) {
@@ -22,7 +26,13 @@ const moduleExports = {
   where: () => null,
   limit: () => null,
   onSnapshot: () => () => {},
-  getDocFromCache: async () => { throw new Error('persistencia no habilitada (memory cache)'); },
+  getDocFromCache: async (ref) => {
+    const c = T.getDocFromCache;
+    if (!c || c.modo === 'tira') throw new Error('persistencia no habilitada (memory cache)');
+    if (c.modo === 'ok') return { exists: () => true, data: () => c.data, metadata: { fromCache: true } };
+    if (c.modo === 'vacio') return { exists: () => false, metadata: { fromCache: true } };
+    throw new Error('modo getDocFromCache desconocido: ' + c.modo);
+  },
   serverTimestamp: () => ({ __ts: 'server' }),
   Timestamp: { now: () => ({ toDate: () => new Date() }) },
 

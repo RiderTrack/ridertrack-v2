@@ -21,6 +21,7 @@ import {
 import {
   getFirestore,
   initializeFirestore,
+  persistentLocalCache,
   collection,
   doc,
   onSnapshot,
@@ -61,10 +62,28 @@ try {
 
   // Detectar APK (Capacitor) para usar long polling (mejor performance en Android)
   const isNative = Capacitor.isNativePlatform();
-  if (isNative) {
-    db = initializeFirestore(app, { experimentalForceLongPolling: true });
-  } else {
-    db = getFirestore(app);
+
+  // 💾 FASE AK: CACHÉ PERSISTENTE (IndexedDB) en APK y web — los
+  // QRs/plantillas aparecen AL INSTANTE sin señal (caché honesta con
+  // metadata.fromCache) y un guardado que no llegó al servidor YA NO
+  // SE PIERDE aunque cierres la app: se sube solo al volver la señal.
+  // Fallback try/catch a la memoria de siempre: si IndexedDB no puede
+  // abrirse (modo privado, WebView viejo), la app arranca IGUAL.
+  try {
+    if (isNative) {
+      db = initializeFirestore(app, {
+        experimentalForceLongPolling: true,
+        localCache: persistentLocalCache({}),
+      });
+    } else {
+      db = initializeFirestore(app, { localCache: persistentLocalCache({}) });
+    }
+    console.log('💾 Caché persistente de Firestore activa (IndexedDB)');
+  } catch (eCache) {
+    console.warn('⚠️ Caché persistente no disponible, usando la de siempre:', eCache);
+    db = isNative
+      ? initializeFirestore(app, { experimentalForceLongPolling: true })
+      : getFirestore(app);
   }
 
   storage = getStorage(app);

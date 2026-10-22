@@ -1,0 +1,51 @@
+═══════════════════════════════════════════════════════════
+🔐 REGLAS v5 — habilitar las imágenes del bot + el Catálogo
+═══════════════════════════════════════════════════════════
+
+¿QUÉ PASABA? (para que quede claro)
+
+1) Subir la imagen de «gracias por tu compra» (o cualquiera de los
+   avisos del bot) moría con:
+   «No se pudo subir — Missing or insufficient permissions»
+   y la pestaña 🖼️ Imágenes del Control Bot salía VACÍA aunque
+   antes hubieras subido cosas.
+   → La colección imagenes_bot NUNCA tuvo permiso en las reglas de
+   la nube. No lo rompimos nosotros con el QR de empresa: estaba
+   bloqueada DESDE EL PRIMER DÍA (herencia de la mudanza), solo que
+   nunca la habías usado hasta ahora.
+
+2) El Catálogo salía vacío por el mismo motivo (catalogo_productos
+   y configuracion sin permiso), igual que el «en línea…» del chat
+   (presencia_watch / presencia_chat).
+
+La APP v0.11.11 ya está curada de su lado (comprime la imagen, le
+pone tope de tiempo y te avisa HONESTO si el registro al bot no
+llega). Este script habilita el permiso que falta en la NUBE.
+
+═══════════════════════════════════════════════════════════
+INSTALACIÓN (1 línea en Termux)
+═══════════════════════════════════════════════════════════
+
+cd ~/bot-whatsapp && curl -LO https://github.com/RiderTrack/ridertrack-v2/releases/download/v0.11.11/reglas-v5.zip && unzip -o reglas-v5.zip && node actualizar_reglas_v5.js
+
+Arriba tiene que decir:  📋 actualizar_reglas_v5.js v5 (FASE AL …)
+y terminar con:          ✅ ¡LISTO! Las reglas vivas ya permiten…
+
+Si algo falla (sin internet, permisos), el script te imprime el
+PLAN B: pega reglas-nuevas-completas.txt en la consola de Firebase
+(Firestore → Reglas → reemplazar todo → Publicar). Nada se rompe
+en el intento: no se cambia nada hasta que el publish responde OK.
+
+═══════════════════════════════════════════════════════════
+DESPUÉS DE CORRERLO
+═══════════════════════════════════════════════════════════
+
+· Cerrá la app del todo (de los DOS celulares) y abrila de nuevo.
+· Control Bot → 🖼️ Imágenes: subí la imagen de «gracias por tu
+  compra» → tiene que decir «Imagen actualizada — subieron N KB».
+· Las imágenes que subas ahora SÍ quedan guardadas para siempre.
+
+NOTA: el bot NO hace falta tocarlo — usa firebase-admin que no
+pasa por reglas. El script solo agrega lo que falta, es
+IDEMPOTENTE (podés correrlo las veces que quieras) y deja las
+reglas de TODO lo demás exactamente como están.

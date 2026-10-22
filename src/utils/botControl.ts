@@ -310,9 +310,14 @@ export function escucharRegistroHoy(
 // PLANTILLAS (plantillas_mensajes)
 // ─────────────────────────────────────────────────────────────
 
-/** Escucha todas las plantillas ( igual que la v1: colección completa ) */
+/** Escucha todas las plantillas ( igual que la v1: colección completa )
+ * 🌱 FASE AL: el callback recibe `info.fromCache` — con la caché
+ * persistente (v0.11.10) el PRIMER snapshot de una colección nunca
+ * vista llega VACÍO desde la caché fría; sembrar las base ahí
+ * duplicaba tus plantillas reales (bug del 21-oct: 6 «base» clonadas
+ * al lado de las de verdad). Ahora el sembrado espera al SERVIDOR. */
 export function escucharPlantillas(
-  cb: (lista: PlantillaMensaje[]) => void,
+  cb: (lista: PlantillaMensaje[], info?: { fromCache: boolean }) => void,
   onError?: (e: Error) => void
 ): Unsubscribe {
   if (!db) {
@@ -337,7 +342,7 @@ export function escucharPlantillas(
         });
       });
       lista.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      cb(lista);
+      cb(lista, { fromCache: snap.metadata?.fromCache === true });
     },
     (err) => onError && onError(err as Error)
   );
@@ -346,11 +351,20 @@ export function escucharPlantillas(
 /**
  * Crea las 6 plantillas predefinidas de la v1 si la colección
  * está vacía (textos idénticos — el bot ya las conoce).
+ * 🌱 FASE AL: SOLO si el SERVIDOR confirma la colección vacía —
+ * si la respuesta vino de la caché fría (fromCache) no se siembra
+ * NADA: un falso «vacío» clonaba las base ENCIMA de las tuyas.
  */
 export async function crearPlantillasPredefinidas(): Promise<number> {
   if (!db) throw new Error('Firestore no disponible');
   const snap = await getDocs(collection(db, 'plantillas_mensajes'));
   if (!snap.empty) return 0;
+  if ((snap as any).metadata?.fromCache === true) {
+    // La caché fría dice «vacío» pero el servidor todavía no habló —
+    // sembrar aquí era el bug: se clonaban las base de fábrica.
+    console.log('🌱 Plantillas: vacío de CACHÉ fría — no siembro, espero al servidor');
+    return 0;
+  }
 
   const predef: { nombre: string; categoria: string; mensaje: string }[] = [
     {

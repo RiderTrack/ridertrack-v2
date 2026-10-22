@@ -40,8 +40,6 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
-  RadialBarChart,
-  RadialBar,
 } from 'recharts';
 import { useClientes } from '../hooks/useClientes';
 // 🛵 FASE D: cobro por pedido (temporada)
@@ -59,6 +57,137 @@ import { cargarViajes, cargarGastos, fechaHoy as fechaHoyDT } from '../drivertra
 
 // Colores para gráficos
 const COLORES = ['#10b981', '#a855f7', '#f59e0b', '#3b82f6', '#06b6d4', '#ef4444', '#6366f1', '#eab308', '#64748b', '#ec4899'];
+
+// ═══════════════════════════════════════════════════════════
+// 📉 FASE AL — VACUNA CONTRA «Minified React error #185»
+// Bug conocido de recharts 3.x + React 19 (issue #7563): objetos y
+// funciones creados inline en cada render (contentStyle, margin,
+// cursor, label, formatter…) disparan dispatches anidados en los
+// efectos internos de recharts bajo re-renders rápidos (los
+// snapshots cache→servidor de la caché persistente llegan amontonados)
+// → «Maximum update depth exceeded» → «Resumen del día no pudo
+// cargar». La guía oficial de los maintainers: hoist a constantes de
+// módulo. Además los 3 gráficos viven en un subcomponente memoizado
+// que SOLO re-renderiza si cambian los datos — aunque el resto de
+// la vista tiemble, recharts no se entera.
+// ═══════════════════════════════════════════════════════════
+const TOOLTIP_CURVA: any = { backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#fff' };
+const TOOLTIP_PIE: any = { backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff' };
+const TOOLTIP_BARRAS: any = { backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff', fontSize: '12px' };
+const CURSOR_BARRAS: any = { fill: 'rgba(59, 130, 246, 0.1)' };
+const MARGEN_BARRAS = { top: 5, right: 10, left: -20, bottom: 5 };
+const RADIO_BARRAS: [number, number, number, number] = [4, 4, 0, 0];
+const ESTILO_LEYENDA: any = { fontSize: '10px', color: '#94a3b8' };
+const ETIQUETA_PORCENTAJE = ({ percent }: { name?: string; percent?: number }) =>
+  percent && percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : '';
+const FORMATEAR_SOLES = (value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Monto'];
+
+/** Datos agregados que consumen los gráficos (salida del useMemo) */
+interface ResumenDia {
+  total: number;
+  entregadosCount: number;
+  fallidosCount: number;
+  pendientesCount: number;
+  cobradoTotal: number;
+  porCobrarTotal: number;
+  seccionTuyo: { key: string; label: string; count: number; monto: number }[];
+  seccionEmpresa: { key: string; label: string; count: number; monto: number }[];
+  seccionNoEntregados: { key: string; label: string; count: number; monto: number }[];
+  totalTuyo: number;
+  totalEmpresa: number;
+  totalNoEntregados: number;
+  datosPie: { name: string; value: number; count: number; tipo: string }[];
+  distritosData: { distrito: string; entregas: number; monto: number }[];
+  horasData: { hora: string; entregas: number; monto: number }[];
+  totalDia: number;
+  progreso: number;
+}
+
+/** 📉 FASE AL: los 3 gráficos aislados — solo re-renderizan si cambia
+ * `resumen` (memoizado en el padre). Los rápidos re-renders externos
+ * (snapshots cache→servidor, latidos, auth) ya NO tocan recharts. */
+const GraficosResumen = React.memo(function GraficosResumen({ resumen }: { resumen: ResumenDia }) {
+  if (resumen.horasData.length === 0 && resumen.datosPie.length === 0 && resumen.distritosData.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      {/* 📊 GRÁFICO AREA: Entregas por hora del día */}
+      {resumen.horasData.length > 0 && resumen.horasData[0].hora !== '—' && (
+        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
+          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
+            <AreaIcon className="w-4 h-4 text-blue-400" />
+            Curva de entregas por hora
+          </h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart data={resumen.horasData}>
+              <defs>
+                <linearGradient id="colorEntregas" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="hora" stroke="#94a3b8" fontSize={11} />
+              <YAxis stroke="#94a3b8" fontSize={11} />
+              <Tooltip contentStyle={TOOLTIP_CURVA} />
+              <Area type="monotone" dataKey="entregas" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorEntregas)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* 📊 GRÁFICO PIE: Distribución por método */}
+      {resumen.datosPie.length > 0 && (
+        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
+          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
+            <PieIcon className="w-4 h-4 text-emerald-400" />
+            Distribución por método de pago
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={resumen.datosPie}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={ETIQUETA_PORCENTAJE}
+                outerRadius={100}
+                fill="#8884d8"
+                dataKey="value"
+              >
+                {resumen.datosPie.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORES[index % COLORES.length]} />
+                ))}
+              </Pie>
+              <Tooltip contentStyle={TOOLTIP_PIE} formatter={FORMATEAR_SOLES} />
+              <Legend wrapperStyle={ESTILO_LEYENDA} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* 📊 GRÁFICO BARRAS: Entregas por distrito */}
+      {resumen.distritosData.length > 0 && (
+        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
+          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-blue-400" />
+            Entregas por distrito
+          </h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={resumen.distritosData} margin={MARGEN_BARRAS}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="distrito" stroke="#94a3b8" fontSize={10} />
+              <YAxis stroke="#94a3b8" fontSize={10} />
+              <Tooltip contentStyle={TOOLTIP_BARRAS} cursor={CURSOR_BARRAS} />
+              <Bar dataKey="entregas" fill="#3b82f6" radius={RADIO_BARRAS} name="Entregas" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </>
+  );
+});
 
 export const ResumenView: React.FC = () => {
   const { clientes, loading } = useClientes();
@@ -387,87 +516,9 @@ export const ResumenView: React.FC = () => {
         </div>
       </div>
 
-      {/* 📊 GRÁFICO AREA: Entregas por hora del día */}
-      {resumen.horasData.length > 0 && resumen.horasData[0].hora !== '—' && (
-        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
-          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
-            <AreaIcon className="w-4 h-4 text-blue-400" />
-            Curva de entregas por hora
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={resumen.horasData}>
-              <defs>
-                <linearGradient id="colorEntregas" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="hora" stroke="#94a3b8" fontSize={11} />
-              <YAxis stroke="#94a3b8" fontSize={11} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
-              />
-              <Area type="monotone" dataKey="entregas" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorEntregas)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+      {/* 📉 FASE AL: los 3 gráficos aislados (memo) — vacuna #185 */}
+      <GraficosResumen resumen={resumen} />
 
-      {/* 📊 GRÁFICO PIE: Distribución por método */}
-      {resumen.datosPie.length > 0 && (
-        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
-          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
-            <PieIcon className="w-4 h-4 text-emerald-400" />
-            Distribución por método de pago
-          </h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={resumen.datosPie}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => percent && percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : ''}
-                outerRadius={100}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {resumen.datosPie.map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORES[index % COLORES.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff' }}
-                formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Monto']}
-              />
-              <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* 📊 GRÁFICO BARRAS: Entregas por distrito */}
-      {resumen.distritosData.length > 0 && (
-        <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700">
-          <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-blue-400" />
-            Entregas por distrito
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={resumen.distritosData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="distrito" stroke="#94a3b8" fontSize={10} />
-              <YAxis stroke="#94a3b8" fontSize={10} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
-                cursor={{ fill: 'rgba(59, 130, 246, 0.1)' }}
-              />
-              <Bar dataKey="entregas" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Entregas" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
 
       {/* 💜 SECCIÓN TUYO */}
       <div className="p-5 rounded-2xl bg-purple-500/10 border border-purple-500/30">

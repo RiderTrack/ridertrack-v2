@@ -28,6 +28,12 @@ import {
   CartesianGrid
 } from 'recharts';
 
+// 📉 FASE AL: vacuna contra «Minified React error #185» (recharts#7563) —
+// props de recharts HOISTED: objetos inline nuevos en cada render son los
+// que disparan el dispatch anidado bajo re-renders rápidos.
+const RADIO_BARRAS_AN: [number, number, number, number] = [8, 8, 0, 0];
+const TOOLTIP_OSCURO: any = { backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' };
+
 const HOURLY_PERFORMANCE = [
   { hora: '08:00', entregas: 12, ingresos: 1420 },
   { hora: '10:00', entregas: 32, ingresos: 3680 },
@@ -165,9 +171,7 @@ export const AnalyticsView: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="hora" stroke="#94a3b8" fontSize={12} />
                 <YAxis stroke="#94a3b8" fontSize={12} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
-                />
+                <Tooltip contentStyle={TOOLTIP_OSCURO} />
                 <Area
                   type="monotone"
                   dataKey="ingresos"
@@ -205,9 +209,7 @@ export const AnalyticsView: React.FC = () => {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
-                />
+                <Tooltip contentStyle={TOOLTIP_OSCURO} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -241,10 +243,8 @@ export const AnalyticsView: React.FC = () => {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="distrito" stroke="#94a3b8" fontSize={12} />
               <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
-              />
-              <Bar dataKey="pedidos" fill="#06b6d4" radius={[8, 8, 0, 0]} />
+              <Tooltip contentStyle={TOOLTIP_OSCURO} />
+              <Bar dataKey="pedidos" fill="#06b6d4" radius={RADIO_BARRAS_AN} />
             </BarChart>
           </ResponsiveContainer>
         </div>

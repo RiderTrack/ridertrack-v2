@@ -23,6 +23,19 @@ import { useAuth } from './useAuth';
 /** De dónde salió la config que está en pantalla */
 export type FuenteConfig = 'cargando' | 'servidor' | 'cache' | 'vacio' | 'error';
 
+/** Timestamp → ms (espejo del helper del servicio, para comparar frescura) */
+function tiempoDe(v: any): number {
+  try {
+    if (!v) return 0;
+    if (typeof v?.toDate === 'function') return v.toDate().getTime();
+    if (v instanceof Date) return v.getTime();
+    const t = new Date(String(v)).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  } catch {
+    return 0;
+  }
+}
+
 export function useConfig() {
   const { user } = useAuth();
   const [config, setConfig] = useState<ConfigCuentas>(CONFIG_CUENTAS_DEFAULT);
@@ -33,6 +46,25 @@ export function useConfig() {
   const [errorCarga, setErrorCarga] = useState('');
   const [nonce, setNonce] = useState(0);
   const [ultimoGuardado, setUltimoGuardado] = useState<FuenteOperacion | null>(null);
+
+  // 🌤️ FASE AL: la CARRERA CORTA del servicio avisa por evento cuando
+  // la versión del servidor es MÁS NUEVA que la caché que se está
+  // mostrando — la pantalla se refresca SOLA (el QR guardado en el
+  // otro cel aparece sin reabrir la app). Nunca pisa un dato más nuevo
+  // (guardado propio incluido): solo aplica si actualizadoEn creció.
+  useEffect(() => {
+    const alRefrescar = (e: Event) => {
+      const nueva = (e as CustomEvent)?.detail as ConfigCuentas | undefined;
+      if (!nueva) return;
+      setConfig((prev) =>
+        tiempoDe((nueva as any)?.actualizadoEn) > tiempoDe((prev as any)?.actualizadoEn) ? nueva : prev
+      );
+      setFuente('servidor');
+      setErrorCarga('');
+    };
+    window.addEventListener('config-empresa:refrescada', alRefrescar as EventListener);
+    return () => window.removeEventListener('config-empresa:refrescada', alRefrescar as EventListener);
+  }, []);
 
   useEffect(() => {
     if (!user) {

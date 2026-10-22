@@ -1159,6 +1159,10 @@ export const LIMITES_CONFIG = {
   timeoutMs: 30_000,
   /** espera entre el 1er intento fallido y el reintento */
   reintentoMs: 2_000,
+  /** 🌤️ FASE AL: tope del refresco en segundo plano tras leer de
+   * la caché — si el servidor no contesta a tiempo, la caché gana
+   * y no pasa nada (la próxima apertura vuelve a intentar). */
+  frescuraMs: 8_000,
 };
 
 /** Cómo terminó la última operación de config ('servidor' llegó al
@@ -1220,6 +1224,53 @@ function fusionarConfig(data: any): ConfigCuentas {
   };
 }
 
+/** Timestamp → milisegundos (acepta Timestamp de Firestore, Date o ISO) */
+function tiempoDe(v: any): number {
+  try {
+    if (!v) return 0;
+    if (typeof v?.toDate === 'function') return v.toDate().getTime();
+    if (v instanceof Date) return v.getTime();
+    const t = new Date(String(v)).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 🌤️ FASE AL: la CARRERA CORTA que faltaba. Con la caché tibia la
+ * pantalla abre al instante… y hasta hoy se quedaba CONGELADA con
+ * esa copia PARA SIEMPRE: guardabas el QR en un cel y el otro nunca
+ * lo veía sin reabrir la app. Ahora, tras servir la caché, se baja
+ * la versión del servidor por detrás (tope LIMITES_CONFIG.frescuraMs);
+ * si es MÁS NUEVA (actualizadoEn) se avisa por el evento global
+ * 'config-empresa:refrescada' y las pantallas que usan useConfig se
+ * refrescan solas. Silencio total si falla — es best-effort.
+ */
+function refrescarConfigEnSegundoPlano(ref: any, configCache: ConfigCuentas): void {
+  try {
+    getDoc(ref)
+      .then((snap) => {
+        if (!snap || !snap.exists()) return;
+        const nueva = fusionarConfig(snap.data());
+        if (tiempoDe((nueva as any)?.actualizadoEn) > tiempoDe((configCache as any)?.actualizadoEn)) {
+          estadoCargaConfig.fuente = 'servidor';
+          estadoCargaConfig.error = '';
+          try {
+            window.dispatchEvent(new CustomEvent('config-empresa:refrescada', { detail: nueva }));
+          } catch {
+            /* sin window (tests): nada */
+          }
+        }
+      })
+      .catch(() => {
+        /* red débil: la caché ya está sirviendo — silencio */
+      });
+  } catch {
+    /* nada */
+  }
+}
+
 /**
  * Carga la config (Fase 2.1 — NUNCA se cuelga):
  *   1. Caché local de Firestore (instantáneo, funciona SIN internet)
@@ -1231,10 +1282,16 @@ export async function cargarConfigCuentas(userId: string): Promise<ConfigCuentas
 
   const ref = doc(db, 'config_empresa', userId);
 
-  // 1) Caché local primero — instantáneo y offline
+  // 1) Caché local primero — instantáneo y offline. 🌤️ FASE AL: al
+  //    encontrarla se larga la carrera corta al servidor (frescura).
   try {
     const snapCache = await getDocFromCache(ref);
-    if (snapCache.exists()) { estadoCargaConfig.fuente = 'cache'; return fusionarConfig(snapCache.data()); }
+    if (snapCache.exists()) {
+      estadoCargaConfig.fuente = 'cache';
+      const configCache = fusionarConfig(snapCache.data());
+      refrescarConfigEnSegundoPlano(ref, configCache);
+      return configCache;
+    }
   } catch {
     // No está en caché todavía (primera vez) — seguir al servidor
   }

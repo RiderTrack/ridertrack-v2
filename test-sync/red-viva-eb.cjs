@@ -99,50 +99,31 @@ var require_stub_red_fx = __commonJS({
 // test-sync/stub-firebase-app.cjs
 var require_stub_firebase_app = __commonJS({
   "test-sync/stub-firebase-app.cjs"(exports2) {
-    var T = globalThis.__UPLOAD_T__ || (globalThis.__UPLOAD_T__ = {
-      uploadBytes: { modo: "ok", fallos: 0, delayMs: 0 },
-      getDownloadURL: { modo: "ok" },
-      __subidas: []
-      // qué FILES se mandaron a uploadBytes
-    });
-    T.__reset = function() {
-      T.uploadBytes = { modo: "ok", fallos: 0, delayMs: 0 };
-      T.getDownloadURL = { modo: "ok" };
-      T.__subidas.length = 0;
-    };
     exports2.db = { __stub: "db-ridertrack" };
     exports2.storage = { __stub: "storage-ridertrack" };
-    exports2.storageRef = (st, ruta) => ({ __ruta: ruta });
-    exports2.uploadBytes = async (ref, file, opts) => {
-      T.__subidas.push({ ruta: ref.__ruta, file, opts });
-      const c = T.uploadBytes;
-      if (c.delayMs) await new Promise((r) => setTimeout(r, c.delayMs));
-      if (c.modo === "ok") return {};
-      if (c.modo === "fallo-n") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        if (c.llamadas <= (c.fallos || 0)) throw new Error("network request failed (storage)");
-        return {};
-      }
-      if (c.modo === "nunca") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        return new Promise(() => {
-        });
-      }
-      if (c.modo === "permiso") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        throw new Error("storage/unauthorized");
-      }
-      throw new Error("modo uploadBytes desconocido: " + c.modo);
+    var UP = globalThis.__UPLOAD_T__ ||= {
+      uploadBytes: { modo: "ok", fallos: 0, delayMs: 0, llamadas: 0 },
+      getDownloadURL: { modo: "ok", llamadas: 0 },
+      __subidas: []
     };
-    exports2.getDownloadURL = async (ref) => {
-      const c = T.getDownloadURL;
+    exports2.storageRef = (storage, ruta) => ({ __ruta: ruta });
+    exports2.uploadBytes = async (ref, file, opts) => {
+      UP.__subidas.push({ ruta: ref.__ruta, file, opts });
+      const c = UP.uploadBytes;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.delayMs) await new Promise((r) => setTimeout(r, c.delayMs));
+      if (c.modo === "fallo-n" && c.llamadas <= (c.fallos || 0)) throw new Error("network request failed");
       if (c.modo === "nunca") return new Promise(() => {
       });
-      if (c.modo === "fallo-n") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        if (c.llamadas <= (c.fallos || 0)) throw new Error("network request failed (url)");
-      }
-      return "https://firebasestorage.test/v0/b/ridertest/o/" + encodeURIComponent(ref.__ruta || "x") + "?token=TOKEN-LARGO";
+      if (c.modo === "permiso") throw new Error("storage/unauthorized");
+      return { ref };
+    };
+    exports2.getDownloadURL = async (ref) => {
+      const c = UP.getDownloadURL;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.modo === "nunca") return new Promise(() => {
+      });
+      return "https://firebasestorage.test/o/" + encodeURIComponent(ref.__ruta) + "?token=stub";
     };
   }
 });

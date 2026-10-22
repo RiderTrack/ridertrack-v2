@@ -1,5 +1,14 @@
 // ═══════════════════════════════════════════════════════════
 // 🔥 FIRESTORE SECURITY RULES - RiderTrack V2
+//
+// 📅 FASE AL (v0.11.11): UNIÓN COMPLETA de todo lo publicado en
+// vivo hasta hoy (base 4-oct + parches FASE N del backup + latido
+// v4 del bot v3 + los 5 bloques nuevos: imagenes_bot, catálogo,
+// configuración de tienda y presencia del chat) + bloqueo de la
+// foto-perfil si existiera. Este archivo es la FUENTE DE VERDAD:
+//    firebase deploy --only firestore:rules
+// o pegarlo entero en Consola → Firestore → Reglas (Plan B del
+// actualizar_reglas_v5.js del bot).
 // Proyecto: ridertrack-93c8a (compartido con modular, riderchat, clientetrack)
 //
 // Principios:
@@ -50,15 +59,6 @@ service cloud.firestore {
       allow write: if isOwner(userId) || isAdmin();
     }
 
-    // ⚡ FASE N: backups de la ruta v1 (auto_{fecha} del cierre + .hist
-    // del importador) — la regla del doc padre NO cubre subcolecciones:
-    // sin este bloque el "Finalizar y guardar ruta" guardaba el
-    // historial pero el backup v1 fallaba en silencio (permission-denied).
-    match /usuarios/{userId}/backups/{backupId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
-    }
-
     // Ruta activa de cada rider — el rider lee/escribe la suya,
     // el bot (rudy-bot con firebase-admin) puede escribir en cualquiera
     match /ruta_activa/{userId} {
@@ -66,16 +66,10 @@ service cloud.firestore {
       allow write: if isOwner(userId) || isAdmin();
     }
 
-    // Historial de rutas — v2 guarda con ID "{uid}_{fecha}"
-    // (no es solo el uid), por eso se valida el prefijo con regex.
-    // ⚡ FASE N: el read se separa en get/list — ANTES el matches()
-    // del docId negaba TODOS los list (las reglas NO son filtros:
-    // un query de colección no puede demostrar el patrón del ID) →
-    // Historial/Estadísticas/Caja/Galería veían la lista VACÍA
-    // aunque las rutas se guardaban bien. Ahora el list exige que el
-    // query filtre where('uid','==',tu uid) (leerHistorial FASE N) y
-    // el create acepta también los v1_{id} del importador (antes
-    // denegados por el mismo matches()).
+    // FASE N: Historial de rutas — read separado en get/list (antes el
+    // matches() del docId negaba TODOS los list: las reglas NO son
+    // filtros → Historial/Estadísticas/Caja/Galería veían VACÍO).
+    // El list exige que el query filtre where('uid','==',tu uid).
     match /historial_rutas/{docId} {
       allow get: if isAuth() && (docId.matches(request.auth.uid + '_.*') || isAdmin() || resource.data.uid == request.auth.uid);
       allow list: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
@@ -171,72 +165,50 @@ service cloud.firestore {
       }
     }
 
-    // 🩺 v0.11.7 (bot v3-blindado): latido del bot de WhatsApp — el
-    // bot escribe estado_bot/{uid} con firebase-admin (las reglas NO
-    // lo frenan); la app LEE su propio doc para mostrar 🟢 vivo /
-    // 🔴 caído en Configuración → "Bot de WhatsApp". Cualquier rider
-    // logueado puede leer (multi-rider como ruta_activa); escritura
-    // solo del dueño (para las pruebas E2E con cuenta test).
-    // ⚠️ Si tocás este bloque, corré también actualizar_reglas.js v4
-    // del bot para que las reglas VIVAS queden igual que este archivo.
-    match /estado_bot/{userId} {
-      allow read: if isAuth();
-      allow write: if isOwner(userId);
-    }
+    // ═══════════════════════════════════════════════════════
+    // FASE B + B2 — INDRIVE / DRIVER LIBRE (DriverTrack) 🛵
+    //
+    // Colecciones PROPIAS de inDrive, separadas de las del trabajo
+    // (acciones_bot / imagenes_bot quedan intactas). El parche
+    // drivertrack_bot.js v1.1 del rudy-bot las lee/escribe con
+    // firebase-admin, que NO pasa por estas reglas — acá solo se
+    // habilita lo que la APP necesita: encolar mensajes y subir
+    // las imágenes de los avisos.
+    // ═══════════════════════════════════════════════════════
 
-    // FASE B: acciones del robot para DriverTrack (inDrive) — misma
-    // estructura que acciones_bot pero cola SEPARADA para que el
-    // index.js del bot (que marca processed TODO lo de acciones_bot)
-    // nunca toque las acciones de inDrive. Las lee el parche
-    // drivertrack_bot.js del rudy-bot.
+    // Cola de acciones del robot para inDrive — MISMO patrón que
+    // acciones_bot pero colección separada. La app encola el
+    // mensaje (cobro 💜, avisos, ubicación, prueba) y el parche
+    // del bot lo manda por WhatsApp al cliente.
     match /acciones_dt/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow write: if isOwner(userId) || isAdmin();
 
+      // Subcolección pendientes
       match /pendientes/{pendId} {
         allow read: if isOwner(userId) || isAdmin();
         allow write: if isOwner(userId) || isAdmin();
       }
     }
 
-    // FASE B2: imágenes de los avisos de inDrive — la app sube la
+    // Imágenes de los avisos de inDrive (una por tipo: camino,
+    // llegando, llegada, entregado, ubicacion) — la app sube la
     // imagen a Storage (campanas/imagenes_dt/…) y registra la URL
-    // acá (doc id = tipo de aviso); el bot la baja con fetch al
-    // momento del envío (firebase-admin pasa sobre las reglas)
+    // acá; el bot la baja al momento del envío y la manda con el
+    // mensaje. Cualquier rider logueado puede gestionarlas.
     match /imagenes_dt/{docId} {
       allow read: if isAuth();
       allow write: if isAuth();
-    }
-
-    // FASE C: ☁️ sync de los datos de inDrive (viajes, gastos,
-    // ajustes) — UN doc por rider con todo su data para verlo en
-    // cualquier cel con la misma cuenta. Solo el dueño entra.
-    match /dt_sync/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
     }
 
     // ═══════════════════════════════════════════════════════
     // COLECCIONES DE BACKUP Y EXCELS
     // ═══════════════════════════════════════════════════════
 
-    // Backups — solo riders autenticados
+    // Backups — solo el dueño del backup
     match /backups/{backupId} {
       allow read: if isAuth();  // cualquier rider puede descargar backups compartidos
       allow write: if isAuth();
-    }
-
-    // ⚡ FASE N: Backups v2 — snapshot de rutas de la pantalla ☁️
-    // Backups: manual + auto-cierre ({uid}_{ts}) + auto-guardado vivo
-    // ({uid}_{fecha}_auto, merge). TODO doc lleva el campo uid del
-    // dueño; el list de la app filtra where('uid','==',tu uid).
-    // ANTES esta colección NO tenía regla → el deny-all la bloqueaba
-    // y el "Finalizar y guardar ruta" guardaba el historial pero NO
-    // el backup (toast ⚠️ "avísame para revisarlo").
-    match /backups_v2/{docId} {
-      allow read: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isAuth() && (request.resource.data.uid == request.auth.uid || isAdmin());
-      allow update, delete: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
     }
 
     // Excels en nube
@@ -269,9 +241,175 @@ service cloud.firestore {
       }
     }
 
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // FASE 3.32 — ESTADO Y CONFIG DEL BOT
+    // (El bot escribe con firebase-admin, que NO pasa por estas
+    //  reglas. Aquí solo se habilita lo que la APP necesita leer
+    //  o escribir. Sin esto, el catch-all de abajo NEGABA todo en
+    //  silencio: el botón @ del grupo quedaba sin miembros y el
+    //  latido "bot conectado ✓" nunca llegaba a la app.)
+    // ═══════════════════════════════════════════════════════════
+
+    // sistema/estado_grupo (latido + miembros del grupo para el
+    // botón @) · sistema/control_bot · sistema/puente_control
+    // (encendido/apagado del bot desde la app — la app ESCRIBE los
+    // dos últimos, por eso write es isAdmin, que es el propio rider)
+    match /sistema/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Chats con el bot callado — la app lista/reactiva/borra
+    match /bot_silenciado/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Lo que el bot hizo hoy — la app SOLO lo muestra
+    match /registro_bot/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Plantillas de WhatsApp del bot — la app las lista/edita/crea
+    match /plantillas_mensajes/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // FASE 4.1 — WHATSAPP PERSONAL (bot-personal, celular 2)
+    //
+    // El bot escribe TODO con firebase-admin (NO pasa por estas
+    // reglas). Aquí solo se habilita lo que la APP necesita:
+    // leer tus chats/media/estado y escribir respuestas,
+    // restringidos y respuestas rápidas.
+    //
+    // ⚠️ Sin estas reglas, el catch-all de abajo NEGABA en
+    // silencio: el bot guardaba los mensajes pero el panel
+    // NUNCA los mostraba ("no llegan los mensajes").
+    // ═══════════════════════════════════════════════════════════
+
+    // Tus conversaciones (mensajes + llamadas registradas)
+    match /mensajes_personal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();   // la app marca "leído"
+    }
+
+    // Media de los mensajes (fotos/audio base64) — solo lectura
+    match /media_personal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Contactos + restringidos (la app los marca)
+    match /contactos_personal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // Respuestas manuales (app escribe → el bot las manda)
+    match /respuestas_personal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+      allow delete: if isAuth();
+    }
+
+    // Respuestas rápidas (plantillas cortas)
+    match /respuestas_rapidas_personal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // NOTA: sistema/estado_personal ya está cubierto arriba por
+    // match /sistema/{docId} (read: isAuth · write: isAdmin, que
+    // es el propio Rudy logueado en la app).
+
+    // ⚡ FASE N: backups de la ruta v1 (auto_{fecha} del cierre + .hist
+    // del importador) — la regla del doc padre NO cubre subcolecciones:
+    // sin este bloque el "Finalizar y guardar ruta" guardaba el
+    // historial pero el backup v1 fallaba en silencio (permission-denied).
+    match /usuarios/{userId}/backups/{backupId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // ⚡ FASE N: Backups v2 — snapshot de rutas de la pantalla ☁️
+    // Backups: manual + auto-cierre ({uid}_{ts}) + auto-guardado vivo
+    // ({uid}_{fecha}_auto, merge). TODO doc lleva el campo uid del
+    // dueño; el list de la app filtra where('uid','==',tu uid).
+    match /backups_v2/{docId} {
+      allow read: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isAuth() && (request.resource.data.uid == request.auth.uid || isAdmin());
+      allow update, delete: if isAuth() && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+
+    // 🩺 v0.11.7 (bot v3-blindado): latido del bot de WhatsApp — el
+    // bot escribe estado_bot/{uid} con firebase-admin (las reglas NO
+    // lo frenan); la app LEE su propio doc para mostrar 🟢 vivo /
+    // 🔴 caído en Configuración → "Bot de WhatsApp". Cualquier rider
+    // logueado puede leer (multi-rider como ruta_activa); escritura
+    // solo del dueño (para las pruebas E2E con cuenta test).
+    match /estado_bot/{userId} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId);
+    }
+
+    // FASE C: ☁️ sync de los datos de inDrive (viajes, gastos,
+    // ajustes) — UN doc por rider con todo su data para verlo en
+    // cualquier cel con la misma cuenta. Solo el dueño entra.
+    match /dt_sync/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // 🖼️ FASE AL (v0.11.11): imágenes de los mensajes del bot — la app
+    // sube la foto a Storage (campanas/imagenes_bot/…) y REGISTRA la
+    // URL acá (doc id = tipo de aviso: inicio_ruta, ridertrack, mate…);
+    // el bot la baja al momento del envío (firebase-admin pasa sobre
+    // las reglas). ⚠️ SIN este bloque el upload moría con «Missing or
+    // insufficient permissions» DESPUÉS de subir la foto, y la pestaña
+    // 🖼️ Imágenes del Control Bot salía VACÍA aunque todo lo demás
+    // funcionara (deny-all la bloqueaba desde siempre).
+    match /imagenes_bot/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // 🛒 FASE AL (v0.11.11): catálogo de productos (sección 🛍️
+    // Catálogo) — productos con foto, ofertas, destacados y estado.
+    // Denegado por el deny-all desde siempre: la sección salía vacía.
+    match /catalogo_productos/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // 🏪 FASE AL (v0.11.11): configuración de la tienda del Catálogo
+    // (configuracion/tienda_{uid}: lema, colores, redes) — el doc id
+    // lleva el uid del dueño pero se comparte entre los riders del
+    // negocio (mismo patrón que clientes_registrados).
+    match /configuracion/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // 👀 FASE AL (v0.11.11): presencia del chat — la app escribe
+    // presencia_watch/{uidBot} (qué conversación mirar) y LEE
+    // presencia_chat/{tel} para pintar «en línea…». El bot escribe
+    // presencia_chat con firebase-admin (no pasa por reglas).
+    match /presencia_watch/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    match /presencia_chat/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // REGLA DEFAULT — NEGAR TODO LO DEMÁS
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
     match /{document=**} {
       allow read, write: if false;
     }

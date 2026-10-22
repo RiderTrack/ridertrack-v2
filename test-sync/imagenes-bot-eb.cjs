@@ -32,50 +32,31 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // test-sync/stub-firebase-app.cjs
 var require_stub_firebase_app = __commonJS({
   "test-sync/stub-firebase-app.cjs"(exports2) {
-    var T = globalThis.__UPLOAD_T__ || (globalThis.__UPLOAD_T__ = {
-      uploadBytes: { modo: "ok", fallos: 0, delayMs: 0 },
-      getDownloadURL: { modo: "ok" },
-      __subidas: []
-      // qué FILES se mandaron a uploadBytes
-    });
-    T.__reset = function() {
-      T.uploadBytes = { modo: "ok", fallos: 0, delayMs: 0 };
-      T.getDownloadURL = { modo: "ok" };
-      T.__subidas.length = 0;
-    };
     exports2.db = { __stub: "db-ridertrack" };
     exports2.storage = { __stub: "storage-ridertrack" };
-    exports2.storageRef = (st, ruta) => ({ __ruta: ruta });
-    exports2.uploadBytes = async (ref, file, opts) => {
-      T.__subidas.push({ ruta: ref.__ruta, file, opts });
-      const c = T.uploadBytes;
-      if (c.delayMs) await new Promise((r) => setTimeout(r, c.delayMs));
-      if (c.modo === "ok") return {};
-      if (c.modo === "fallo-n") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        if (c.llamadas <= (c.fallos || 0)) throw new Error("network request failed (storage)");
-        return {};
-      }
-      if (c.modo === "nunca") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        return new Promise(() => {
-        });
-      }
-      if (c.modo === "permiso") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        throw new Error("storage/unauthorized");
-      }
-      throw new Error("modo uploadBytes desconocido: " + c.modo);
+    var UP = globalThis.__UPLOAD_T__ ||= {
+      uploadBytes: { modo: "ok", fallos: 0, delayMs: 0, llamadas: 0 },
+      getDownloadURL: { modo: "ok", llamadas: 0 },
+      __subidas: []
     };
-    exports2.getDownloadURL = async (ref) => {
-      const c = T.getDownloadURL;
+    exports2.storageRef = (storage2, ruta) => ({ __ruta: ruta });
+    exports2.uploadBytes = async (ref, file, opts) => {
+      UP.__subidas.push({ ruta: ref.__ruta, file, opts });
+      const c = UP.uploadBytes;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.delayMs) await new Promise((r) => setTimeout(r, c.delayMs));
+      if (c.modo === "fallo-n" && c.llamadas <= (c.fallos || 0)) throw new Error("network request failed");
       if (c.modo === "nunca") return new Promise(() => {
       });
-      if (c.modo === "fallo-n") {
-        c.llamadas = (c.llamadas || 0) + 1;
-        if (c.llamadas <= (c.fallos || 0)) throw new Error("network request failed (url)");
-      }
-      return "https://firebasestorage.test/v0/b/ridertest/o/" + encodeURIComponent(ref.__ruta || "x") + "?token=TOKEN-LARGO";
+      if (c.modo === "permiso") throw new Error("storage/unauthorized");
+      return { ref };
+    };
+    exports2.getDownloadURL = async (ref) => {
+      const c = UP.getDownloadURL;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.modo === "nunca") return new Promise(() => {
+      });
+      return "https://firebasestorage.test/o/" + encodeURIComponent(ref.__ruta) + "?token=stub";
     };
   }
 });
@@ -85,14 +66,12 @@ var require_stub_config_fx = __commonJS({
   "test-sync/stub-config-fx.cjs"(exports2, module2) {
     var T = globalThis.__CFG_T__ || (globalThis.__CFG_T__ = {
       getDoc: { modo: "ok", fallos: 0, data: {} },
-      cache: { modo: "vacio", data: {} },
-      setDoc: { modo: "ok", fallos: 0 }
+      setDoc: { modo: "ok", fallos: 0 },
+      // 🌤️ FASE AL: getDocFromCache configurable (default 'tira' = el
+      // comportamiento de siempre, memoria sin caché → respetado por los
+      // tests S1-S16 de la FASE AJ)
+      getDocFromCache: null
     });
-    T.__reset = function() {
-      T.getDoc = { modo: "ok", fallos: 0, data: {} };
-      T.cache = { modo: "vacio", data: {} };
-      T.setDoc = { modo: "ok", fallos: 0 };
-    };
     function anotar(map, clave) {
       map[clave] = (map[clave] || 0) + 1;
     }
@@ -106,12 +85,12 @@ var require_stub_config_fx = __commonJS({
       limit: () => null,
       onSnapshot: () => () => {
       },
-      getDocFromCache: async () => {
-        const c = T.cache || { modo: "vacio" };
-        if ((c.modo || "vacio") === "ok") {
-          return { exists: () => true, data: () => c.data };
-        }
-        throw new Error("unavailable: no entry in cache");
+      getDocFromCache: async (ref) => {
+        const c = T.getDocFromCache;
+        if (!c || c.modo === "tira") throw new Error("persistencia no habilitada (memory cache)");
+        if (c.modo === "ok") return { exists: () => true, data: () => c.data, metadata: { fromCache: true } };
+        if (c.modo === "vacio") return { exists: () => false, metadata: { fromCache: true } };
+        throw new Error("modo getDocFromCache desconocido: " + c.modo);
       },
       serverTimestamp: () => ({ __ts: "server" }),
       Timestamp: { now: () => ({ toDate: () => /* @__PURE__ */ new Date() }) },
@@ -119,15 +98,15 @@ var require_stub_config_fx = __commonJS({
         anotar(T.getDoc, "llamadas");
         const c = T.getDoc;
         if (c.modo === "ok") {
-          return { exists: () => true, data: () => c.data, metadata: { fromCache: !!c.fromCache } };
+          return { exists: () => true, data: () => c.data };
         }
         if (c.modo === "vacio") {
-          return { exists: () => false, data: () => void 0, metadata: { fromCache: false } };
+          return { exists: () => false, data: () => void 0 };
         }
         if (c.modo === "fallo-n") {
           const hechas = c.llamadas || 1;
           if (hechas <= (c.fallos || 0)) throw new Error("network request failed");
-          return { exists: () => true, data: () => c.data, metadata: { fromCache: !!c.fromCache } };
+          return { exists: () => true, data: () => c.data };
         }
         if (c.modo === "nunca") {
           return new Promise(() => {
@@ -329,11 +308,7 @@ async function subirImagenBot(uid, tipo, fileOriginal) {
     await conTope(
       (0, import_firebase.uploadBytes)(refImg, file, {
         contentType: mimetype,
-        customMetadata: {
-          uid,
-          tipo,
-          fase: "AK"
-        }
+        customMetadata: { uid, tipo, fase: "AK" }
       }),
       LIMITES_IMAGEN_BOT.topeMs,
       "sin-conexion"

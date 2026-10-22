@@ -67,6 +67,12 @@ function comprimirImagen(file: File): Promise<string> {
         ctx.drawImage(img, 0, 0, width, height);
         let base64 = canvas.toDataURL('image/jpeg', 0.8);
         if (base64.length > 900 * 1024) base64 = canvas.toDataURL('image/jpeg', 0.5);
+        // 🌤️ FASE AL: presupuesto intermedio — un QR de 111 KB hincha el
+        // doc de config_empresa a ~300 KB y el primer «Mi QR» con la caché
+        // fría tarda un mundo en bajar. A calidad 0.5 queda en la mitad y
+        // sigue perfectamente escaneable (WhatsApp lo recomprime igual
+        // al enviarlo). Con esto el doc vuelve a ~150 KB.
+        else if (base64.length > 160 * 1024) base64 = canvas.toDataURL('image/jpeg', 0.5);
         resolve(base64);
       };
       img.src = e.target?.result as string;

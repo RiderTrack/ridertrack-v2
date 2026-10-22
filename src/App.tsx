@@ -23,6 +23,8 @@ import { NewOrderModal } from './components/NewOrderModal';
 import { iniciarSyncDT } from './drivertrack/services/syncDT';
 // FASE C: 🏍️ lo que ganás en libre — tarjeta para Dashboard/Resumen
 import ResumenLibreCard from './components/ResumenLibreCard';
+// 🩺 FASE AK: red viva — la conexión zombi, nunca más
+import { instalarRedViva } from './services/redViva';
 import { ToastContainer, ToastMessage } from './components/Toast';
 // Fase 3.17: avisos globales de chat (campanita + toast flotante)
 import { AvisoChatToast } from './components/AvisoChatToast';
@@ -230,6 +232,16 @@ export default function App() {
   // En navegador/web es un no-op inofensivo (impl. web vacía).
   useEffect(() => {
     SplashScreen.hide({ fadeOutDuration: 250 }).catch(() => {/* web o ya oculto */});
+  }, []);
+
+  // 🩺 FASE AK: RED VIVA — al reabrir la app (tras 15 s escondida) o
+  // al volver la señal, se CORTA la conexión zombi que Android dejó
+  // muerta-en-vida y se abre una fresca: lo pendiente sale en segundos
+  // en vez de esperar el reloj interno de la red (~10-15 min). Debounce
+  // de 15 s dentro del propio servicio para no sacudir la red.
+  useEffect(() => {
+    const limpiar = instalarRedViva();
+    return limpiar;
   }, []);
 
   // 🚀 FASE AB-2: precarga en la sombra — 1.2 s después del primer

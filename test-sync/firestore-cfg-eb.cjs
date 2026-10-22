@@ -34,6 +34,30 @@ var require_stub_firebase_app = __commonJS({
   "test-sync/stub-firebase-app.cjs"(exports2) {
     exports2.db = { __stub: "db-ridertrack" };
     exports2.storage = { __stub: "storage-ridertrack" };
+    var UP = globalThis.__UPLOAD_T__ ||= {
+      uploadBytes: { modo: "ok", fallos: 0, delayMs: 0, llamadas: 0 },
+      getDownloadURL: { modo: "ok", llamadas: 0 },
+      __subidas: []
+    };
+    exports2.storageRef = (storage2, ruta) => ({ __ruta: ruta });
+    exports2.uploadBytes = async (ref, file, opts) => {
+      UP.__subidas.push({ ruta: ref.__ruta, file, opts });
+      const c = UP.uploadBytes;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.delayMs) await new Promise((r) => setTimeout(r, c.delayMs));
+      if (c.modo === "fallo-n" && c.llamadas <= (c.fallos || 0)) throw new Error("network request failed");
+      if (c.modo === "nunca") return new Promise(() => {
+      });
+      if (c.modo === "permiso") throw new Error("storage/unauthorized");
+      return { ref };
+    };
+    exports2.getDownloadURL = async (ref) => {
+      const c = UP.getDownloadURL;
+      c.llamadas = (c.llamadas || 0) + 1;
+      if (c.modo === "nunca") return new Promise(() => {
+      });
+      return "https://firebasestorage.test/o/" + encodeURIComponent(ref.__ruta) + "?token=stub";
+    };
   }
 });
 
@@ -42,7 +66,11 @@ var require_stub_config_fx = __commonJS({
   "test-sync/stub-config-fx.cjs"(exports2, module2) {
     var T = globalThis.__CFG_T__ || (globalThis.__CFG_T__ = {
       getDoc: { modo: "ok", fallos: 0, data: {} },
-      setDoc: { modo: "ok", fallos: 0 }
+      setDoc: { modo: "ok", fallos: 0 },
+      // 🌤️ FASE AL: getDocFromCache configurable (default 'tira' = el
+      // comportamiento de siempre, memoria sin caché → respetado por los
+      // tests S1-S16 de la FASE AJ)
+      getDocFromCache: null
     });
     function anotar(map, clave) {
       map[clave] = (map[clave] || 0) + 1;
@@ -57,8 +85,12 @@ var require_stub_config_fx = __commonJS({
       limit: () => null,
       onSnapshot: () => () => {
       },
-      getDocFromCache: async () => {
-        throw new Error("persistencia no habilitada (memory cache)");
+      getDocFromCache: async (ref) => {
+        const c = T.getDocFromCache;
+        if (!c || c.modo === "tira") throw new Error("persistencia no habilitada (memory cache)");
+        if (c.modo === "ok") return { exists: () => true, data: () => c.data, metadata: { fromCache: true } };
+        if (c.modo === "vacio") return { exists: () => false, metadata: { fromCache: true } };
+        throw new Error("modo getDocFromCache desconocido: " + c.modo);
       },
       serverTimestamp: () => ({ __ts: "server" }),
       Timestamp: { now: () => ({ toDate: () => /* @__PURE__ */ new Date() }) },
@@ -1098,7 +1130,11 @@ var LIMITES_CONFIG = {
   /** tope por intento de red (el doc pesa ~300KB) */
   timeoutMs: 3e4,
   /** espera entre el 1er intento fallido y el reintento */
-  reintentoMs: 2e3
+  reintentoMs: 2e3,
+  /** 🌤️ FASE AL: tope del refresco en segundo plano tras leer de
+   * la caché — si el servidor no contesta a tiempo, la caché gana
+   * y no pasa nada (la próxima apertura vuelve a intentar). */
+  frescuraMs: 8e3
 };
 var estadoCargaConfig = {
   fuente: "servidor",
@@ -1136,6 +1172,35 @@ function fusionarConfig(data) {
     apariencia: { ...CONFIG_CUENTAS_DEFAULT.apariencia, ...data?.apariencia }
   };
 }
+function tiempoDe(v) {
+  try {
+    if (!v) return 0;
+    if (typeof v?.toDate === "function") return v.toDate().getTime();
+    if (v instanceof Date) return v.getTime();
+    const t = new Date(String(v)).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  } catch {
+    return 0;
+  }
+}
+function refrescarConfigEnSegundoPlano(ref, configCache) {
+  try {
+    (0, import_firestore.getDoc)(ref).then((snap) => {
+      if (!snap || !snap.exists()) return;
+      const nueva = fusionarConfig(snap.data());
+      if (tiempoDe(nueva?.actualizadoEn) > tiempoDe(configCache?.actualizadoEn)) {
+        estadoCargaConfig.fuente = "servidor";
+        estadoCargaConfig.error = "";
+        try {
+          window.dispatchEvent(new CustomEvent("config-empresa:refrescada", { detail: nueva }));
+        } catch {
+        }
+      }
+    }).catch(() => {
+    });
+  } catch {
+  }
+}
 async function cargarConfigCuentas(userId) {
   if (!import_firebase.db || !userId) return CONFIG_CUENTAS_DEFAULT;
   const ref = (0, import_firestore.doc)(import_firebase.db, "config_empresa", userId);
@@ -1143,7 +1208,9 @@ async function cargarConfigCuentas(userId) {
     const snapCache = await (0, import_firestore.getDocFromCache)(ref);
     if (snapCache.exists()) {
       estadoCargaConfig.fuente = "cache";
-      return fusionarConfig(snapCache.data());
+      const configCache = fusionarConfig(snapCache.data());
+      refrescarConfigEnSegundoPlano(ref, configCache);
+      return configCache;
     }
   } catch {
   }

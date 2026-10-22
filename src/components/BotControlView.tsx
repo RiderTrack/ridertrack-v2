@@ -40,6 +40,7 @@ import {
   ImagePlus,
   RotateCcw,
   CheckCircle2,
+  WifiOff,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -148,6 +149,10 @@ const EDITOR_VACIO: EditorState = {
 
 const PlantillasTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
   const [plantillas, setPlantillas] = useState<PlantillaMensaje[]>([]);
+  // 🩺 FASE AK (recuperada): estado honesto — antes el vacío mudo
+  // decía «Sin plantillas» aunque fuera la red trabada
+  const [estadoPlantillas, setEstadoPlantillas] = useState<'cargando' | 'listo' | 'error'>('cargando');
+  const [noncePlantillas, setNoncePlantillas] = useState(0);
   const [busqueda, setBusqueda] = useState('');
   const [filtroCat, setFiltroCat] = useState('todas');
   const [editor, setEditor] = useState<EditorState>(EDITOR_VACIO);
@@ -163,11 +168,16 @@ const PlantillasTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
 
   // ── Suscripciones ──
   useEffect(() => {
-    const un1 = escucharPlantillas(
-      (lista) => {
+    let un1: () => void = () => undefined;
+    un1 = escucharPlantillas(
+      (lista, info) => {
         setPlantillas(lista);
+        setEstadoPlantillas('listo');
         // v1: si la colección está vacía → crear las 6 base (el bot las conoce)
-        if (lista.length === 0 && !creoPredefinidas.current) {
+        // 🌱 FASE AL: SOLO cuando el SERVIDOR la confirma vacía — el primer
+        // snapshot de la caché fría llega «vacío» aunque tengas 24 plantillas
+        // reales, y sembrar ahí clonaba las base de fábrica (bug del 21-oct).
+        if (lista.length === 0 && info?.fromCache !== true && !creoPredefinidas.current) {
           creoPredefinidas.current = true;
           crearPlantillasPredefinidas()
             .then((n) => {
@@ -176,7 +186,10 @@ const PlantillasTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
             .catch((e) => onShowToast('Plantillas base', e.message, 'warning'));
         }
       },
-      (e) => onShowToast('Plantillas', e.message, 'warning')
+      (e) => {
+        setEstadoPlantillas('error');
+        onShowToast('Plantillas', e.message, 'warning');
+      }
     );
     const un2 = escucharPuente(
       (p) => setPuente(p),
@@ -187,7 +200,7 @@ const PlantillasTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
       un2();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [noncePlantillas]);
 
   // ── Reloj del modo bucle (countdown) ──
   const bucleActivo = puente.accion === 'loop' && !!puente.expiraEn && puente.expiraEn > ahora;
@@ -334,6 +347,38 @@ const PlantillasTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
 
   return (
     <div className="space-y-4">
+      {/* 🩺 FASE AK: honesto mientras baja / si falla — nunca más un
+          «Sin plantillas» mudo cuando la red anda trabada */}
+      {estadoPlantillas === 'cargando' && (
+        <Card data-testid="plantillas-cargando">
+          <div className="flex items-center gap-2.5 text-xs text-slate-400 mb-3">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Bajando tus plantillas de la nube…
+          </div>
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-9 rounded-lg bg-slate-800/60 animate-pulse" />
+            ))}
+          </div>
+        </Card>
+      )}
+      {estadoPlantillas === 'error' && (
+        <Card data-testid="plantillas-error" className="!border-amber-500/40 !bg-amber-500/10">
+          <div className="flex items-center gap-3">
+            <WifiOff className="w-5 h-5 text-amber-400 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-amber-200">No pude bajar tus plantillas</p>
+              <p className="text-[11px] text-amber-300/70">La señal anda floja o el bot no contesta. Tus plantillas siguen a salvo en la nube.</p>
+            </div>
+            <button
+              data-testid="plantillas-reintentar"
+              onClick={() => { setEstadoPlantillas('cargando'); setNoncePlantillas((n) => n + 1); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors flex-shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+            </button>
+          </div>
+        </Card>
+      )}
       {/* ── Barra de sincronización con el bot ── */}
       <Card className="!p-3.5">
         <div className="space-y-2.5">
@@ -1061,8 +1106,14 @@ const ImagenesBotTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => 
     }
     setSubiendo(tipo);
     try {
-      await subirImagenBot(user.uid, tipo, file);
-      onShowToast('Imagen actualizada', 'El bot la usará en segundos, sin reiniciar nada', 'success');
+      // 🩺 FASE AK/AL: el servicio devuelve el peso REAL subido — el
+      // toast te dice qué llegó al servidor (y si la comprimió al vuelo)
+      const res = await subirImagenBot(user.uid, tipo, file);
+      onShowToast(
+        'Imagen actualizada',
+        `Subieron ${res.pesoKb} KB${res.comprimida ? ' (comprimida al vuelo)' : ''} — el bot la usará en segundos, sin reiniciar nada`,
+        'success'
+      );
     } catch (e) {
       onShowToast('No se pudo subir', (e as Error).message, 'error');
     } finally {
