@@ -216,7 +216,7 @@ function purgarCola(cola, hoy, hoyLista) {
   });
   return { vivos, expirados, resueltos };
 }
-function migrarFallidos(ultima, cola) {
+function migrarFallidos(ultima, cola, hoyLista = [], hoy = "") {
   if (!ultima || !(ultima.noEntregados || []).length) return cola || [];
   let refresco = false;
   const out = (cola || []).map((item) => {
@@ -232,9 +232,10 @@ function migrarFallidos(ultima, cola) {
     }
     return item;
   });
+  const ultimaExpirada = !!(hoy && ultima.fecha && hoy > sumaDiasISO(ultima.fecha, EXPIRA_DIAS));
   const yaEstan = (c) => out.some((e) => e && e.cliente && coinciden(e.cliente, c));
-  const faltantes = (ultima.noEntregados || []).filter(
-    (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c)
+  const faltantes = ultimaExpirada ? [] : (ultima.noEntregados || []).filter(
+    (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c) && !estaEnLista(c, hoyLista)
   );
   if (!faltantes.length && !refresco) return cola || [];
   return [

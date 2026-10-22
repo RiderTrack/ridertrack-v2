@@ -418,10 +418,31 @@ export function purgarCola(
  * esta ruta cerrada se les REFRESCA la fecha — el badge dice
  * "fallido del [ÚLTIMO fallo]", no el primero. (El ✕ los
  * respeta: descartarDeCola también los saca de ultimaCerrada.)
+ *
+ * 🚨 AM (22-oct): HAY DOS EXCLUSIONES NUEVAS, y no son capricho —
+ * son las que ROMPEN el péndulo infinito. Sin ellas, el efecto de
+ * auto-cuidado de useClientes hacía ESTO en cada ciclo:
+ *   migración AGREGA al fallido → purga lo SACA (porque ya volvió
+ *   en la lista de hoy, o porque ya expiró) → escritura → snapshot
+ *   → la migración lo VUELVE A AGREGAR (ultimaCerrada lo recuerda
+ *   para siempre) → purga lo vuelve a sacar → … ESCRITURA INFINITA
+ *   contra usuarios/{uid} — la tormenta del 21/22-oct que dejó
+ *   "cargando" a Mi Ruta / Resumen / Seguimiento, enloqueció a Mi QR
+ *   (300KB compitiendo con la tormenta) y le comió la red al bot de
+ *   Termux (mensajes lentos y sin imagen). La regla de oro:
+ *   NUNCA migrar a alguien que la purga va a echar de vuelta.
+ *     (a) ya volvió HOY (está en la lista del día) → está resuelto,
+ *         a la listita no va;
+ *     (b) la última cerrada ya pasó del vencimiento (5 días) →
+ *         migrarlo sería para que la purga lo expire al instante.
+ * Los DOS parámetros son opcionales para no romper a los tests
+ * viejos: sin ellos, el comportamiento es el de siempre.
  */
 export function migrarFallidos(
   ultima: UltimaCerrada | null,
-  cola: Reprogramado[]
+  cola: Reprogramado[],
+  hoyLista: Cliente[] = [],
+  hoy: string = ''
 ): Reprogramado[] {
   if (!ultima || !(ultima.noEntregados || []).length) return cola || [];
   // 1) REFRESCAR la fecha de los fallidos que ya viven en la
@@ -440,12 +461,26 @@ export function migrarFallidos(
     }
     return item;
   });
-  // 2) AGREGAR los fallidos que aún no viven en la listita
+  // 2) AGREGAR los fallidos que aún no viven en la listita —
+  //    🚨 AM: salvo los que la purga echaría de vuelta:
+  //    (a) los que YA volvieron en la lista de HOY (el Excel los
+  //        trajo otra vez — están en la ruta, nada que recordar), y
+  //    (b) TODOS, si la última cerrada ya pasó de los 5 días (la
+  //        purga los expiraría al instante).
+  const ultimaExpirada =
+    !!(hoy && ultima.fecha && hoy > sumaDiasISO(ultima.fecha, EXPIRA_DIAS));
   const yaEstan = (c: Cliente) =>
     out.some((e) => e && e.cliente && coinciden(e.cliente, c));
-  const faltantes = (ultima.noEntregados || []).filter(
-    (c) => c && normalizar(c.nombre) && esFallido(c.st) && !yaEstan(c)
-  );
+  const faltantes = ultimaExpirada
+    ? []
+    : (ultima.noEntregados || []).filter(
+        (c) =>
+          c &&
+          normalizar(c.nombre) &&
+          esFallido(c.st) &&
+          !yaEstan(c) &&
+          !estaEnLista(c, hoyLista)
+      );
   if (!faltantes.length && !refresco) return cola || [];
   return [
     ...out,

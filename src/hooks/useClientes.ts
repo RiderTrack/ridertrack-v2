@@ -331,7 +331,14 @@ export function useClientes() {
     if (reprogramados.length === 0 && !ultimaCerrada) return;
     try {
       // 1) fallidos de la última cerrada → listita
-      const migrada = migrarFallidos(ultimaCerrada, reprogramados);
+      //    🚨 AM: se le pasa TAMBIÉN la lista de hoy y la fecha — sin
+      //    eso, un fallido que ya volvió en el Excel de hoy entraba a
+      //    la listita (migración) y salía al toque (purga de
+      //    "resueltos") EN CADA SNAPSHOT → escritura infinita contra
+      //    usuarios/{uid} que dejaba "cargando" a Mi Ruta / Resumen /
+      //    Seguimiento y le comía la red al bot. La migración ahora
+      //    no resucita a los que la purga va a echar de vuelta.
+      const migrada = migrarFallidos(ultimaCerrada, reprogramados, clientes, hoyISOLocal());
       // 2) resueltos y expirados → fuera
       const { vivos } = purgarCola(migrada, hoyISOLocal(), clientes);
       if (migrada !== reprogramados || vivos.length !== migrada.length) {

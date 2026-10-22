@@ -38,6 +38,7 @@ import { Capacitor } from '@capacitor/core';
 import { ConfigCuentasModal } from './ConfigCuentasModal';
 import { WhatsAppApiModal } from './WhatsAppApiModal';
 import { useAuth } from '../hooks/useAuth';
+import { useConfig } from '../hooks/useConfig';
 import { cerrarSesion } from '../services/firebase';
 import {
   cargarConfigCuentas,
@@ -45,6 +46,7 @@ import {
   ConfigCuentas,
   subscribeEstadoBot,
   probarBot,
+  probarImagenBot,
   EstadoBot,
 } from '../services/firestore';
 import {
@@ -93,6 +95,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
   const [estadoBot, setEstadoBot] = useState<EstadoBot | null>(null);
   const [tickReloj, setTickReloj] = useState(0); // recomponer "hace Xs" sin re-abrir
   const [probandoBot, setProbandoBot] = useState(false);
+  // 🖼️ AM v0.11.12: prueba de IMAGEN del bot (el QR que la app adjunta)
+  const [probandoImagen, setProbandoImagen] = useState(false);
+  const { config } = useConfig();
 
   // ── Mapas y Rutas (Fase 1.3) ──
   const [mapasAbierto, setMapasAbierto] = useState(false);
@@ -233,6 +238,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
       onShowToast?.('❌ No se pudo encolar', e?.message || 'Revisa tu conexión', 'error');
     } finally {
       setProbandoBot(false);
+    }
+  };
+
+  // 🖼️ AM v0.11.12: prueba de IMAGEN — manda tu propio QR de Yape del
+  // trabajo a tu WhatsApp. Si llega con imagen, la pelea terminó. Si
+  // no, el cartel del bot acá abajo va a decir el MOTIVO exacto.
+  const manejarProbarImagen = async () => {
+    if (!user?.uid || probandoImagen) return;
+    const qrImg = (config?.yape?.qrBase64 || '').trim() || (config?.plin?.qrBase64 || '').trim();
+    const esYape = !!(config?.yape?.qrBase64 || '').trim();
+    if (!qrImg) {
+      onShowToast?.(
+        'Sin QR cargado',
+        'Primero subí tu QR en Mi QR Yape/Plin — la prueba manda ESE QR',
+        'warning'
+      );
+      return;
+    }
+    setProbandoImagen(true);
+    try {
+      await probarImagenBot(
+        user.uid,
+        qrImg,
+        (esYape ? config?.yape?.telefono : config?.plin?.telefono) || '',
+        (esYape ? config?.yape?.nombre : config?.plin?.nombre) || ''
+      );
+      onShowToast?.(
+        '🖼️ Prueba de imagen en camino',
+        botVivo
+          ? 'El bot te manda tu QR a tu WhatsApp con reintentos reforzados — el resultado aparece acá en unos segundos'
+          : 'Quedó en la cola — pero el bot parece CAÍDO: no la va a mandar hasta que lo reinicies',
+        botVivo ? 'success' : 'warning'
+      );
+    } catch (e: any) {
+      onShowToast?.('❌ No se pudo encolar', e?.message || 'Revisa tu conexión', 'error');
+    } finally {
+      setProbandoImagen(false);
     }
   };
 
@@ -548,6 +590,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
             </div>
           )}
 
+          {/* 🖼️ AM v0.11.12: resultado de la prueba de imagen + último error
+              de subida de media del bot — la pelea "texto llega, imagen no"
+              deja de ser adivinanza: acá dice QUÉ pasó y cuándo */}
+          {estadoBot?.pruebaImagen && (
+            <div
+              data-testid="bot-prueba-imagen"
+              className={`mt-2 rounded-xl px-3 py-2 text-[11px] leading-snug border ${
+                estadoBot.pruebaImagen.resultado === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                  : 'bg-red-500/10 border-red-500/40 text-red-300'
+              }`}
+            >
+              {estadoBot.pruebaImagen.resultado === 'ok'
+                ? '🖼️ Prueba de imagen: 🟢 SALIÓ — tu WhatsApp tiene que tener el QR. Si un cliente no lo recibe, decime cuál.'
+                : `🖼️ Prueba de imagen: 🔴 falló — ${estadoBot.pruebaImagen.motivo || 'sin motivo'}`}
+            </div>
+          )}
+          {estadoBot?.mediaUltimoError ? (
+            <div data-testid="bot-media-error" className="mt-2 rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2 text-[11px] text-amber-300 leading-snug">
+              ⚠️ <b>Última imagen que no salió:</b> {estadoBot.mediaUltimoError}. Los mensajes de texto sí salen — es la subida de fotos de WhatsApp (media). Reintentá con 🖼️ Probar imagen; si sigue, tocá re-vincular el bot (borrar la sesión de Termux y re-escanear).
+            </div>
+          ) : estadoBot ? (
+            <div className="mt-2 rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-[11px] text-slate-400 leading-snug">
+              🖼️ Imágenes: sin errores registrados — los QR salen con su imagen.
+            </div>
+          ) : null}
+
           <div className="mt-3 flex flex-col sm:flex-row gap-2">
             <button
               data-testid="btn-probar-bot"
@@ -556,6 +625,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
               className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
             >
               {probandoBot ? <Loader2 className="w-4 h-4 animate-spin" /> : '🧪'} Probar el bot
+            </button>
+            <button
+              data-testid="btn-probar-imagen"
+              onClick={manejarProbarImagen}
+              disabled={probandoImagen}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-60 text-white font-bold text-xs shadow-lg shadow-violet-600/30 transition-all active:scale-95"
+            >
+              {probandoImagen ? <Loader2 className="w-4 h-4 animate-spin" /> : '🖼️'} Probar imagen
             </button>
             {!estadoBot && (
               <div data-testid="bot-pasos" className="flex-1 text-[11px] text-slate-400 leading-relaxed px-1 py-1.5 min-w-0">

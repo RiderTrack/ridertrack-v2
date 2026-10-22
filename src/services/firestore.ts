@@ -1640,6 +1640,12 @@ export async function encolarAccionBot(
     enviar_imagen?: boolean;
     modo_entrega?: string;
     minutos?: number; // F-L: 🚀 "Estoy yendo en X min" desde Seguimiento de ruta
+    // 🖼️ AM v0.11.12: la imagen VIAJA en la acción — el QR de Yape/Plin
+    // para enviar_yape/enviar_plin, o el de la prueba 🖼️. El bot v3.4 la
+    // usa al toque (sin leer ruta_activa) y la BORRA del doc tras mandarla.
+    imagenBase64?: string;
+    numero?: string;
+    titular?: string;
   }
 ): Promise<void> {
   if (!db || !userId) return;
@@ -1687,6 +1693,14 @@ export interface EstadoBot {
   // 🌡️ v0.11.8: modo calentamiento del bot (si true, el bot NO manda
   // mensajes a clientes — la tarjeta lo AVISA en vez de sufrirlo)
   calentamiento: boolean;
+  // 🖼️ AM v0.11.12: el ÚLTIMO error de subida de imagen del bot
+  // (Baileys 'media upload' — el clásico texto llega / imagen no).
+  // Vacío = la última imagen salió bien. Lo escribe el bot v3.4 en
+  // el latido; la app lo muestra en el cartel del bot.
+  mediaUltimoError: string;
+  // 🖼️ AM v0.11.12: resultado de la última «🖼️ Probar imagen» —
+  // { resultado: 'ok' | 'error', motivo, cuando }
+  pruebaImagen: { resultado: string; motivo: string; cuando: string } | null;
 }
 
 /**
@@ -1716,6 +1730,16 @@ export function subscribeEstadoBot(
           // v0.11.8: ausentes en bots v3.0 → false (defaults sanos)
           dtParche: d.dtParche === true,
           calentamiento: d.calentamiento === true,
+          // 🖼️ AM v0.11.12: diagnóstico de imágenes del bot (v3.4)
+          mediaUltimoError: typeof d.mediaUltimoError === 'string' ? d.mediaUltimoError : '',
+          pruebaImagen:
+            d.pruebaImagen && typeof d.pruebaImagen === 'object'
+              ? {
+                  resultado: String((d.pruebaImagen as any).resultado || ''),
+                  motivo: String((d.pruebaImagen as any).motivo || ''),
+                  cuando: String((d.pruebaImagen as any).cuando || ''),
+                }
+              : null,
         });
       },
       () => { cb(null); }
@@ -1738,6 +1762,32 @@ export async function probarBot(userId: string): Promise<void> {
     clienteId: 'prueba',
     telefono: '',
     nombre: 'Rudy',
+  });
+}
+
+/**
+ * 🖼️ AM v0.11.12: "Probar imagen" — igual que probarBot pero con la
+ * IMAGEN adjunta. El bot v3.4 le manda a tu propio WhatsApp el QR que
+ * le pases (el de Yape del trabajo por defecto) con reintento reforzado,
+ * y el resultado (ok + el motivo EXACTO del error si falla) queda en
+ * estado_bot.pruebaImagen para que lo veas en el cartel del bot sin
+ * mirar logs. Así la pelea de "mensajes sin imagen" deja de ser
+ * adivinanza: la app te dice QUÉ pasó.
+ */
+export async function probarImagenBot(
+  userId: string,
+  imagenBase64: string,
+  numero = '',
+  titular = ''
+): Promise<void> {
+  await encolarAccionBot(userId, {
+    tipo: 'probar_imagen',
+    clienteId: 'prueba-imagen',
+    telefono: '',
+    nombre: 'Rudy',
+    imagenBase64,
+    numero,
+    titular,
   });
 }
 

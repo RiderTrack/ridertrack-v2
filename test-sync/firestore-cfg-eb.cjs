@@ -210,6 +210,7 @@ __export(firestore_exports, {
   obtenerPlinDelBot: () => obtenerPlinDelBot,
   obtenerYapeDelBot: () => obtenerYapeDelBot,
   probarBot: () => probarBot,
+  probarImagenBot: () => probarImagenBot,
   publicarClientesEnRutaActiva: () => publicarClientesEnRutaActiva,
   publicarPosicionRider: () => publicarPosicionRider,
   publicarRutaActiva: () => publicarRutaActiva,
@@ -1461,7 +1462,14 @@ function subscribeEstadoBot(userId, cb) {
           procesando: typeof d.procesando === "string" ? d.procesando : "",
           // v0.11.8: ausentes en bots v3.0 → false (defaults sanos)
           dtParche: d.dtParche === true,
-          calentamiento: d.calentamiento === true
+          calentamiento: d.calentamiento === true,
+          // 🖼️ AM v0.11.12: diagnóstico de imágenes del bot (v3.4)
+          mediaUltimoError: typeof d.mediaUltimoError === "string" ? d.mediaUltimoError : "",
+          pruebaImagen: d.pruebaImagen && typeof d.pruebaImagen === "object" ? {
+            resultado: String(d.pruebaImagen.resultado || ""),
+            motivo: String(d.pruebaImagen.motivo || ""),
+            cuando: String(d.pruebaImagen.cuando || "")
+          } : null
         });
       },
       () => {
@@ -1480,6 +1488,17 @@ async function probarBot(userId) {
     clienteId: "prueba",
     telefono: "",
     nombre: "Rudy"
+  });
+}
+async function probarImagenBot(userId, imagenBase64, numero = "", titular = "") {
+  await encolarAccionBot(userId, {
+    tipo: "probar_imagen",
+    clienteId: "prueba-imagen",
+    telefono: "",
+    nombre: "Rudy",
+    imagenBase64,
+    numero,
+    titular
   });
 }
 function calcularEstadisticas(clientes) {
@@ -2083,6 +2102,7 @@ async function guardarAutoBackupVivo(userId, clientes) {
   obtenerPlinDelBot,
   obtenerYapeDelBot,
   probarBot,
+  probarImagenBot,
   publicarClientesEnRutaActiva,
   publicarPosicionRider,
   publicarRutaActiva,

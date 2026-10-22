@@ -786,6 +786,25 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
       return;
     }
 
+    // 🖼️ AM (22-oct): el QR VIAJA EN LA PROPIA ACCIÓN. Antes el bot
+    // tenía que leer ruta_activa (un doc de ~200KB con tu QR adentro)
+    // para conseguir la imagen — en red débil esa lectura fallaba y el
+    // cliente recibía el mensaje SIN su QR, sin que nadie supiera por
+    // qué. Ahora la app le adjunta la imagen que YA tiene en memoria
+    // (config_empresa, la misma que ves en «Mi QR»): cero lecturas
+    // extra, y el bot v3.4 la usa al toque. Si el bot es viejo la
+    // ignora y sigue leyendo ruta_activa como siempre (compatible).
+    let extraFinal = extra;
+    if (tipo === 'enviar_yape' || tipo === 'enviar_plin') {
+      const esYape = tipo === 'enviar_yape';
+      const qrImg = esYape ? yapeQR : plinQR;
+      const qrNum = esYape ? yapeNum : plinNum;
+      const qrTit = esYape ? yapeTit : plinTit;
+      if (qrImg) {
+        extraFinal = { ...(extra || {}), imagenBase64: qrImg, numero: qrNum, titular: qrTit };
+      }
+    }
+
     try {
       await encolarAccionBot(user.uid, {
         tipo: tipo,
@@ -802,7 +821,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
           telefono: profile?.email || '',
           empresa: 'MATE',
         },
-        ...extra,
+        ...extraFinal,
       });
       // 🙏 F3.44/F3.46: si acabas de mandar el gracias a mano, (1) el
       // disparo automático se calla 5 min (anti doble inmediato) y
