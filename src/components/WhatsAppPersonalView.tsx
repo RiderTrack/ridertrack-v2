@@ -338,6 +338,9 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
   const [menuRapidos, setMenuRapidos] = useState(false);
   const [verEventos, setVerEventos] = useState(false);
   const [qrModal, setQrModal] = useState(false);
+  // 🆕 FASE AN (v0.11.13): reloj de 1s SOLO mientras el modal de QR está
+  // abierto — el badge de frescura necesita saber "ahora" cada segundo.
+  const [qrAhora, setQrAhora] = useState(Date.now());
   const [lightbox, setLightbox] = useState<{ src: string; nombre: string; esVideo: boolean } | null>(null);
   const [confirmBorrar, setConfirmBorrar] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -376,6 +379,21 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
     const subRapidas = suscribirRapidasPersonal(setRapidas);
     return () => { sub.cancelar(); subEstado.cancelar(); subRapidas.cancelar(); };
   }, []);
+
+  // 🆕 FASE AN (v0.11.13): el QR de vinculación VENCE (~60s) y el bot saca
+  // uno nuevo cada ~20s. Mientras el modal está abierto, este reloj avanza
+  // 1s/1s y el badge dice si el QR en pantalla es fresco, envejece o ya
+  // venció — escanear uno vencido es el «Intentalo otra vez» de WhatsApp.
+  useEffect(() => {
+    if (!qrModal) return;
+    setQrAhora(Date.now());
+    const t = setInterval(() => setQrAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [qrModal]);
+
+  // 🆕 FASE AN: edad del QR en segundos + ¿el bot dejó de latir? (latido cada 90s)
+  const qrEdadSeg = estado?.qrAt ? Math.floor((qrAhora - estado.qrAt) / 1000) : null;
+  const botSilencioso = !!estado?.latidoAt && qrAhora - estado.latidoAt > 4 * 60 * 1000;
 
   // ── Conversación activa + abrir chat ───────────────────
   const convActiva = useMemo(
@@ -1472,8 +1490,40 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
               </div>
             ) : estado?.qrTexto ? (
               <div className="space-y-3">
-                <div className="bg-white rounded-xl p-3 flex justify-center">
+                <div className="bg-white rounded-xl p-3 flex justify-center relative">
                   <QRCode value={estado.qrTexto} size={230} />
+                  {/* 🆕 FASE AN: si venció, se TAPA — no se escanea un QR muerto */}
+                  {qrEdadSeg !== null && qrEdadSeg > 60 && (
+                    <div className="absolute inset-0 rounded-xl bg-slate-950/70 flex flex-col items-center justify-center text-center px-4 gap-1">
+                      <Clock size={26} className="text-amber-300" />
+                      <div className="text-xs font-black text-white">Este QR ya venció</div>
+                      <div className="text-[10px] text-slate-300">el próximo llega solo en segundos</div>
+                    </div>
+                  )}
+                </div>
+                {/* 🆕 FASE AN: badge de frescura del QR */}
+                <div className="flex justify-center">
+                  {botSilencioso ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[11px] font-bold" data-testid="qr-bot-caido">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                      El bot no late hace varios minutos — revisá pm2
+                    </span>
+                  ) : qrEdadSeg === null ? null : qrEdadSeg <= 30 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold" data-testid="qr-fresco">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      QR nuevo — escanealo ahora ({qrEdadSeg}s)
+                    </span>
+                  ) : qrEdadSeg <= 60 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-bold" data-testid="qr-envejeciendo">
+                      <Clock size={11} />
+                      Envejeciendo ({qrEdadSeg}s) — si no pasa, esperá al próximo
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[11px] font-bold" data-testid="qr-vencido">
+                      <Clock size={11} />
+                      Venció hace {qrEdadSeg - 60}s — esperá al próximo
+                    </span>
+                  )}
                 </div>
                 <ol className="text-xs text-slate-300 space-y-1.5 list-decimal list-inside">
                   <li>Abrí WhatsApp en tu <b>celular 2</b></li>
@@ -1481,13 +1531,13 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
                   <li>En tu celular 1 borrá la vinculación vieja de «RiderTrack Panel» si aparece</li>
                   <li>En el celular 2: <b>Vincular un dispositivo</b> → escaneá este QR</li>
                 </ol>
-                <div className="text-[10px] text-slate-500 text-center">Si el QR no pasa: esperá 30s (se renueva solo) y volvé a escanear.</div>
+                <div className="text-[10px] text-slate-500 text-center">El QR se renueva solo cada ~20s — escaneá solo el que está 🟢 fresco.</div>
               </div>
             ) : (
               <div className="text-center py-6 space-y-2">
                 <Loader2 size={24} className="animate-spin text-emerald-300 mx-auto" />
                 <div className="text-sm font-bold text-white">Generando QR…</div>
-                <div className="text-xs text-slate-400">El bot del celular 2 está armando el código. Si no aparece en 1 min, revisá que pm2 esté corriendo.</div>
+                <div className="text-xs text-slate-400">El bot está armando el código. Si no aparece en 1 min, revisá que pm2 esté corriendo.</div>
               </div>
             )}
           </div>
