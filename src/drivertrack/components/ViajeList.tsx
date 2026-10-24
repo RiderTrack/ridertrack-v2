@@ -17,7 +17,7 @@
 // F-ID5: el 💬 pasa por el flujo compartido de cobro — con el robot
 // activo manda el mensaje CON tu QR solo (🤖); si no, WhatsApp manual.
 import { useEffect, useState } from 'react';
-import { Camera, CheckCircle2, Phone, QrCode, Route, Trash2 } from 'lucide-react';
+import { Camera, CheckCircle2, Pencil, Phone, QrCode, Route, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
 import { MetodoCobro, fmtSoles, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
@@ -39,6 +39,13 @@ import RobotMenu from './RobotMenu';
 // que abre tu QR personal con la TARIFA a la vista (lo que el
 // cliente paga) — para mostrarle la pantalla y que escanee.
 import QrViajeModal from './QrViajeModal';
+// ✏️ EDITAR VIAJE (pedido de Rudy): "a veces el teléfono que puse es
+// el del que ENVÍA, pero el mensaje de inDrive me manda OTRO número
+// al que tengo que comunicarme" → el viaje ya cargado se corrige
+// sin borrarlo: teléfonos (cliente/envía/recibe), direcciones A/B,
+// tarifa, notas… El modal vive acá como los otros 5 de la tarjeta
+// (mismo patrón); el shell aporta la función de guardado (onEditar).
+import EditarViajeModal from './EditarViajeModal';
 
 // FASE E: 📋 copiar dirección con respaldo (WebView de Android sin
 // clipboard API — el textarea viejo nunca falla)
@@ -108,6 +115,10 @@ interface Props {
   onGuardarFoto?: (id: string, dataUrl: string) => void;
   /** FASE H: toasts del shell para el modal de la foto */
   onToast?: (msg: string) => void;
+  /** ✏️ Editar viaje ya cargado — corrige teléfonos/direcciones/
+   *  tarifa/notas SIN borrar. El shell aplica el cambio al estado
+   *  (y viaja a la nube por el sync de siempre). */
+  onEditar?: (v: Viaje) => void;
 }
 
 export default function ViajeList({
@@ -127,6 +138,7 @@ export default function ViajeList({
   onToggleEntregado,
   onGuardarFoto,
   onToast,
+  onEditar,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
@@ -140,6 +152,8 @@ export default function ViajeList({
   // 💜 FASE AA: qué viaje tiene abierto el modal del QR (patrón de
   // los otros modales de la tarjeta)
   const [qrViajeId, setQrViajeId] = useState<string | null>(null);
+  // ✏️ qué viaje tiene abierto el modal de EDICIÓN (mismo patrón)
+  const [editarViajeId, setEditarViajeId] = useState<string | null>(null);
   // FASE E: qué dirección se acaba de copiar ("{id}-a" / "{id}-b") —
   // muestra el ✓ Copiada en la tarjeta
   const [copiadoKey, setCopiadoKey] = useState<string | null>(null);
@@ -490,6 +504,27 @@ export default function ViajeList({
                 <QrCode size={16} />
                 <span className="text-[8px] font-black leading-none">QR</span>
               </button>
+              {/* ✏️ EDITAR — SIEMPRE visible (aunque no tenga
+                  teléfonos cargados): sirve para CORREGIR el número
+                  que quedó mal (el clásico: inDrive te manda a
+                  comunicarte a OTRO teléfono) o SUMARLE uno a un
+                  viaje que quedó sin número y recién ahí salen los
+                  botones de Contacto/cobro. */}
+              {onEditar && (
+                <button
+                  onClick={() => {
+                    setEditarViajeId(v.id);
+                    vibrar(30);
+                  }}
+                  className="flex flex-col items-center rounded-lg bg-amber-500/15 p-2 text-amber-300 transition-all hover:bg-amber-500/25 active:scale-95"
+                  aria-label="Editar este viaje"
+                  title="Editar: teléfonos, direcciones, tarifa, notas…"
+                  data-testid="boton-editar-viaje"
+                >
+                  <Pencil size={16} />
+                  <span className="text-[8px] font-black leading-none">Editar</span>
+                </button>
+              )}
             </div>
             {/* FASE G: 📞 UN solo botón que abre el ContactoModal con
                 TODO adentro: llamar/WhatsApp a A y a B, el cobro, los
@@ -650,6 +685,25 @@ export default function ViajeList({
               cobroEnCurso={cobroEnCurso}
               onToggleEntregado={onToggleEntregado}
               onToast={onToast}
+            />
+          );
+        })()}
+
+      {/* ✏️ modal de EDICIÓN del viaje — corrige teléfonos /
+          direcciones / tarifa / notas sin borrar; al guardar, el
+          shell lo aplica y el sync lo lleva al otro celular */}
+      {editarViajeId &&
+        (() => {
+          const v = ordenados.find(x => x.id === editarViajeId);
+          if (!v || !onEditar) return null;
+          return (
+            <EditarViajeModal
+              viaje={v}
+              onGuardar={nuevo => {
+                onEditar(nuevo);
+                setEditarViajeId(null);
+              }}
+              onCerrar={() => setEditarViajeId(null)}
             />
           );
         })()}

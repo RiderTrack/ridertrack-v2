@@ -89,6 +89,20 @@ export default function PanelCajaDT({ onToast }: Props) {
     });
   }
 
+  // ✏️ Editar viaje ya cargado (mismo modal de la sección Viajes de
+  // inDrive): corrige teléfonos/direcciones/tarifa/notas SIN borrar.
+  // El viaje llega COMPLETO del modal (historial intacto) y el
+  // guardado + avisarCambioDT lo persisten y lo llevan a la nube.
+  function editarViaje(v: Viaje) {
+    setViajes(prev => {
+      const nuevo = prev.map(x => (x.id === v.id ? v : x));
+      guardarViajes(nuevo);
+      return nuevo;
+    });
+    vibrar(80);
+    mostrarToast('✓ Viaje actualizado');
+  }
+
   // 🟣 FASE R: el cobro que espera la elección del método (Yape/Plin)
   const [cobroPendiente, setCobroPendiente] = useState<{
     datos: { cliente: string; monto: number; direccion: string };
@@ -205,6 +219,7 @@ export default function PanelCajaDT({ onToast }: Props) {
         onDetenerGPS={undefined}
         onMandarCobro={mandarCobro}
         cobroEnCurso={cobroEnCurso}
+        onEditar={editarViaje}
       />
 
       {cobrarAbierto && (

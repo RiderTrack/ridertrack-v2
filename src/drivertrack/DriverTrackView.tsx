@@ -250,6 +250,18 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     );
   }
 
+  // ✏️ EDITAR VIAJE YA CARGADO (pedido de Rudy): corrige
+  // teléfonos/direcciones/tarifa/notas SIN borrar — el clásico es
+  // "escaneé la captura y quedó el celular del que ENVÍA, pero
+  // inDrive me manda a comunicarme a OTRO número". El viaje llega
+  // COMPLETO del modal (historial intacto por ...viaje); el guardado
+  // automático lo persiste y el sync lo lleva al otro celular.
+  function editarViaje(v: Viaje) {
+    setViajes(prev => prev.map(x => (x.id === v.id ? v : x)));
+    vibrar(80);
+    mostrarToast('✓ Viaje actualizado');
+  }
+
   // FASE F: 🛣️ los km A→B se calculan SOLOS — apenas aceptás un viaje
   // con los DOS pines (o cuando llega del otro cel sin el número),
   // Google mide la ruta por calles; sin internet queda el estimado
@@ -925,6 +937,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           onToggleEntregado={toggleEntregado}
           onGuardarFoto={guardarFotoEntrega}
           onToast={mostrarToast}
+          onEditar={editarViaje}
         />
 
         {/* FASE C: cartelito para que no busqués con el viejo hábito —

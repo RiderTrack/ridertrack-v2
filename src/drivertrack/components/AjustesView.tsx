@@ -1364,7 +1364,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-        DriverTrack v0.11.13 (📱 EL QR DE VINCULACIÓN YA NO ENGAÑA: cuando tu WhatsApp personal se desconecta, el panel muestra el QR de re-vinculación — ahora con un badge que te dice si el QR es 🟢 fresco (escanealo ya), 🟡 está envejeciendo o 🔴 ya venció; y cuando vence se TAPA para que no escanees un QR muerto (el clásico «intentalo otra vez» de WhatsApp); además, si el bot personal deja de latir hace varios minutos, el panel te avisa para que revises pm2 — el QR se sigue renovando solo cada ~20s mientras el bot viva · Lima, PE
+DriverTrack v0.11.14 (✏️ EDITAR VIAJE YA CARGADO: botoncito ámbar «Editar» en cada viaje de la sección 🏍️ Viajes inDrive — corregís los TELÉFONOS (cliente, quien envía, quien recibe) cuando inDrive te manda a comunicarte a otro número distinto del que escaneaste, y también direcciones A/B, tarifa (recalcula el neto al toque) y notas, sin borrar el viaje; sirve igual para SUMARLE un número a un viaje que quedó sin teléfono; fecha, hora, GPS y foto de evidencia quedan intactos, y el cambio viaja solo al otro celular por el sync · Lima, PE
       </p>
     </div>
   );

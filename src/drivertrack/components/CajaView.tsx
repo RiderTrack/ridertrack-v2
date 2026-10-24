@@ -30,6 +30,9 @@ interface Props {
   // F-ID5: flujo de cobro compartido (robot si está activo) — pasa through
   onMandarCobro?: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean;
+  /** ✏️ Editar viaje ya cargado (pasa through a la lista — mismo
+   *  modal de la sección Viajes de inDrive, aplica el shell) */
+  onEditar?: (v: Viaje) => void;
 }
 
 function sumarDias(fecha: string, dias: number): string {
@@ -52,6 +55,7 @@ export default function CajaView({
   onDetenerGPS,
   onMandarCobro,
   cobroEnCurso = false,
+  onEditar,
 }: Props) {
   const [fecha, setFecha] = useState(fechaHoy());
   const resumen = useMemo(() => resumenDia(viajes, fecha), [viajes, fecha]);
@@ -474,6 +478,7 @@ export default function CajaView({
           })
         }
         cobroEnCurso={cobroEnCurso}
+        onEditar={onEditar}
       />
 
       {/* FASE T: 📜 el modal con todos los días — tocás uno y la
