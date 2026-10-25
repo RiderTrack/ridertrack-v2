@@ -41,6 +41,10 @@ import {
   RotateCcw,
   CheckCircle2,
   WifiOff,
+  Shield,
+  Play,
+  Power,
+  BatteryMedium,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -83,9 +87,19 @@ import {
   linkProbarPlantilla,
   celBonito,
 } from '../utils/botControl';
+import {
+  EstadoGuardian,
+  ControlTermux,
+  subscribeEstadoGuardian,
+  subscribeControlTermux,
+  enviarComandoTermux,
+  haceRato,
+  GUARDIAN_VIVO_MS,
+} from '../services/guardianTermux';
+import { subscribeEstadoBot, EstadoBot } from '../services/firestore';
 
 interface BotControlViewProps {
-  vistaInicial?: 'plantillas' | 'imagenes' | 'automatizaciones';
+  vistaInicial?: 'plantillas' | 'imagenes' | 'automatizaciones' | 'termux';
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
@@ -1267,11 +1281,211 @@ const ImagenesBotTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => 
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// 🛡️ TAB 4 · TERMUX (FASE G1 v0.11.15) — el guardián
+//
+// Tres señales, en orden de confianza:
+//   1. Guardián vivo → late cada 60s en sistema/termux_estado
+//   2. Bot en PM2 → lo reporta el guardián (online/stopped, RAM, ↺)
+//   3. Latido del bot → estado_bot/{uid} (la verdad del WhatsApp)
+// Órdenes: sistema/termux_control → pm2 start/stop/restart rudy-bot.
+// Si el guardián está muerto, los botones se apagan (nadie escucharía).
+// ─────────────────────────────────────────────────────────────
+const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
+  const { user } = useAuth();
+  const [guardian, setGuardian] = useState<EstadoGuardian | null>(null);
+  const [control, setControl] = useState<ControlTermux | null>(null);
+  const [bot, setBot] = useState<EstadoBot | null>(null);
+  const [ahora, setAhora] = useState(Date.now());
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    const u1 = subscribeEstadoGuardian(setGuardian);
+    const u2 = subscribeControlTermux(setControl);
+    return () => {
+      u1();
+      u2();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    return subscribeEstadoBot(user.uid, setBot);
+  }, [user?.uid]);
+
+  // reloj de 1s: los "hace Xs" viven
+  useEffect(() => {
+    const t = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const guardiaVivo = !!guardian && guardian.ts > 0 && ahora - guardian.ts < GUARDIAN_VIVO_MS;
+  const botLate = !!bot && !!bot.lastSeen && ahora - Date.parse(bot.lastSeen) < 180_000;
+  const botCorriendo = guardian?.botEstado === 'online';
+  const botParado = guardian?.botEstado === 'stopped';
+
+  const uptimeBonito = (min: number) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h ${min % 60}m`);
+
+  const mandar = async (cmd: 'start' | 'stop' | 'restart', pregunta: string, tituloExito: string) => {
+    if (!window.confirm(pregunta)) return;
+    setEnviando(true);
+    try {
+      await enviarComandoTermux(cmd);
+      onShowToast(tituloExito, 'El guardián la ejecuta en segundos', 'success');
+    } catch (e: any) {
+      onShowToast('No se pudo enviar la orden', e?.message || 'Firestore', 'error');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  // resultado de la última orden (feedback del guardián)
+  const ultimaOrden = (() => {
+    if (!control || !control.cmd || !control.ts) return null;
+    if (control.ejecutadoEn < control.ts) return { pendiente: true, txt: `${control.cmd} · esperando al guardián…`, ok: false };
+    const ok = control.resultado === 'ok';
+    return { pendiente: false, txt: `${control.cmd} → ${control.detalle || (ok ? 'OK' : 'sin detalle')} (${haceRato(ahora - control.ejecutadoEn)})`, ok };
+  })();
+
+  const Punto: React.FC<{ on: boolean }> = ({ on }) => (
+    <span className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${on ? 'bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/70' : 'bg-red-500 shadow-[0_0_8px] shadow-red-500/60'}`} />
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* ── Señal del guardián ── */}
+      <Card>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Shield className={`w-5 h-5 shrink-0 ${guardiaVivo ? 'text-emerald-400' : 'text-red-400'}`} />
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white">Guardián {guardiaVivo ? 'vivo' : 'sin señal'}</p>
+              <p className="text-[11px] text-slate-400">
+                {guardiaVivo
+                  ? `latió ${haceRato(ahora - guardian!.ts)} · ${guardian!.version}`
+                  : 'no late hace más de 2 min — ¿corre en Termux?'}
+              </p>
+            </div>
+          </div>
+          {guardian?.bateria != null && (
+            <span className="flex items-center gap-1 text-xs font-bold text-slate-300 shrink-0">
+              <BatteryMedium className="w-4 h-4 text-lime-400" /> {guardian.bateria}%
+            </span>
+          )}
+        </div>
+        {!guardiaVivo && (
+          <p className="mt-3 text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 leading-relaxed">
+            Para revivirlo, en Termux:{' '}
+            <code className="text-emerald-300">pm2 restart guardian-termux</code> · para instalarlo:{' '}
+            <code className="text-emerald-300">pm2 start guardian.js --name guardian-termux && pm2 save</code>
+          </p>
+        )}
+      </Card>
+
+      {/* ── El bot en PM2 + su latido real ── */}
+      <Card>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">El bot de trabajo</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="flex items-center gap-2 text-slate-300">
+              <Punto on={guardiaVivo ? botCorriendo : botLate} />
+              Proceso en Termux {guardian ? `(${guardian.botEstado})` : ''}
+            </span>
+            {guardiaVivo && botCorriendo && (
+              <span className="text-[11px] text-slate-400 text-right">
+                {uptimeBonito(guardian!.botUptimeMin)} · ↺{guardian!.botReinicios} · {guardian!.botMemMb} MB
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="flex items-center gap-2 text-slate-300">
+              <Punto on={botLate} />
+              Latido de WhatsApp {bot ? `(${bot.version})` : '(sin señal)'}
+            </span>
+            {bot?.lastSeen ? (
+              <span className="text-[11px] text-slate-400 text-right">
+                {bot.whatsapp === 'conectado' ? '🟢 conectado' : '🔴 desconectado'} · {haceRato(ahora - Date.parse(bot.lastSeen))}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {guardiaVivo && botParado && (
+          <p className="mt-3 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
+            ⏹️ El bot está APAGADO — los mensajes de clientes no responden. Enciendelo abajo.
+          </p>
+        )}
+      </Card>
+
+      {/* ── Control remoto ── */}
+      <Card>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Control desde la app</p>
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <button
+            disabled={!guardiaVivo || enviando}
+            onClick={() => mandar('start', '¿Encender el bot de trabajo?', '▶️ Encendiendo…')}
+            className={`flex flex-col items-center gap-1.5 py-3 rounded-xl font-bold text-sm border transition-colors ${
+              guardiaVivo && botParado
+                ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white animate-pulse'
+                : 'bg-slate-900/60 hover:bg-slate-700/60 border-slate-700/60 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            <Play className="w-5 h-5" /> Encender
+          </button>
+          <button
+            disabled={!guardiaVivo || enviando}
+            onClick={() =>
+              mandar(
+                'stop',
+                '¿APAGAR el bot de trabajo?\n\nDeja de responder a los clientes hasta que lo enciendas.\nTus botones de RiderTrack quedan en cola.',
+                '⏹️ Apagando…'
+              )
+            }
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl font-bold text-sm border bg-slate-900/60 hover:bg-red-900/40 border-slate-700/60 text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Power className="w-5 h-5" /> Apagar
+          </button>
+          <button
+            disabled={!guardiaVivo || enviando}
+            onClick={() =>
+              mandar(
+                'restart',
+                '¿Reiniciar el bot de trabajo?\n\nTarda unos segundos en volver a conectarse a WhatsApp.',
+                '🔄 Reiniciando…'
+              )
+            }
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl font-bold text-sm border bg-slate-900/60 hover:bg-amber-900/40 border-slate-700/60 text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <RotateCcw className="w-5 h-5" /> Reiniciar
+          </button>
+        </div>
+        {ultimaOrden && (
+          <p
+            className={`mt-3 text-[11px] rounded-xl p-2.5 border leading-relaxed ${
+              ultimaOrden.pendiente
+                ? 'text-slate-400 bg-slate-900/60 border-slate-700/60'
+                : ultimaOrden.ok
+                  ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+                  : 'text-red-300 bg-red-500/10 border-red-500/30'
+            }`}
+          >
+            {ultimaOrden.pendiente ? '⏳ Última orden: ' : 'Última orden: '}
+            {ultimaOrden.txt}
+          </p>
+        )}
+        <p className="mt-3 text-[10px] text-slate-500 leading-relaxed">
+          El guardián jamás se apaga a sí mismo desde acá (el control nunca queda huérfano). Si ANDROID mata Termux, solo se revive abriendo Termux a mano.
+        </p>
+      </Card>
+    </div>
+  );
+};
+
 // VISTA PRINCIPAL (tabs)
 // ─────────────────────────────────────────────────────────────
 
 export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = 'plantillas', onShowToast }) => {
-  const [tab, setTab] = useState<'plantillas' | 'imagenes' | 'automatizaciones'>(vistaInicial);
+  const [tab, setTab] = useState<'plantillas' | 'imagenes' | 'automatizaciones' | 'termux'>(vistaInicial);
   const toast: ToastFn =
     onShowToast ||
     ((title: string, desc?: string) => {
@@ -1339,6 +1553,18 @@ export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = '
           <span className="hidden sm:inline">Automatizaciones</span>
           <span className="sm:hidden">Auto.</span>
         </button>
+        <button
+          onClick={() => setTab('termux')}
+          className={`flex-1 min-w-0 sm:flex-none sm:px-4 px-2 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-colors flex items-center justify-center gap-1.5 ${
+            tab === 'termux'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Shield className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">Termux</span>
+          <span className="sm:hidden">Termux</span>
+        </button>
       </div>
 
       {/* Contenido */}
@@ -1346,6 +1572,8 @@ export const BotControlView: React.FC<BotControlViewProps> = ({ vistaInicial = '
         <PlantillasTab onShowToast={toast} />
       ) : tab === 'imagenes' ? (
         <ImagenesBotTab onShowToast={toast} />
+      ) : tab === 'termux' ? (
+        <TermuxTab onShowToast={toast} />
       ) : (
         <AutomatizacionesTab onShowToast={toast} />
       )}
