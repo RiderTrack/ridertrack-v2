@@ -45,6 +45,8 @@ import {
   Play,
   Power,
   BatteryMedium,
+  ScrollText,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -90,8 +92,12 @@ import {
 import {
   EstadoGuardian,
   ControlTermux,
+  TermuxLogs,
+  TermuxRespaldo,
   subscribeEstadoGuardian,
   subscribeControlTermux,
+  subscribeTermuxLogs,
+  subscribeTermuxRespaldo,
   enviarComandoTermux,
   haceRato,
   GUARDIAN_VIVO_MS,
@@ -1288,7 +1294,9 @@ const ImagenesBotTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => 
 //   1. Guardián vivo → late cada 60s en sistema/termux_estado
 //   2. Bot en PM2 → lo reporta el guardián (online/stopped, RAM, ↺)
 //   3. Latido del bot → estado_bot/{uid} (la verdad del WhatsApp)
-// Órdenes: sistema/termux_control → pm2 start/stop/restart rudy-bot.
+// Órdenes: sistema/termux_control → pm2 start/stop/restart rudy-bot
+//   + 'logs' (📜) y 'respaldar' (📦) — FASE G2.
+// 🌙 El guardián v1.2 reinicia el bot solo una vez por día (4:00).
 // Si el guardián está muerto, los botones se apagan (nadie escucharía).
 // ─────────────────────────────────────────────────────────────
 const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
@@ -1296,15 +1304,22 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
   const [guardian, setGuardian] = useState<EstadoGuardian | null>(null);
   const [control, setControl] = useState<ControlTermux | null>(null);
   const [bot, setBot] = useState<EstadoBot | null>(null);
+  const [logsDoc, setLogsDoc] = useState<TermuxLogs | null>(null);
+  const [logsAbierto, setLogsAbierto] = useState(false);
+  const [respaldoDoc, setRespaldoDoc] = useState<TermuxRespaldo | null>(null);
   const [ahora, setAhora] = useState(Date.now());
   const [enviando, setEnviando] = useState(false);
 
   useEffect(() => {
     const u1 = subscribeEstadoGuardian(setGuardian);
     const u2 = subscribeControlTermux(setControl);
+    const u3 = subscribeTermuxLogs(setLogsDoc);
+    const u4 = subscribeTermuxRespaldo(setRespaldoDoc);
     return () => {
       u1();
       u2();
+      u3();
+      u4();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1327,7 +1342,7 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
 
   const uptimeBonito = (min: number) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h ${min % 60}m`);
 
-  const mandar = async (cmd: 'start' | 'stop' | 'restart', pregunta: string, tituloExito: string) => {
+  const mandar = async (cmd: 'start' | 'stop' | 'restart' | 'logs' | 'respaldar', pregunta: string, tituloExito: string) => {
     if (!window.confirm(pregunta)) return;
     setEnviando(true);
     try {
@@ -1477,6 +1492,125 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
           El guardián jamás se apaga a sí mismo desde acá (el control nunca queda huérfano). Si ANDROID mata Termux, solo se revive abriendo Termux a mano.
         </p>
       </Card>
+
+      {/* ── 🛠️ Herramientas (FASE G2) ── */}
+      <Card>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Herramientas</p>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button
+            disabled={!guardiaVivo || enviando}
+            onClick={() => {
+              mandar('logs', '¿Pedirle al guardián los últimos logs del bot?', '📜 Buscando logs…');
+              setLogsAbierto(true);
+            }}
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl font-bold text-sm border bg-slate-900/60 hover:bg-sky-900/40 border-slate-700/60 text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ScrollText className="w-5 h-5" /> Ver logs
+          </button>
+          <button
+            disabled={!guardiaVivo || enviando}
+            onClick={() =>
+              mandar(
+                'respaldar',
+                '¿Respaldar la configuración del bot?\n\nSe guarda en la nube + una copia local con fecha en Termux.',
+                '📦 Respalando…'
+              )
+            }
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl font-bold text-sm border bg-slate-900/60 hover:bg-violet-900/40 border-slate-700/60 text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Archive className="w-5 h-5" /> Respaldar config
+          </button>
+        </div>
+        <div className="mt-3 space-y-1.5 text-[11px] text-slate-400">
+          {respaldoDoc ? (
+            <p>
+              📦 Último respaldo: <span className="text-slate-300 font-bold">{respaldoDoc.copiados.join(', ') || '—'}</span> ·{' '}
+              {haceRato(Math.max(0, ahora - respaldoDoc.ts))}
+            </p>
+          ) : (
+            <p>📦 Sin respaldos aún — el primero queda en la nube + copia local en Termux.</p>
+          )}
+          {guardian?.ultimoReinicioNocturno ? (
+            <p>
+              🌙 Reinicio nocturno {guardian.nocturnoHora ?? 4}:00 — último {haceRato(Math.max(0, ahora - Date.parse(guardian.ultimoReinicioNocturno)))}
+            </p>
+          ) : (
+            <p>🌙 Reinicio nocturno: 4:00 — llega con el guardián v1.2 (el bot arranca fresco cada día).</p>
+          )}
+        </div>
+      </Card>
+
+      {/* ── 📜 Modal de logs (FASE G2) ── */}
+      {logsAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setLogsAbierto(false)}
+        >
+          <div
+            className="w-full sm:max-w-2xl max-h-[85vh] overflow-hidden bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl dt-anim-pop flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 p-4 border-b border-slate-700/60">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-white flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-sky-400 shrink-0" /> Últimos logs del bot
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {logsDoc ? `traídos ${haceRato(Math.max(0, ahora - logsDoc.ts))} · ${guardian?.version || ''}` : 'nunca pedidos'}
+                </p>
+              </div>
+              <button onClick={() => setLogsAbierto(false)} className="p-2 rounded-xl hover:bg-slate-800 text-slate-400 shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto">
+              {control?.cmd === 'logs' && control.ejecutadoEn < control.ts && (
+                <p className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-700/60 rounded-xl p-2.5">
+                  ⏳ Esperando al guardián…
+                </p>
+              )}
+              {control?.cmd === 'logs' && control.ejecutadoEn >= control.ts && control.resultado === 'error' && (
+                <p className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl p-2.5">🔴 {control.detalle}</p>
+              )}
+              {logsDoc && (
+                <>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                      Consola (últimas {logsDoc.out ? logsDoc.out.split('\n').length : 0} líneas)
+                    </p>
+                    <pre className="text-[10px] font-mono text-slate-300 bg-slate-950/80 border border-slate-700/60 rounded-xl p-3 max-h-56 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">
+                      {logsDoc.out || '(vacío)'}
+                    </pre>
+                  </div>
+                  {logsDoc.err && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-red-400 mb-1">Errores</p>
+                      <pre className="text-[10px] font-mono text-red-200 bg-slate-950/80 border border-red-500/30 rounded-xl p-3 max-h-40 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">
+                        {logsDoc.err}
+                      </pre>
+                    </div>
+                  )}
+                  <button
+                    onClick={() =>
+                      navigator.clipboard?.writeText((logsDoc.out || '') + (logsDoc.err ? '\n--- ERRORES ---\n' + logsDoc.err : ''))
+                    }
+                    className="flex items-center gap-1.5 text-[11px] font-bold text-sky-300 hover:text-sky-200"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Copiar todo
+                  </button>
+                </>
+              )}
+              <button
+                disabled={!guardiaVivo || enviando}
+                onClick={() => mandar('logs', '¿Refrescar los logs?', '📜 Buscando logs…')}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs border border-sky-500/40 bg-sky-600/20 hover:bg-sky-600/30 text-sky-200 transition-colors disabled:opacity-40"
+              >
+                <RefreshCw className="w-4 h-4" /> Refrescar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

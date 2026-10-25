@@ -11,6 +11,10 @@
 //   sistema/termux_control (app → guardián)  órdenes:
 //      encender / apagar / reiniciar al rudy-bot. El guardián
 //      escribe el resultado de vuelta en el MISMO doc.
+//   sistema/termux_logs    (guardián → app · FASE G2)  últimos
+//      logs del bot, subidos on-demand con la orden 'logs'.
+//   sistema/termux_respaldo (guardián → app · FASE G2)  copia de
+//      la configuración del bot, con la orden 'respaldar'.
 //
 // Reglas Firestore: sistema/{docId} ya existe (read: isAuth ·
 // write: isAdmin) — CERO cambios de reglas. La app escribe solo
@@ -42,6 +46,10 @@ export interface EstadoGuardian {
   bateria: number | null;
   /** desde cuándo corre el guardián (ISO) */
   guardianDesde: string;
+  /** 🌙 ISO del último reinicio nocturno automático (FASE G2, opcional) */
+  ultimoReinicioNocturno?: string;
+  /** 🌙 hora configurada del nocturno (FASE G2, opcional) */
+  nocturnoHora?: number;
 }
 
 /** Doc de órdenes (sistema/termux_control — app escribe, guardián responde) */
@@ -62,6 +70,28 @@ export interface ControlTermux {
 
 /** ¿El guardián está vivo? (latido hace menos de 2.5 min) */
 export const GUARDIAN_VIVO_MS = 150_000;
+
+/** 📜 Logs del bot on-demand (sistema/termux_logs — FASE G2) */
+export interface TermuxLogs {
+  /** últimas ~80 líneas de la consola del bot */
+  out: string;
+  /** últimas líneas del log de errores */
+  err: string;
+  /** ms de cuándo el guardián los trajo */
+  ts: number;
+}
+
+/** 📦 Último respaldo de configuración (sistema/termux_respaldo — FASE G2) */
+export interface TermuxRespaldo {
+  /** nombre → contenido de cada archivo respaldado */
+  archivos: Record<string, string>;
+  /** qué archivos entraron en el respaldo */
+  copiados: string[];
+  /** ms de cuándo se hizo */
+  ts: number;
+  /** copia local con fecha que dejó en Termux */
+  localCopia: string;
+}
 
 /** Escucha en vivo el latido del guardián. cb(null) = nunca latió. */
 export function subscribeEstadoGuardian(cb: (estado: EstadoGuardian | null) => void): Unsubscribe {
@@ -85,6 +115,8 @@ export function subscribeEstadoGuardian(cb: (estado: EstadoGuardian | null) => v
         botCpu: typeof d.botCpu === 'number' ? d.botCpu : 0,
         bateria: typeof d.bateria === 'number' ? d.bateria : null,
         guardianDesde: typeof d.guardianDesde === 'string' ? d.guardianDesde : '',
+        ultimoReinicioNocturno: typeof d.ultimoReinicioNocturno === 'string' ? d.ultimoReinicioNocturno : undefined,
+        nocturnoHora: typeof d.nocturnoHora === 'number' ? d.nocturnoHora : undefined,
       });
     },
     () => cb(null)
@@ -115,11 +147,55 @@ export function subscribeControlTermux(cb: (control: ControlTermux | null) => vo
   );
 }
 
+/** 📜 Escucha los logs que el guardián sube on-demand (FASE G2). */
+export function subscribeTermuxLogs(cb: (logs: TermuxLogs | null) => void): Unsubscribe {
+  if (!db) return () => undefined;
+  return onSnapshot(
+    doc(db, 'sistema', 'termux_logs'),
+    (snap) => {
+      if (!snap.exists()) {
+        cb(null);
+        return;
+      }
+      const d = snap.data() as Record<string, unknown>;
+      cb({
+        out: typeof d.out === 'string' ? d.out : '',
+        err: typeof d.err === 'string' ? d.err : '',
+        ts: typeof d.ts === 'number' ? d.ts : 0,
+      });
+    },
+    () => cb(null)
+  );
+}
+
+/** 📦 Escucha el último respaldo de configuración (FASE G2). */
+export function subscribeTermuxRespaldo(cb: (respaldo: TermuxRespaldo | null) => void): Unsubscribe {
+  if (!db) return () => undefined;
+  return onSnapshot(
+    doc(db, 'sistema', 'termux_respaldo'),
+    (snap) => {
+      if (!snap.exists()) {
+        cb(null);
+        return;
+      }
+      const d = snap.data() as Record<string, unknown>;
+      cb({
+        archivos: d.archivos && typeof d.archivos === 'object' ? (d.archivos as Record<string, string>) : {},
+        copiados: Array.isArray(d.copiados) ? (d.copiados as string[]) : [],
+        ts: typeof d.ts === 'number' ? d.ts : 0,
+        localCopia: typeof d.localCopia === 'string' ? d.localCopia : '',
+      });
+    },
+    () => cb(null)
+  );
+}
+
 /**
- * Manda una orden al guardián. Solo 'start' | 'stop' | 'restart' —
- * el guardián ignora cualquier otra cosa (y las viejas de +5 min).
+ * Manda una orden al guardián: 'start' | 'stop' | 'restart' +
+ * 'logs' (📜 FASE G2) | 'respaldar' (📦 FASE G2) — el guardián
+ * ignora cualquier otra cosa (y las viejas de +5 min).
  */
-export async function enviarComandoTermux(cmd: 'start' | 'stop' | 'restart'): Promise<void> {
+export async function enviarComandoTermux(cmd: 'start' | 'stop' | 'restart' | 'logs' | 'respaldar'): Promise<void> {
   if (!db) throw new Error('Firestore no disponible');
   await setDoc(
     doc(db, 'sistema', 'termux_control'),
