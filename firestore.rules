@@ -355,6 +355,19 @@ service cloud.firestore {
       allow write: if isOwner(userId);
     }
 
+    // 📱 v0.11.17 (bot v3.7-QRAPP): el QR de VINCULACIÓN del bot de
+    // trabajo — el bot lo publica acá cuando WhatsApp pide re-escanear
+    // y la app lo muestra (Bot → 🛡️ Termux → Vincular WhatsApp) con su
+    // edad y aviso de vencimiento. Solo el dueño puede leer: un QR vivo
+    // en un doc legible por cualquier rider sería regalarle el WhatsApp.
+    // El bot escribe con firebase-admin (las reglas no lo frenan);
+    // escritura del dueño para las pruebas E2E (patrón estado_bot).
+    // Se publica con: node actualizar_reglas.js (v5, en el zip del bot).
+    match /qr_bot/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
     // FASE C: ☁️ sync de los datos de inDrive (viajes, gastos,
     // ajustes) — UN doc por rider con todo su data para verlo en
     // cualquier cel con la misma cuenta. Solo el dueño entra.

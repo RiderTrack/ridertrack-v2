@@ -47,7 +47,9 @@ import {
   BatteryMedium,
   ScrollText,
   Archive,
+  QrCode,
 } from 'lucide-react';
+import QRCode from 'react-qr-code';
 import { useAuth } from '../hooks/useAuth';
 import {
   TIPOS_IMAGEN_BOT,
@@ -103,6 +105,7 @@ import {
   GUARDIAN_VIVO_MS,
 } from '../services/guardianTermux';
 import { subscribeEstadoBot, EstadoBot } from '../services/firestore';
+import { QrTrabajo, subscribeQrTrabajo } from '../services/qrTrabajo';
 
 interface BotControlViewProps {
   vistaInicial?: 'plantillas' | 'imagenes' | 'automatizaciones' | 'termux';
@@ -1307,6 +1310,9 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
   const [logsDoc, setLogsDoc] = useState<TermuxLogs | null>(null);
   const [logsAbierto, setLogsAbierto] = useState(false);
   const [respaldoDoc, setRespaldoDoc] = useState<TermuxRespaldo | null>(null);
+  // 📱 FASE AQ: el QR de vinculación del bot de trabajo, vivo en qr_bot/{uid}
+  const [qrDoc, setQrDoc] = useState<QrTrabajo | null>(null);
+  const [qrAbierto, setQrAbierto] = useState(false);
   const [ahora, setAhora] = useState(Date.now());
   const [enviando, setEnviando] = useState(false);
 
@@ -1329,6 +1335,13 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
     return subscribeEstadoBot(user.uid, setBot);
   }, [user?.uid]);
 
+  // 📱 FASE AQ: QR de vinculación del trabajo — el bot v3.7 lo publica
+  // en qr_bot/{uid} cada vez que WhatsApp pide re-escanear
+  useEffect(() => {
+    if (!user?.uid) return;
+    return subscribeQrTrabajo(user.uid, setQrDoc);
+  }, [user?.uid]);
+
   // reloj de 1s: los "hace Xs" viven
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 1000);
@@ -1339,6 +1352,13 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
   const botLate = !!bot && !!bot.lastSeen && ahora - Date.parse(bot.lastSeen) < 180_000;
   const botCorriendo = guardian?.botEstado === 'online';
   const botParado = guardian?.botEstado === 'stopped';
+
+  // 📱 FASE AQ: estado del QR de vinculación del trabajo (patrón FASE AN
+  // del bot personal — el QR vence a los ~60s y el bot saca uno nuevo
+  // cada ~20s; escanear uno vencido es el «Intentalo otra vez» de WhatsApp)
+  const wspConectado = botLate && bot?.whatsapp === 'conectado';
+  const hayQr = !!qrDoc && !!qrDoc.qrTexto;
+  const qrEdadSeg = qrDoc?.qrAt ? Math.floor((ahora - qrDoc.qrAt) / 1000) : null;
 
   const uptimeBonito = (min: number) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h ${min % 60}m`);
 
@@ -1424,6 +1444,20 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
               </span>
             ) : null}
           </div>
+          {/* 📱 FASE AQ: el QR de vinculación — cuando WhatsApp pide
+              re-escanear, ya no hace falta meterse a la terminal */}
+          <button
+            data-testid="boton-vincular-wsp"
+            onClick={() => setQrAbierto(true)}
+            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm border transition-colors ${
+              !wspConectado && (hayQr || qrDoc?.estadoConexion === 'vinculando')
+                ? 'bg-amber-600/25 hover:bg-amber-600/40 border-amber-500/50 text-amber-200 animate-pulse'
+                : 'bg-slate-900/60 hover:bg-slate-700/60 border-slate-700/60 text-slate-300'
+            }`}
+          >
+            <QrCode className="w-4 h-4 shrink-0" />
+            {wspConectado ? 'Vincular WhatsApp (no hace falta — está conectado)' : '📷 Vincular WhatsApp — escanear QR'}
+          </button>
         </div>
         {guardiaVivo && botParado && (
           <p className="mt-3 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
@@ -1608,6 +1642,104 @@ const TermuxTab: React.FC<{ onShowToast: ToastFn }> = ({ onShowToast }) => {
                 <RefreshCw className="w-4 h-4" /> Refrescar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── 📱 Modal QR de vinculación (FASE AQ · patrón FASE AN) ── */}
+      {qrAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 p-3 sm:p-4"
+          onClick={() => setQrAbierto(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl dt-anim-pop p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 mb-3">
+              <QrCode size={18} className="text-amber-300 shrink-0" />
+              <span className="font-black text-white">Vincular WhatsApp del trabajo</span>
+              <button onClick={() => setQrAbierto(false)} className="ml-auto p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 shrink-0">
+                <X size={16} />
+              </button>
+            </div>
+
+            {wspConectado ? (
+              <div className="text-center py-6 space-y-2" data-testid="qr-trabajo-conectado">
+                <span className="text-4xl">✅</span>
+                <div className="text-sm font-bold text-emerald-300">¡Todo conectado!</div>
+                <div className="text-xs text-slate-400">
+                  El bot del trabajo responde a tus clientes — no hay nada que escanear.
+                </div>
+              </div>
+            ) : !botLate ? (
+              <div className="text-center py-6 space-y-2" data-testid="qr-trabajo-bot-caido">
+                <span className="text-4xl">🔌</span>
+                <div className="text-sm font-bold text-red-300">El bot no late — no hay QR que mostrar</div>
+                <div className="text-xs text-slate-400 leading-relaxed">
+                  Encendelo arriba (▶️ Encender) o revisá pm2 en Termux. Cuando el bot arranque, el QR aparece acá solo.
+                </div>
+              </div>
+            ) : hayQr && qrDoc ? (
+              <div className="space-y-3">
+                <div className="bg-white rounded-xl p-3 flex justify-center relative">
+                  <QRCode value={qrDoc.qrTexto} size={230} />
+                  {/* si venció, se TAPA — no se escanea un QR muerto */}
+                  {qrEdadSeg !== null && qrEdadSeg > 60 && (
+                    <div className="absolute inset-0 rounded-xl bg-slate-950/70 flex flex-col items-center justify-center text-center px-4 gap-1">
+                      <Clock size={26} className="text-amber-300" />
+                      <div className="text-xs font-black text-white">Este QR ya venció</div>
+                      <div className="text-[10px] text-slate-300">el próximo llega solo en segundos</div>
+                    </div>
+                  )}
+                </div>
+                {/* badge de frescura del QR */}
+                <div className="flex justify-center">
+                  {qrEdadSeg === null ? null : qrEdadSeg <= 30 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold" data-testid="qr-trabajo-fresco">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      QR nuevo — escanealo ahora ({qrEdadSeg}s)
+                    </span>
+                  ) : qrEdadSeg <= 60 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-bold" data-testid="qr-trabajo-envejeciendo">
+                      <Clock size={11} />
+                      Envejeciendo ({qrEdadSeg}s) — si no pasa, esperá al próximo
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[11px] font-bold" data-testid="qr-trabajo-vencido">
+                      <Clock size={11} />
+                      Venció hace {qrEdadSeg - 60}s — esperá al próximo
+                    </span>
+                  )}
+                </div>
+                <ol className="text-xs text-slate-300 space-y-1.5 list-decimal list-inside">
+                  <li>Abrí WhatsApp en el <b>celular del trabajo</b></li>
+                  <li>Ajustes → <b>Dispositivos vinculados</b></li>
+                  <li>Si aparece una vinculación vieja de RiderTrack, borrala</li>
+                  <li><b>Vincular un dispositivo</b> → escaneá este QR</li>
+                </ol>
+                <div className="text-[10px] text-slate-500 text-center">
+                  El bot renueva el QR solo cada ~20s — dejá esto abierto y escaneá solo el que está 🟢 fresco.
+                </div>
+              </div>
+            ) : qrDoc && qrDoc.estadoConexion === 'desconectado' ? (
+              <div className="text-center py-6 space-y-2" data-testid="qr-trabajo-reconectando">
+                <Loader2 size={24} className="animate-spin text-amber-300 mx-auto" />
+                <div className="text-sm font-bold text-white">El bot está reconectando…</div>
+                <div className="text-xs text-slate-400">
+                  Cuando WhatsApp pida el escaneo, el QR aparece acá solo en segundos.
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-6 space-y-2" data-testid="qr-trabajo-generando">
+                <Loader2 size={24} className="animate-spin text-amber-300 mx-auto" />
+                <div className="text-sm font-bold text-white">Generando QR…</div>
+                <div className="text-xs text-slate-400 leading-relaxed">
+                  Si no aparece en 1 min, al bot le falta la v3.7-QRAPP o las reglas v5 (corré{' '}
+                  <code className="text-amber-300">node actualizar_reglas.js</code> en Termux). Mientras tanto,
+                  la terminal sigue sirviendo: <code className="text-amber-300">pm2 logs rudy-bot</code>.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
