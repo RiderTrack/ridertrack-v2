@@ -59,7 +59,7 @@ import { escucharImagenesDT, ImagenDT } from './services/imagenesDT';
 // FASE F: 🛣️ km A→B calculados solos para los viajes con ambos pines
 import { calcularRutaAB } from './services/rutaAB';
 // FASE K: saldo de la recarga semanal (chip comisión prepagada)
-import { estadoSaldo } from './services/recarga';
+import { estadoSaldo, textoDias } from './services/recarga';
 // FASE A2: el tema viene del TRABAJO — mismo toggle para toda la app
 import { useTema } from '../theme/useTema';
 import {
@@ -850,34 +850,76 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           las secciones del panel general (junto a los del trabajo). */}
       <main className="flex-1 space-y-3 px-4 py-4 pb-24">
         <MetaBar neto={resumenHoy.neto} meta={config.metaDiaria} />
-        {/* FASE K: chip del modo comisión prepagada — un toque y te
-            lleva a la Configuración para ver el saldo/recargar */}
-        {config.recarga?.activa && (
+        {/* FASE K→AS: 🪫 CONTADOR DE SALDO — siempre visible mientras
+            haya una recarga registrada; se descuenta solo con cada viaje
+            inDrive que haces y avisa cuando es hora de recargar. Con el
+            modo activa pero SIN recarga registrada, el chip te manda a
+            la Configuración (comportamiento de siempre). */}
+        {saldoRecarga ? (
+          (() => {
+            const alerta = saldoRecarga.saldo < 0 || saldoRecarga.casiAgotada;
+            const pct = Math.round(saldoRecarga.pctUsado * 100);
+            return (
+              <button
+                onClick={() => onIrAAjustes?.()}
+                className={`w-full rounded-xl border px-3 py-2 text-left transition-colors hover:brightness-110 ${
+                  alerta
+                    ? 'border-amber-500/50 bg-amber-500/10'
+                    : 'border-violet-500/30 bg-violet-500/10'
+                }`}
+                data-testid="contador-saldo-indrive"
+                title="Tocá para ver el saldo y recargar en Configuración → inDrive → 🎯 Recarga"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-violet-200">
+                    {config.recarga?.activa ? '🟣 Comisión prepagada' : '🪫 Saldo inDrive'}
+                  </span>
+                  <span
+                    className={`text-xs font-black tabular-nums ${
+                      saldoRecarga.saldo < 0 ? 'text-red-400' : alerta ? 'text-amber-300' : 'text-emerald-400'
+                    }`}
+                  >
+                    {saldoRecarga.saldo < 0
+                      ? `−S/ ${Math.abs(saldoRecarga.saldo).toFixed(2)}`
+                      : `S/ ${saldoRecarga.saldo.toFixed(2)}`}
+                  </span>
+                </div>
+                {/* Barra de consumo — se llena con cada viaje que hacés */}
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      saldoRecarga.saldo < 0 ? 'bg-red-500' : alerta ? 'bg-amber-400' : 'bg-emerald-500'
+                    }`}
+                    style={{ width: `${Math.min(100, pct)}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] font-semibold text-slate-400">
+                  recargaste S/ {saldoRecarga.monto.toFixed(2)} · consumiste S/ {saldoRecarga.usado.toFixed(2)} ({pct}%)
+                  {saldoRecarga.diasRestantes !== null &&
+                    saldoRecarga.saldo > 0 &&
+                    ` · te queda ${textoDias(saldoRecarga.diasRestantes)} de trabajo`}
+                </p>
+                {alerta && (
+                  <p className="mt-0.5 text-[10px] font-black text-amber-300">
+                    ⚠️ Ya es hora de recargar — tocá acá para registrarla
+                  </p>
+                )}
+              </button>
+            );
+          })()
+        ) : config.recarga?.activa ? (
           <button
             onClick={() => onIrAAjustes?.()}
             className="w-full rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-left transition-colors hover:bg-violet-500/20"
             data-testid="chip-prepago"
-            title="Ver el saldo de tu recarga en Configuración → inDrive → 🎯 Recarga semanal"
+            title="Ver el saldo de tu recarga en Configuración → inDrive → 🎯 Recarga"
           >
             <span className="text-[11px] font-bold text-violet-200">🟣 Comisión prepagada</span>
-            {saldoRecarga ? (
-              <span className="text-[10px] font-semibold text-slate-400">
-                {' '}· usaste S/ {saldoRecarga.usado.toFixed(2)} de S/ {saldoRecarga.monto.toFixed(2)} —{' '}
-                <span
-                  className={
-                    saldoRecarga.saldo < 0 || saldoRecarga.casiAgotada ? 'text-amber-300' : 'text-emerald-400'
-                  }
-                >
-                  queda S/ {saldoRecarga.saldo.toFixed(2)}
-                </span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-semibold text-slate-400">
-                {' '}· cada carrera inDrive entra COMPLETA (registrá tu recarga en Configuración)
-              </span>
-            )}
+            <span className="text-[10px] font-semibold text-slate-400">
+              {' '}· cada carrera inDrive entra COMPLETA (registrá tu recarga en Configuración)
+            </span>
           </button>
-        )}
+        ) : null}
         <ViajeForm
           config={config}
           onAgregar={agregarViaje}

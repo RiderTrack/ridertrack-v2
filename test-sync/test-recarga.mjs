@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // 🎯 TEST recarga semanal + escáner v4 — FASE F
+// 🪫 TEST recarga FLEXIBLE (calcularDuracion + diasRestantes) — FASE AS
 // Corre con: node test-sync/test-recarga.mjs
 // (puro — sin Firebase, sin React, igual que pagoPedidosCore)
 // ═══════════════════════════════════════════════════════════
@@ -17,7 +18,7 @@ await build({
   outfile: OUT,
   logLevel: 'silent',
 });
-const { calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje } = await import(OUT);
+const { calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje, calcularDuracion, textoDias } = await import(OUT);
 
 // escanerIA.ts es 100% autocontenido (sin imports) → import directo
 import { sanearDatos } from '../src/drivertrack/services/escanerIA.ts';
@@ -103,6 +104,53 @@ console.log('\n3) estadoSaldo — usaste X de Y, te queda Z');
 
   const s3 = estadoSaldo([{ ...viajes[0], tarifa: 800 }], rec); // 80 de 63 → saldo −17
   check('saldo negativo −17.00', s3.saldo === -17, String(s3.saldo));
+}
+
+// ── 3½. FASE AS: recarga FLEXIBLE ─────────────────────
+console.log('\n3½) FASE AS — calcularDuracion: «hoy recargué 15, ¿cuánto me dura?»');
+{
+  const d = calcularDuracion(15, 60, 15); // comisión 9/día
+  check('15 soles con 60×15% → comisión 9.00/día', d.comisionDia === 9, String(d.comisionDia));
+  check('15 ÷ 9 = 1.7 días', d.dias === 1.7, String(d.dias));
+  check('1.7 días → «~1 día y medio»', d.diasTexto === '~1 día y medio', d.diasTexto);
+  check('estimable', d.estimable === true);
+
+  const d2 = calcularDuracion(63, 60, 15); // la semana completa de siempre
+  check('63 soles → 7 días justos', d2.dias === 7, String(d2.dias));
+  check('7 días → «~7 días»', d2.diasTexto === '~7 días', d2.diasTexto);
+
+  check('monto 0 → no estimable', calcularDuracion(0, 60, 15).estimable === false);
+  check('sin meta → no estimable', calcularDuracion(15, 0, 15).estimable === false);
+  check('sin % → no estimable', calcularDuracion(15, 60, 0).estimable === false);
+  const d0 = calcularDuracion(15, 0, 15);
+  check('no estimable → dias 0 y texto «—»', d0.dias === 0 && d0.diasTexto === '—');
+
+  // % imposible se recorta: 60×100% = 60/día
+  check('% 150 se recorta a 100: 30 con 60/día → 0.5 días', calcularDuracion(30, 60, 150).dias === 0.5);
+
+  // textoDias: los bordes
+  check('textoDias(2) → «~2 días»', textoDias(2) === '~2 días');
+  check('textoDias(1.4) → «~1 día y medio»', textoDias(1.4) === '~1 día y medio');
+  check('textoDias(1) → «~1 día»', textoDias(1) === '~1 día');
+  check('textoDias(0.5) → «menos de 1 día»', textoDias(0.5) === 'menos de 1 día');
+  check('textoDias(0) → «—»', textoDias(0) === '—');
+  check('negativo → «—»', textoDias(-3) === '—');
+}
+
+// ── 3⅔. FASE AS: días restantes del saldo ───────────────
+console.log('\n3⅔) estadoSaldo.diasRestantes — cuánto trabajo le queda al saldo');
+{
+  const rec = { activa: true, metaDiaria: 60, pct: 10, dias: 7, monto: 63, fecha: '2026-10-05 14:00' };
+  const viajes = [
+    { id: '1', fecha: '2026-10-06', hora: '10:00', origen: 'indrive', tarifa: 300 },
+  ];
+  const s = estadoSaldo(viajes, rec); // usado 30, saldo 33, comisión 6/día
+  check('saldo 33 a 6/día → 5.5 días restantes', s.diasRestantes === 5.5, String(s.diasRestantes));
+  const sSinRitmo = estadoSaldo(viajes, { ...rec, metaDiaria: 0 });
+  check('sin meta → diasRestantes null (no estimable)', sSinRitmo.diasRestantes === null);
+  const sAgotado = estadoSaldo([{ ...viajes[0], tarifa: 900 }], rec); // usado 90 > 63
+  check('saldo agotado → diasRestantes 0', sAgotado.diasRestantes === 0, String(sAgotado.diasRestantes));
+  check('regresión: campos viejos del bloque 3 intactos', s.usado === 30 && s.saldo === 33 && s.casiAgotada === false);
 }
 
 // ── 4. Escáner v4 (FASE I, ya en la app): A/B y observación ──

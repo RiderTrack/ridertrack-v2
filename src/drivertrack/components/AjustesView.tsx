@@ -25,7 +25,7 @@ import {
 import { ConfigDT, Gasto, ORIGENES, TipoGasto } from '../types';
 import { CONFIG_DEFECTO, cargarGastos, cargarViajes, fechaHoy, guardarConfig, guardarGastos, horaAhora } from '../storage';
 // FASE K: 🎯 recarga semanal — calculadora + saldo consumido
-import { calcularRecarga, estadoSaldo } from '../services/recarga';
+import { calcularDuracion, calcularRecarga, estadoSaldo, textoDias } from '../services/recarga';
 import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
@@ -495,7 +495,7 @@ export default function AjustesView({
       <section className="rounded-2xl border border-violet-500/40 bg-violet-500/5 p-4" data-testid="seccion-recarga">
         <div className="flex items-center justify-between gap-2">
           <p className="flex items-center gap-1.5 text-xs font-bold text-violet-300">
-            🎯 Recarga semanal (comisión prepagada)
+            🎯 Recarga inDrive (comisión prepagada)
           </p>
           {/* Interruptor del modo prepagada */}
           <button
@@ -516,10 +516,10 @@ export default function AjustesView({
           </button>
         </div>
         <p className="mt-1 text-[11px] leading-snug text-slate-400">
-          Poné <b className="text-violet-300">cuánto querés hacerte por día</b> y la app te dice{' '}
-          <b className="text-violet-300">cuánto recargar UNA vez para toda la semana</b>. Con el modo prendido, cada
-          carrera de inDrive entra <b className="text-violet-300">COMPLETA</b> (ya no te descuenta el % por viaje — la
-          comisión ya la pagaste con la recarga).
+          La app te dice <b className="text-violet-300">cuánto recargar para toda la semana</b>… pero podés recargar{' '}
+          <b className="text-violet-300">lo que quieras, cuando quieras</b> (diario también): poné el monto y te decimos{' '}
+          <b className="text-violet-300">cuánto te dura</b>. Con el modo prendido, cada carrera de inDrive entra{' '}
+          <b className="text-violet-300">COMPLETA</b> (la comisión ya la pagaste con la recarga).
         </p>
 
         {/* Los 3 datos de la calculadora */}
@@ -623,12 +623,9 @@ export default function AjustesView({
             return (
               <button
                 onClick={() => {
-                  const calc = calcularRecarga(
-                    parseFloat(recargaMeta.replace(',', '.')) || 0,
-                    parseFloat(recargaPct.replace(',', '.')) || 0,
-                    recargaDias,
-                  );
-                  setMontoRecargaTxt(calc.recargaSugerida > 0 ? calc.recargaSugerida.toFixed(2) : '');
+                  // FASE AS: sin prefill — recargás lo que QUIERAS (chips y
+                  // estimación en vivo en el cartel de confirmación)
+                  setMontoRecargaTxt('');
                   setConfirmandoRecarga(true);
                 }}
                 className="mt-2 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 py-2.5 text-xs font-black text-emerald-300 transition-all active:scale-[0.99] hover:bg-emerald-500/20"
@@ -673,14 +670,23 @@ export default function AjustesView({
                     ? ' — ⚠️ queda poco: recargá de nuevo cuando llegue a 0'
                     : ''}
               </p>
+              {/* FASE AS: a tu ritmo, ¿cuántos días de trabajo te quedan? */}
+              {saldo.diasRestantes !== null && (
+                <p className="mt-0.5 text-[10px] font-semibold text-slate-300" data-testid="recarga-saldo-dias">
+                  {saldo.saldo > 0 ? (
+                    <>
+                      ⚡ A tu ritmo te queda para{' '}
+                      <b className="text-violet-300">{textoDias(saldo.diasRestantes)}</b> de trabajo
+                    </>
+                  ) : (
+                    <>🪫 A tu ritmo ya no te queda saldo — recargá para seguir tranquilo</>
+                  )}
+                </p>
+              )}
               <button
                 onClick={() => {
-                  const calc = calcularRecarga(
-                    parseFloat(recargaMeta.replace(',', '.')) || 0,
-                    parseFloat(recargaPct.replace(',', '.')) || 0,
-                    recargaDias,
-                  );
-                  setMontoRecargaTxt(calc.recargaSugerida > 0 ? calc.recargaSugerida.toFixed(2) : '');
+                  // FASE AS: sin prefill — el monto es tuyo (chips arriba)
+                  setMontoRecargaTxt('');
                   setConfirmandoRecarga(true);
                 }}
                 className="mt-2 w-full rounded-xl border border-violet-500/40 bg-violet-500/10 py-2 text-[11px] font-black text-violet-300 transition-all active:scale-[0.99] hover:bg-violet-500/20"
@@ -696,6 +702,24 @@ export default function AjustesView({
         {confirmandoRecarga && (
           <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3" data-testid="recarga-confirmar">
             <p className="text-[11px] font-bold text-emerald-300">¿Cuánto recargaste?</p>
+            {/* FASE AS: chips de monto rápido — un toque y listo (la
+                recarga de todos los días ya no necesita teclado) */}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[10, 15, 20, 30, 50].map(m => (
+                <button
+                  key={m}
+                  onClick={() => setMontoRecargaTxt(String(m))}
+                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-all active:scale-[0.97] ${
+                    parseFloat(montoRecargaTxt) === m
+                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                      : 'border-slate-600 bg-slate-900 text-slate-300 hover:text-emerald-300'
+                  }`}
+                  data-testid={`recarga-chip-${m}`}
+                >
+                  S/ {m}
+                </button>
+              ))}
+            </div>
             <div className="mt-2 flex items-center gap-2">
               <span className="text-sm font-black text-slate-400">S/</span>
               <input
@@ -705,12 +729,33 @@ export default function AjustesView({
                 min="0"
                 value={montoRecargaTxt}
                 onChange={e => setMontoRecargaTxt(e.target.value)}
-                placeholder="63.00"
+                placeholder="15.00"
                 autoFocus
                 className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-emerald-200 outline-none focus:border-emerald-400"
                 data-testid="recarga-monto-input"
               />
             </div>
+            {/* FASE AS: la pregunta de Rudy — «hoy recargué 15, ¿cuánto
+                me va a durar?» — respondida EN VIVO mientras escribís */}
+            {(() => {
+              const monto = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
+              if (monto <= 0) return null;
+              const dur = calcularDuracion(
+                monto,
+                parseFloat(recargaMeta.replace(',', '.')) || 0,
+                parseFloat(recargaPct.replace(',', '.')) || 0,
+              );
+              return dur.estimable ? (
+                <p className="mt-1.5 text-[10px] font-semibold leading-snug text-emerald-300" data-testid="recarga-duracion">
+                  🪫 S/ {monto.toFixed(2)} te duran <b>{dur.diasTexto}</b> — comisión S/ {dur.comisionDia.toFixed(2)} por
+                  día a tu ritmo
+                </p>
+              ) : (
+                <p className="mt-1.5 text-[10px] leading-snug text-slate-400" data-testid="recarga-duracion">
+                  Poné tu meta diaria y % en la calculadora de arriba y te digo cuánto te dura 📝
+                </p>
+              );
+            })()}
             <label className="mt-2 flex items-center gap-2 text-[10px] text-slate-300">
               <input
                 type="checkbox"
@@ -1364,7 +1409,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.14 (✏️ EDITAR VIAJE YA CARGADO: botoncito ámbar «Editar» en cada viaje de la sección 🏍️ Viajes inDrive — corregís los TELÉFONOS (cliente, quien envía, quien recibe) cuando inDrive te manda a comunicarte a otro número distinto del que escaneaste, y también direcciones A/B, tarifa (recalcula el neto al toque) y notas, sin borrar el viaje; sirve igual para SUMARLE un número a un viaje que quedó sin teléfono; fecha, hora, GPS y foto de evidencia quedan intactos, y el cambio viaja solo al otro celular por el sync · Lima, PE
+DriverTrack v0.11.18 (🪫 RECARGA FLEXIBLE + CONTADOR DE SALDO VIVO: la recarga ya no es solo semanal — en Configuración → inDrive → 🎯 Recarga tocá «✅ Ya recargué», elegí el monto con los chips rápidos (10/15/20/30/50) o escribilo libre, y la app te dice EN VIVO cuánto te dura según tu ritmo («hoy recargué 15 → te duran ~1 día y medio»); en la sección 🏍️ Viajes inDrive ahora hay un CONTADOR siempre visible del saldo de tu recarga: cuánto te queda, la barra de consumo, los días que te alcanzan y el aviso «⚠️ ya es hora de recargar» que se descuenta solo con cada viaje que haces; la 💰 Caja del día también lo muestra · Lima, PE
       </p>
     </div>
   );

@@ -43,6 +43,47 @@ export function calcularRecarga(metaDiaria: number, pct: number, dias: number): 
   return { comisionDia, brutoSemana, recargaSugerida, bolsilloReal };
 }
 
+// ═══ FASE AS: recarga FLEXIBLE — cualquier monto (diario también) ═══
+
+/**
+ * FASE AS: número de días → texto listo para la UI.
+ *   7.0 → '~7 días' · 1.7 → '~1 día y medio' · 1.0 → '~1 día'
+ *   0.5 → 'menos de 1 día' · sin datos → '—'
+ */
+export function textoDias(dias: number): string {
+  if (!(dias > 0)) return '—';
+  if (dias >= 1.8) return `~${Math.round(dias)} días`;
+  if (dias >= 1.3) return '~1 día y medio';
+  if (dias >= 0.9) return '~1 día';
+  return 'menos de 1 día';
+}
+
+export interface CalculoDuracion {
+  /** Comisión por día según tu ritmo (meta × %). */
+  comisionDia: number;
+  /** Días que te dura el monto (0 = no estimable). */
+  dias: number;
+  /** Texto listo para mostrar: '~3 días', '~1 día y medio'… */
+  diasTexto: string;
+  /** false = falta meta o % (todavía no hay ritmo para estimar). */
+  estimable: boolean;
+}
+
+/**
+ * FASE AS: la INVERSA de la calculadora — «hoy recargué 15, ¿cuánto
+ * me va a durar?» → monto ÷ comisión por día (meta × %).
+ *   Ej: 15 soles con 60 diarios × 15% → comisión 9/día → 1.7 días.
+ */
+export function calcularDuracion(monto: number, metaDiaria: number, pct: number): CalculoDuracion {
+  const m = Math.max(0, monto || 0);
+  const meta = Math.max(0, metaDiaria || 0);
+  const p = Math.min(Math.max(0, pct || 0), 100);
+  const comisionDia = +(meta * (p / 100)).toFixed(2);
+  const estimable = m > 0 && comisionDia > 0;
+  const dias = estimable ? +(m / comisionDia).toFixed(1) : 0;
+  return { comisionDia, dias, diasTexto: estimable ? textoDias(dias) : '—', estimable };
+}
+
 /**
  * Clave de orden de un viaje para comparar contra la fecha de la
  * recarga: 'YYYY-MM-DD HH:MM' — comparación de strings directa
@@ -80,6 +121,10 @@ export interface EstadoSaldo {
   pctUsado: number;
   /** true = queda menos del 15% → avisar que recargue. */
   casiAgotada: boolean;
+  /** FASE AS: ~cuántos días de trabajo le quedan al saldo al ritmo
+   *  configurado (saldo ÷ comisión por día). null = sin ritmo para
+   *  estimar (falta meta o %) · 0 = ya no queda nada. */
+  diasRestantes: number | null;
 }
 
 /** El estado del saldo de la recarga: usaste X de Y, te queda Z. */
@@ -88,11 +133,15 @@ export function estadoSaldo(viajes: Viaje[], recarga: RecargaSemanal): EstadoSal
   const usado = comisionAcumulada(viajes, recarga.pct, recarga.fecha);
   const saldo = +(recarga.monto - usado).toFixed(2);
   const pctUsado = Math.min(1, recarga.monto > 0 ? usado / recarga.monto : 0);
+  // FASE AS: días que le quedan al saldo — solo si configuraste ritmo
+  const comisionDia = calcularDuracion(recarga.monto, recarga.metaDiaria, recarga.pct).comisionDia;
+  const diasRestantes = comisionDia > 0 ? +(Math.max(0, saldo) / comisionDia).toFixed(1) : null;
   return {
     monto: recarga.monto,
     usado,
     saldo,
     pctUsado,
+    diasRestantes,
     casiAgotada: saldo <= recarga.monto * 0.15,
   };
 }

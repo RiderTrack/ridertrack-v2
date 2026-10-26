@@ -9,7 +9,7 @@ import { ConfigDT, emojiGasto, Gasto, nombreOrigen, nombreGasto, TIPOS_GASTO, Ti
 import { fechaBonita, fechaHoy, horaAhora, resumenDia, totalGastosDia } from '../storage';
 import { armarMensajeCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
 // FASE K: saldo de la recarga semanal (banner comisión prepagada)
-import { estadoSaldo } from '../services/recarga';
+import { estadoSaldo, textoDias } from '../services/recarga';
 // FASE T: 📜 historial — todos tus días con sus números
 import { diasHistorial } from '../services/historialDT';
 import HistorialModal from './HistorialModal';
@@ -141,19 +141,26 @@ export default function CajaView({
 
   return (
     <div className="space-y-3">
-      {/* ═══ FASE K: 🟣 banner comisión prepagada — cada carrera inDrive
-          entra COMPLETA + cómo va el saldo de la recarga ═══ */}
-      {config.recarga?.activa && (
+      {/* ═══ FASE K→AS: 🪫 banner del saldo de la recarga — cada carrera
+          inDrive entra COMPLETA (con el modo activa) + cómo va el saldo.
+          FASE AS: visible también con el modo apagado si registraste una
+          recarga, y con los días que te quedan a tu ritmo. ═══ */}
+      {(config.recarga?.activa || (config.recarga?.monto ?? 0) > 0) && (
         (() => {
-          const saldo = estadoSaldo(viajes, config.recarga!);
+          const saldo = config.recarga ? estadoSaldo(viajes, config.recarga) : null;
           const pct = saldo ? Math.round(saldo.pctUsado * 100) : 0;
+          const alerta = !!saldo && (saldo.saldo < 0 || saldo.casiAgotada);
           return (
             <div
-              className="rounded-2xl border border-violet-500/40 bg-violet-500/10 p-3"
+              className={`rounded-2xl border p-3 ${
+                alerta ? 'border-amber-500/40 bg-amber-500/10' : 'border-violet-500/40 bg-violet-500/10'
+              }`}
               data-testid="banner-prepago"
             >
               <p className="text-xs font-bold text-violet-200">
-                🟣 Comisión prepagada — cada carrera inDrive entra COMPLETA
+                {config.recarga?.activa
+                  ? '🟣 Comisión prepagada — cada carrera inDrive entra COMPLETA'
+                  : '🪫 Saldo de tu recarga inDrive'}
               </p>
               {saldo ? (
                 <>
@@ -163,6 +170,9 @@ export default function CajaView({
                     <b className={saldo.saldo < 0 || saldo.casiAgotada ? 'text-amber-300' : 'text-emerald-400'}>
                       queda S/ {saldo.saldo.toFixed(2)}
                     </b>
+                    {saldo.diasRestantes !== null && saldo.saldo > 0 && (
+                      <> · ⚡ te queda <b className="text-violet-300">{textoDias(saldo.diasRestantes)}</b> de trabajo</>
+                    )}
                   </p>
                   <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-800">
                     <div
@@ -174,15 +184,15 @@ export default function CajaView({
                   </div>
                   {(saldo.saldo < 0 || saldo.casiAgotada) && (
                     <p className="mt-1 text-[10px] font-bold text-amber-300">
-                      ⚠️ {saldo.saldo < 0 ? 'Te pasaste — inDrive ya te pide recarga' : 'Queda poco — recargá de nuevo pronto'}
-                      · Ajustes → inDrive → 🎯 Recarga semanal
+                      ⚠️ {saldo.saldo < 0 ? 'Te pasaste — inDrive ya te pide recarga' : 'Ya es hora de recargar'} ·
+                      Ajustes → inDrive → 🎯 Recarga
                     </p>
                   )}
                 </>
               ) : (
                 <p className="mt-1 text-[11px] leading-snug text-slate-400">
                   Todavía no registraste la recarga — hacelo en <b className="text-slate-200">Ajustes → inDrive → 🎯
-                  Recarga semanal</b> y la app te dice cuánto te queda.
+                  Recarga</b> y la app te dice cuánto te queda.
                 </p>
               )}
             </div>
