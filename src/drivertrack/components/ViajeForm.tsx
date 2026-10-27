@@ -39,7 +39,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EvArchivo } from '../tipos';
 import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, Plus, X, Zap } from 'lucide-react';
-import { ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
+import { CanceladoPor, ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
 import { armarMensajeCobro, fmtSoles, normalizarCelular, vibrar } from '../utils';
 import { escanearDireccion } from '../services/escanerIA';
@@ -71,6 +71,7 @@ interface BorradorViaje {
   notas: string;
   coordenadas?: { lat: number; lng: number } | null;
   coordenadasA?: { lat: number; lng: number } | null; // FASE E: pin del recojo (A)
+  canceladoPor?: CanceladoPor | ''; // FASE AT: ❌ si el pedido se canceló
 }
 
 const K_BORRADOR = 'dt_borrador_v1';
@@ -87,7 +88,7 @@ function leerBorrador(): BorradorViaje | null {
       (b.celular ?? '').trim() || (b.zona ?? '').trim() || (b.yapeNombre ?? '').trim() ||
       (b.yapeNumero ?? '').trim() || (b.notas ?? '').trim() || (b.dirA ?? '').trim() ||
       (b.observacion ?? '').trim() || (Array.isArray(b.paradas) && b.paradas.some(p => String(p ?? '').trim())) ||
-      b.coordenadas || b.coordenadasA;
+      b.coordenadas || b.coordenadasA || b.canceladoPor; // FASE AT: el toggle también cuenta
     if (!algoEscrito) return null;
     return {
       origen: (['indrive', 'rappi', 'pedidosya', 'directo'].includes(b.origen ?? '')
@@ -111,6 +112,7 @@ function leerBorrador(): BorradorViaje | null {
       notas: b.notas ?? '',
       coordenadas: b.coordenadas ?? null,
       coordenadasA: b.coordenadasA ?? null, // FASE E: pin del recojo (A)
+      canceladoPor: b.canceladoPor === 'cliente' || b.canceladoPor === 'yo' ? b.canceladoPor : '', // FASE AT
     };
   } catch {
     return null;
@@ -178,6 +180,10 @@ export default function ViajeForm({
   const [yapeNombre, setYapeNombre] = useState(borradorInicial?.yapeNombre ?? ''); // F-ID2.6: "Mk" en "Mk yape 980811297"
   const [yapeNumero, setYapeNumero] = useState(borradorInicial?.yapeNumero ?? ''); // F-ID2.6: 980811297 — para saber quién pagó
   const [notas, setNotas] = useState(borradorInicial?.notas ?? '');
+  // FASE AT: ❌ el pedido se canceló después de aceptarlo — se registra
+  // con la tarifa (para que el contador le descuente la comisión del
+  // saldo a inDrive, igual que el aplicativo) pero con neto 0
+  const [canceladoPor, setCanceladoPor] = useState<CanceladoPor | ''>(borradorInicial?.canceladoPor ?? '');
   const [error, setError] = useState('');
   // F-ID3.2: coordenadas de la entrega (pin en el mapa)
   const [coordenadas, setCoordenadas] = useState<{ lat: number; lng: number } | null>(
@@ -253,9 +259,10 @@ export default function ViajeForm({
       celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas,
       coordenadasA, // FASE E: pin del recojo sobrevive cambios de pestaña
       paradas, // FASE M: las paradas del multi-punto también sobreviven
+      canceladoPor, // FASE AT: el toggle también sobrevive
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA, paradas]);
+  }, [origen, tarifa, comisionPct, cliente, zona, direccion, dirA, observacion, celularEnvia, celularRecibe, yapeNombre, yapeNumero, notas, coordenadas, coordenadasA, paradas, canceladoPor]);
 
   const { comision, neto } = useMemo(() => {
     const t = parseFloat(tarifa) || 0;
@@ -483,6 +490,11 @@ export default function ViajeForm({
     // recarga semanal de inDrive)
     const p = prepago ? 0 : parseFloat(comisionPct) || 0;
     const c = +(t * (p / 100)).toFixed(2);
+    // FASE AT: ❌ pedido CANCELADO después de aceptarlo — inDrive igual
+    // te cobró la comisión del SALDO (el contador se la descuenta con la
+    // tarifa del pedido) pero NO entró plata: neto 0 y comisión 0 en
+    // la Caja. La tarifa queda guardada como referencia del pedido.
+    const cancelado = canceladoPor === 'cliente' || canceladoPor === 'yo';
     const nuevo: Viaje = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       fecha: fechaHoy(),
@@ -513,9 +525,10 @@ export default function ViajeForm({
         : {}),
       tarifa: t,
       comisionPct: p,
-      comision: c,
-      neto: +(t - c).toFixed(2),
+      comision: cancelado ? 0 : c, // FASE AT: cancelado → la comisión la lleva el contador del saldo
+      neto: cancelado ? 0 : +(t - c).toFixed(2), // FASE AT: cancelado → no entró plata
       notas: notas.trim(),
+      ...(cancelado ? { canceladoPor: canceladoPor as CanceladoPor } : {}), // FASE AT
     };
     onAgregar(nuevo);
     // FASE C.2: el formulario se limpia para el próximo viaje — el
@@ -533,6 +546,7 @@ export default function ViajeForm({
     setYapeNombre('');
     setYapeNumero('');
     setNotas('');
+    setCanceladoPor(''); // FASE AT: el próximo viaje arranca limpio
     setCoordenadas(null);
     setCoordenadasA(null); // FASE E
     borrarBorrador(); // F-ID3.2: el viaje ya está guardado — el borrador se limpia
@@ -723,6 +737,62 @@ export default function ViajeForm({
           </p>
         </div>
       )}
+
+      {/* FASE AT: ❌ el pedido se CANCELÓ después de aceptarlo — inDrive
+          igual te cobra la comisión del saldo; registrándolo acá el
+          contador lo descuenta solo y tu Caja no se infla */}
+      <div
+        className={`mt-2 rounded-xl border px-3 py-2.5 transition-colors ${
+          canceladoPor ? 'border-red-500/50 bg-red-500/[0.07]' : 'border-slate-700 bg-slate-900/60'
+        }`}
+        data-testid="box-cancelado"
+      >
+        <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+          <input
+            type="checkbox"
+            checked={canceladoPor !== ''}
+            onChange={e => setCanceladoPor(e.target.checked ? 'cliente' : '')}
+            className="h-4 w-4 accent-red-500"
+            data-testid="toggle-cancelado"
+          />
+          ❌ El pedido se canceló (después de aceptarlo)
+        </label>
+        {canceladoPor !== '' && (
+          <>
+            <div className="mt-2 flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCanceladoPor('cliente')}
+                className={`flex-1 rounded-lg border py-1.5 text-[11px] font-bold transition-all active:scale-[0.97] ${
+                  canceladoPor === 'cliente'
+                    ? 'border-red-400 bg-red-500/20 text-red-200'
+                    : 'border-slate-600 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+                data-testid="chip-cancelado-cliente"
+              >
+                😞 Me lo cancelaron
+              </button>
+              <button
+                type="button"
+                onClick={() => setCanceladoPor('yo')}
+                className={`flex-1 rounded-lg border py-1.5 text-[11px] font-bold transition-all active:scale-[0.97] ${
+                  canceladoPor === 'yo'
+                    ? 'border-red-400 bg-red-500/20 text-red-200'
+                    : 'border-slate-600 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+                data-testid="chip-cancelado-yo"
+              >
+                🤚 Lo cancelé yo
+              </button>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-snug text-slate-400" data-testid="hint-cancelado">
+              inDrive igual te cobró la comisión → el <b className="text-amber-300">contador de saldo</b> la descuenta
+              con la tarifa del pedido, pero el viaje entra con neto <b>S/ 0</b> (no generó plata en la Caja) — igualito
+              que en el aplicativo.
+            </p>
+          </>
+        )}
+      </div>
 
       {/* Cliente + zona */}
       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1108,14 +1178,29 @@ export default function ViajeForm({
       {/* Cálculo en vivo */}
       {puedeEnviar && (
         <div className="dt-anim-pop mt-3 rounded-xl bg-slate-900/80 p-3 text-sm">
-          <div className="flex justify-between text-slate-400">
-            <span>La plataforma se queda ({comisionPct || 0}%)</span>
-            <span className="text-red-400">−{fmtSoles(comision)}</span>
-          </div>
-          <div className="mt-1 flex justify-between border-t border-slate-700/60 pt-1.5 text-base font-bold">
-            <span className="text-slate-200">TE QUEDA NETO</span>
-            <span className="text-emerald-400">{fmtSoles(neto)}</span>
-          </div>
+          {canceladoPor ? (
+            <>
+              <div className="flex justify-between text-slate-300">
+                <span>❌ Pedido cancelado — no entró plata</span>
+                <span className="font-bold text-red-400">S/ 0.00</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t border-slate-700/60 pt-1.5 text-[11px] text-slate-400">
+                <span>🪫 La comisión se descuenta igual del saldo inDrive</span>
+                {!prepago && <span className="font-bold text-amber-300">−{fmtSoles(comision)}</span>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between text-slate-400">
+                <span>La plataforma se queda ({comisionPct || 0}%)</span>
+                <span className="text-red-400">−{fmtSoles(comision)}</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t border-slate-700/60 pt-1.5 text-base font-bold">
+                <span className="text-slate-200">TE QUEDA NETO</span>
+                <span className="text-emerald-400">{fmtSoles(neto)}</span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1131,7 +1216,7 @@ export default function ViajeForm({
         }`}
       >
         <span className="inline-flex items-center gap-2">
-          <Check size={17} /> Aceptar viaje
+          <Check size={17} /> {canceladoPor ? 'Registrar pedido cancelado' : 'Aceptar viaje'}
         </span>
       </button>
 

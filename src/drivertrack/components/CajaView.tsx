@@ -170,6 +170,14 @@ export default function CajaView({
                     <b className={saldo.saldo < 0 || saldo.casiAgotada ? 'text-amber-300' : 'text-emerald-400'}>
                       queda S/ {saldo.saldo.toFixed(2)}
                     </b>
+                    {saldo.ajustado && (
+                      <span
+                        className="ml-1 rounded bg-sky-500/25 px-1 py-0.5 text-[9px] font-black text-sky-200"
+                        title="Contador sincronizado a mano con tu inDrive"
+                      >
+                        ✏️
+                      </span>
+                    )}
                     {saldo.diasRestantes !== null && saldo.saldo > 0 && (
                       <> · ⚡ te queda <b className="text-violet-300">{textoDias(saldo.diasRestantes)}</b> de trabajo</>
                     )}

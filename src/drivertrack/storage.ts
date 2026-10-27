@@ -125,6 +125,13 @@ function normalizarRecarga(r?: Partial<RecargaSemanal>): RecargaSemanal {
     const n = typeof x === 'number' ? x : parseFloat(String(x ?? ''));
     return Number.isFinite(n) && n >= 0 ? n : def;
   };
+  // FASE AT: el ajuste del contador es el ÚNICO número firmado de la
+  // recarga (la corrección manual puede restar S/ si tu inDrive real
+  // quedó más bajo que el contador)
+  const numSigned = (x: unknown) => {
+    const n = typeof x === 'number' ? x : parseFloat(String(x ?? ''));
+    return Number.isFinite(n) ? n : 0;
+  };
   const dias = Math.round(num(base.dias, 7));
   return {
     activa: base.activa === true,
@@ -133,6 +140,7 @@ function normalizarRecarga(r?: Partial<RecargaSemanal>): RecargaSemanal {
     dias: dias >= 1 && dias <= 7 ? dias : 7,
     monto: +num(base.monto).toFixed(2),
     fecha: String(base.fecha ?? ''),
+    ajuste: +numSigned(base.ajuste).toFixed(2), // FASE AT
   };
 }
 
@@ -247,7 +255,10 @@ export function resumenDia(viajes: Viaje[], fecha: string): ResumenDia {
   }
   return {
     n: delDia.length,
-    bruto: delDia.reduce((s, v) => s + v.tarifa, 0),
+    // FASE AT: un pedido CANCELADO no generó plata → no cuenta en el
+    // bruto del día (igual consume comisión del saldo, pero eso lo
+    // lleva el contador de la recarga, no la Caja)
+    bruto: delDia.reduce((s, v) => s + (v.canceladoPor ? 0 : v.tarifa), 0),
     comision: delDia.reduce((s, v) => s + v.comision, 0),
     neto: delDia.reduce((s, v) => s + v.neto, 0),
     porOrigen,

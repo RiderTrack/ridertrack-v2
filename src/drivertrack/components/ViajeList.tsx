@@ -209,6 +209,9 @@ export default function ViajeList({
         // FASE F: ✓ entrega completada — la tarjeta se pinta de verde
         // suave y el horario queda guardado (para saber cuántos faltan)
         const yaEntregado = v.entregado === true;
+        // FASE AT: ❌ pedido cancelado después de aceptarlo — consume
+        // comisión del saldo pero no generó plata
+        const cancelado = !!v.canceladoPor;
         return (
         <div
           key={v.id}
@@ -216,12 +219,15 @@ export default function ViajeList({
           className={`flex items-center gap-3 rounded-xl border bg-slate-800/60 p-3 scroll-mt-24 ${
             esNuevo
               ? 'border-emerald-500/70 ring-2 ring-emerald-500/40'
-              : yaEntregado
-                ? 'border-emerald-500/50 bg-emerald-500/[0.06]'
-                : 'border-slate-700'
+              : cancelado
+                ? 'border-red-500/40 bg-red-500/[0.05]'
+                : yaEntregado
+                  ? 'border-emerald-500/50 bg-emerald-500/[0.06]'
+                  : 'border-slate-700'
           }`}
           data-testid="tarjeta-viaje"
           data-entregado={yaEntregado ? 'si' : 'no'}
+          data-cancelado={cancelado ? (v.canceladoPor === 'cliente' ? 'cliente' : 'yo') : 'no'}
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -246,6 +252,21 @@ export default function ViajeList({
                   ✓ Entregado{v.entregadoHora ? ` ${v.entregadoHora}` : ''}
                 </span>
               )}
+              {/* FASE AT: ❌ el pedido se canceló después de aceptarlo —
+                  inDrive igual cobró la comisión del saldo */}
+              {cancelado && (
+                <span
+                  className="rounded-md bg-red-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-red-300"
+                  data-testid="badge-cancelado"
+                  title={
+                    v.canceladoPor === 'cliente'
+                      ? 'Te lo cancelaron después de aceptarlo'
+                      : 'Lo cancelaste después de aceptarlo'
+                  }
+                >
+                  ❌ Cancelado{v.canceladoPor === 'cliente' ? ' (cliente)' : ' (vos)'}
+                </span>
+              )}
               <span className="text-xs font-semibold text-emerald-300">{nombreOrigen(v.origen)}</span>
               {(v.cliente || v.zona) && (
                 <span className="truncate text-xs text-slate-400">
@@ -256,11 +277,28 @@ export default function ViajeList({
               )}
             </div>
             <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-xs text-slate-500 line-through">{fmtSoles(v.tarifa)}</span>
-              <span className="text-sm font-bold text-emerald-400">{fmtSoles(v.neto)}</span>
-              <span className="text-[10px] text-red-400/80">
-                −{fmtSoles(v.comision)} ({v.comisionPct}%)
-              </span>
+              {cancelado ? (
+                <>
+                  <span className="text-xs font-bold text-red-300">{fmtSoles(v.tarifa)}</span>
+                  <span className="text-[10px] text-slate-500">pedido cancelado — no cobrado</span>
+                  <span
+                    className="text-[10px] font-semibold text-amber-300"
+                    title="inDrive te cobró esta comisión del saldo — el contador de la recarga la descuenta"
+                  >
+                    🪫 consumió{v.comisionPct > 0
+                      ? ` S/ ${((v.tarifa * v.comisionPct) / 100).toFixed(2)} del saldo`
+                      : ' comisión del saldo'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-500 line-through">{fmtSoles(v.tarifa)}</span>
+                  <span className="text-sm font-bold text-emerald-400">{fmtSoles(v.neto)}</span>
+                  <span className="text-[10px] text-red-400/80">
+                    −{fmtSoles(v.comision)} ({v.comisionPct}%)
+                  </span>
+                </>
+              )}
             </div>
             {/* FASE E: las direcciones ahora se TOCAN para COPIARLAS
                 (A y B por separado — ✓ Copiada como feedback). Al lado

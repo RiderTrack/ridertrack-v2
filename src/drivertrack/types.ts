@@ -4,6 +4,11 @@
 
 export type OrigenViaje = 'indrive' | 'rappi' | 'pedidosya' | 'directo';
 
+// FASE AT: ❌ quién canceló el pedido DESPUÉS de aceptarlo — inDrive
+// igual te cobra la comisión (consume saldo), pero no entró plata.
+// 'cliente' = te lo cancelaron · 'yo' = lo cancelaste vos.
+export type CanceladoPor = 'cliente' | 'yo';
+
 // F-ID3: un punto del recorrido GPS grabado durante un viaje
 export interface PuntoRuta {
   lat: number;  // redondeado a 5 decimales (~1 m)
@@ -48,6 +53,11 @@ export interface Viaje {
   comision: number;    // monto de la comisión
   neto: number;        // tarifa - comisión
   notas: string;
+  /** FASE AT: ❌ el pedido se CANCELÓ después de aceptarlo — inDrive
+   *  igual te cobró comisión del SALDO (el contador la descuenta),
+   *  pero NO entró plata: neto 0 y no cuenta en el bruto de la Caja.
+   *  undefined = viaje normal completado. */
+  canceladoPor?: CanceladoPor;
 }
 
 // ═══ F-ID6: 💸 Gastos del día ═══
@@ -108,6 +118,11 @@ export interface RecargaSemanal {
   /** Cuándo recargaste: 'YYYY-MM-DD HH:MM' (hora Lima) — desde acá se
    *  cuenta la comisión acumulada de tus viajes inDrive. */
   fecha: string;
+  /** FASE AT: ✏️ corrección manual del contador (S/, puede ser NEGATIVA):
+   *  cuando sincronizás el contador con el saldo REAL que te muestra
+   *  inDrive (cancelados que no registraste, comisiones distintas…),
+   *  acá queda el delta. 0 = sin ajuste. Una recarga nueva lo pone en 0. */
+  ajuste?: number;
 }
 
 export const RECARGA_DEFECTO: RecargaSemanal = {
@@ -117,6 +132,7 @@ export const RECARGA_DEFECTO: RecargaSemanal = {
   dias: 7,
   monto: 0,
   fecha: '',
+  ajuste: 0, // FASE AT: sin corrección manual del contador
 };
 
 export interface ConfigDT {

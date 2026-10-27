@@ -20,7 +20,7 @@
 // ═══════════════════════════════════════════════════════════
 import { useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
-import { Viaje } from '../types';
+import { CanceladoPor, Viaje } from '../types';
 import { fmtSoles } from '../utils';
 
 interface Props {
@@ -43,6 +43,11 @@ export default function EditarViajeModal({ viaje, onGuardar, onCerrar }: Props) 
   const [comisionPct, setComisionPct] = useState(String(viaje.comisionPct));
   const [observacion, setObservacion] = useState(viaje.observacion ?? '');
   const [notas, setNotas] = useState(viaje.notas);
+  // FASE AT: ❌ marcar el pedido como CANCELADO después de aceptarlo
+  // (el caso real: ya lo habías registrado y el cliente te lo canceló —
+  // o tuviste que cancelarlo vos). inDrive igual te cobró la comisión
+  // del saldo → el contador la sigue descontando; la Caja no la cuenta.
+  const [canceladoPor, setCanceladoPor] = useState<CanceladoPor | ''>(viaje.canceladoPor ?? '');
   const [error, setError] = useState('');
 
   // Cálculo EN VIVO igual al formulario: coma o punto, comisión
@@ -50,7 +55,8 @@ export default function EditarViajeModal({ viaje, onGuardar, onCerrar }: Props) 
   const t = parseFloat(tarifa.replace(',', '.'));
   const p = parseFloat(comisionPct.replace(',', '.')) || 0;
   const comision = Number.isFinite(t) ? +(t * (p / 100)).toFixed(2) : 0;
-  const neto = Number.isFinite(t) ? +(t - comision).toFixed(2) : 0;
+  const cancelado = canceladoPor === 'cliente' || canceladoPor === 'yo'; // FASE AT
+  const neto = cancelado ? 0 : Number.isFinite(t) ? +(t - comision).toFixed(2) : 0; // FASE AT: cancelado → S/ 0
   const puedeGuardar = Number.isFinite(t) && t > 0;
 
   function guardar() {
@@ -76,9 +82,12 @@ export default function EditarViajeModal({ viaje, onGuardar, onCerrar }: Props) 
       observacion: observacion.trim(),
       tarifa: t,
       comisionPct: p,
-      comision,
-      neto,
+      comision: cancelado ? 0 : comision, // FASE AT: cancelado → la comisión la lleva el contador del saldo
+      neto: cancelado ? 0 : neto, // FASE AT: cancelado → no entró plata
       notas: notas.trim(),
+      ...(cancelado
+        ? { canceladoPor: canceladoPor as CanceladoPor }
+        : { canceladoPor: undefined }), // FASE AT: des-marcar también se puede
     });
   }
 
@@ -275,17 +284,77 @@ export default function EditarViajeModal({ viaje, onGuardar, onCerrar }: Props) 
 
           {/* Neto en vivo — mismo look de la tarjeta (tarifa tachada + neto) */}
           {puedeGuardar && (
-            <p
-              className="flex items-baseline justify-center gap-2 rounded-lg bg-slate-800/60 px-3 py-2 text-xs"
-              data-testid="editar-neto-vivo"
-            >
-              <span className="text-slate-500 line-through">{fmtSoles(t)}</span>
-              <span className="font-bold text-emerald-400">{fmtSoles(neto)}</span>
-              <span className="text-[10px] text-red-400/80">
-                −{fmtSoles(comision)} ({p}%)
-              </span>
-            </p>
+            cancelado ? (
+              <p
+                className="flex items-baseline justify-center gap-2 rounded-lg bg-slate-800/60 px-3 py-2 text-xs"
+                data-testid="editar-neto-vivo"
+              >
+                <span className="font-bold text-red-300">❌ Cancelado — no entró plata (S/ 0.00)</span>
+                <span className="text-[10px] font-semibold text-amber-300">
+                  🪫 la comisión ({p}%) se descuenta igual del saldo
+                </span>
+              </p>
+            ) : (
+              <p
+                className="flex items-baseline justify-center gap-2 rounded-lg bg-slate-800/60 px-3 py-2 text-xs"
+                data-testid="editar-neto-vivo"
+              >
+                <span className="text-slate-500 line-through">{fmtSoles(t)}</span>
+                <span className="font-bold text-emerald-400">{fmtSoles(neto)}</span>
+                <span className="text-[10px] text-red-400/80">
+                  −{fmtSoles(comision)} ({p}%)
+                </span>
+              </p>
+            )
           )}
+
+          {/* FASE AT: ❌ marcar como CANCELADO — el pedido que ya habías
+              registrado y se cayó después de aceptarlo */}
+          <div
+            className={`rounded-xl border px-3 py-2.5 ${
+              cancelado ? 'border-red-500/50 bg-red-500/[0.07]' : 'border-slate-700 bg-slate-950/60'
+            }`}
+            data-testid="box-editar-cancelado"
+          >
+            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+              <input
+                type="checkbox"
+                checked={cancelado}
+                onChange={e => setCanceladoPor(e.target.checked ? 'cliente' : '')}
+                className="h-4 w-4 accent-red-500"
+                data-testid="toggle-editar-cancelado"
+              />
+              ❌ Este pedido se canceló (después de aceptarlo)
+            </label>
+            {cancelado && (
+              <div className="mt-2 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCanceladoPor('cliente')}
+                  className={`flex-1 rounded-lg border py-1.5 text-[11px] font-bold transition-all active:scale-[0.97] ${
+                    canceladoPor === 'cliente'
+                      ? 'border-red-400 bg-red-500/20 text-red-200'
+                      : 'border-slate-600 bg-slate-950 text-slate-400 hover:text-slate-200'
+                  }`}
+                  data-testid="chip-editar-cancelado-cliente"
+                >
+                  😞 Me lo cancelaron
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCanceladoPor('yo')}
+                  className={`flex-1 rounded-lg border py-1.5 text-[11px] font-bold transition-all active:scale-[0.97] ${
+                    canceladoPor === 'yo'
+                      ? 'border-red-400 bg-red-500/20 text-red-200'
+                      : 'border-slate-600 bg-slate-950 text-slate-400 hover:text-slate-200'
+                  }`}
+                  data-testid="chip-editar-cancelado-yo"
+                >
+                  🤚 Lo cancelé yo
+                </button>
+              </div>
+            )}
+          </div>
 
           <div>
             <label className="mb-1 block text-[11px] font-medium text-slate-400">

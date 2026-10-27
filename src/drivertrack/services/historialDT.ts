@@ -67,7 +67,10 @@ export function diasHistorial(viajes: Viaje[], gastos: Gasto[]): DiaHistorial[] 
         o.neto += v.neto;
         porOrigen[v.origen] = o;
       }
-      const bruto = delDia.reduce((s, v) => s + v.tarifa, 0);
+      // FASE AT: los pedidos CANCELADOS no generaron plata → no cuentan
+      // en el bruto del día (la comisión que te cobró inDrive la lleva
+      // el contador del saldo, no la Caja)
+      const bruto = delDia.reduce((s, v) => s + (v.canceladoPor ? 0 : v.tarifa), 0);
       const comision = delDia.reduce((s, v) => s + v.comision, 0);
       const neto = delDia.reduce((s, v) => s + v.neto, 0);
       return {

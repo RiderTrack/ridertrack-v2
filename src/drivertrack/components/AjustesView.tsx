@@ -140,6 +140,11 @@ export default function AjustesView({
   const [recargaDias, setRecargaDias] = useState(config.recarga?.dias || 7);
   const [recargaMonto, setRecargaMonto] = useState(config.recarga?.monto || 0);
   const [recargaFecha, setRecargaFecha] = useState(config.recarga?.fecha || '');
+  // FASE AT: ✏️ la corrección manual del contador (sincronizado con el
+  // saldo real de tu inDrive) — viaja dentro de config.recarga
+  const [recargaAjuste, setRecargaAjuste] = useState(config.recarga?.ajuste ?? 0);
+  const [ajustandoSaldo, setAjustandoSaldo] = useState(false);
+  const [saldoRealTxt, setSaldoRealTxt] = useState('');
   // "Ya recargué": monto a mano + si anotarla como gasto de hoy
   const [confirmandoRecarga, setConfirmandoRecarga] = useState(false);
   const [montoRecargaTxt, setMontoRecargaTxt] = useState('');
@@ -154,7 +159,9 @@ export default function AjustesView({
     return () => window.removeEventListener('dt:sync-remoto', alSync);
   }, []);
 
-  /** El objeto RecargaSemanal con lo que hay en pantalla ahora */
+  /** El objeto RecargaSemanal con lo que hay en pantalla ahora.
+   *  FASE AT: una recarga NUEVA (over) resetea el ajuste ✏️ — contador
+   *  fresco, fresco; sin over se mantiene la corrección a mano. */
   function recargaActual(over?: { monto: number; fecha: string }) {
     return {
       activa: recargaActiva,
@@ -163,6 +170,7 @@ export default function AjustesView({
       dias: Math.round(Number(recargaDias) || 7),
       monto: over ? over.monto : recargaMonto,
       fecha: over ? over.fecha : recargaFecha,
+      ajuste: over ? 0 : recargaAjuste, // FASE AT
     };
   }
 
@@ -387,7 +395,7 @@ export default function AjustesView({
     guardarConfig(c);
     onGuardar(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas, mensajeFoto, recargaActiva, recargaMeta, recargaPct, recargaDias, recargaMonto, recargaFecha]);
+  }, [meta, comisiones, miNombre, miCelular, geminiKey, claudeKey, robotActivo, plantillas, mensajeFoto, recargaActiva, recargaMeta, recargaPct, recargaDias, recargaMonto, recargaFecha, recargaAjuste]);
 
   // FASE K: ✅ "Ya recargué" — registra el monto+fecha y (opcional)
   // lo anota como gasto 📶 Recarga de HOY en la Caja (así el "En mano"
@@ -402,6 +410,7 @@ export default function AjustesView({
     const m = +monto.toFixed(2);
     setRecargaMonto(m);
     setRecargaFecha(fecha);
+    setRecargaAjuste(0); // FASE AT: recarga nueva → contador fresco, sin ajuste viejo
     setConfirmandoRecarga(false);
     setMontoRecargaTxt('');
 
@@ -431,6 +440,40 @@ export default function AjustesView({
         ? `✅ Recarga de S/ ${m.toFixed(2)} registrada (anotada en la Caja de hoy)`
         : `✅ Recarga de S/ ${m.toFixed(2)} registrada`,
     );
+  }
+
+  // ═══ FASE AT: ✏️ SINCRONIZAR el contador con el saldo REAL de inDrive ═══
+  // Cancelados que no registraste, comisiones que difieren… → mirás tu
+  // inDrive, ponés lo que te queda de verdad y el contador queda CLAVADO
+  // al aplicativo. El delta vive en config.recarga.ajuste (firmado).
+  function sincronizarSaldoAjustes() {
+    const real = parseFloat(saldoRealTxt.replace(',', '.'));
+    if (!Number.isFinite(real) || real < 0) {
+      onToast('Poné el saldo que te muestra tu inDrive');
+      return;
+    }
+    const actual = estadoSaldo(viajesSaldo, recargaActual());
+    const delta = +(real - (actual?.saldo ?? 0)).toFixed(2);
+    const nuevoAjuste = +((recargaAjuste ?? 0) + delta).toFixed(2);
+    setRecargaAjuste(nuevoAjuste);
+    const c = { ...armarConfig(), recarga: { ...recargaActual(), ajuste: nuevoAjuste } };
+    guardarConfig(c);
+    onGuardar(c);
+    setAjustandoSaldo(false);
+    setSaldoRealTxt('');
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    onToast(`✅ Contador sincronizado con tu inDrive — queda S/ ${real.toFixed(2)}`);
+  }
+
+  function quitarAjusteSaldoAjustes() {
+    setRecargaAjuste(0);
+    const c = { ...armarConfig(), recarga: { ...recargaActual(), ajuste: 0 } };
+    guardarConfig(c);
+    onGuardar(c);
+    setAjustandoSaldo(false);
+    setSaldoRealTxt('');
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    onToast('✏️ El ajuste se quitó — el contador vuelve a lo calculado');
   }
 
   async function probarKey() {
@@ -465,6 +508,7 @@ export default function AjustesView({
         setRecargaDias(data.config.recarga?.dias || 7);
         setRecargaMonto(data.config.recarga?.monto || 0);
         setRecargaFecha(data.config.recarga?.fecha || '');
+        setRecargaAjuste(data.config.recarga?.ajuste ?? 0); // FASE AT
         setMensajeFoto(data.config.mensajeFoto ?? '');
       }
     } catch {
@@ -650,6 +694,14 @@ export default function AjustesView({
                   data-testid="recarga-saldo-restante"
                 >
                   queda S/ {saldo.saldo.toFixed(2)}
+                  {saldo.ajustado && (
+                    <span
+                      className="ml-1 rounded bg-sky-500/25 px-1 py-0.5 text-[9px] font-black text-sky-200"
+                      title={`Contador sincronizado a mano con tu inDrive (${saldo.ajuste > 0 ? '+' : ''}S/ ${saldo.ajuste.toFixed(2)})`}
+                    >
+                      ✏️ ajustado
+                    </span>
+                  )}
                 </p>
               </div>
               {/* Barra de consumo */}
@@ -682,6 +734,76 @@ export default function AjustesView({
                     <>🪫 A tu ritmo ya no te queda saldo — recargá para seguir tranquilo</>
                   )}
                 </p>
+              )}
+              {/* FASE AT: ✏️ SINCRONIZAR con el saldo real de tu inDrive —
+                  el pedido de Rudy: pedidos cancelados que no se
+                  registran dejan el contador alto; acá lo clavás */}
+              {saldo.ajustado && (
+                <p className="mt-0.5 text-[10px] font-semibold text-sky-300" data-testid="recarga-ajuste-info">
+                  ✏️ Sincronizado a mano con tu inDrive ({saldo.ajuste > 0 ? '+' : ''}
+                  {saldo.ajuste.toFixed(2)}) — los viajes nuevos siguen descontando desde ahí
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  setSaldoRealTxt('');
+                  setAjustandoSaldo(true);
+                }}
+                className="mt-2 w-full rounded-xl border border-sky-500/40 bg-sky-500/10 py-2 text-[11px] font-black text-sky-300 transition-all active:scale-[0.99] hover:bg-sky-500/20"
+                data-testid="boton-sincronizar-indrive"
+              >
+                ✏️ Sincronizar con mi inDrive (editar el contador)
+              </button>
+              {ajustandoSaldo && (
+                <div
+                  className="mt-1.5 rounded-xl border border-sky-500/40 bg-sky-500/[0.07] p-2.5"
+                  data-testid="panel-editar-saldo-ajustes"
+                >
+                  <p className="text-[11px] font-bold text-sky-200">✏️ ¿Cuánto saldo te muestra tu inDrive?</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
+                    Mirá tu inDrive, poné lo que te queda de verdad — el contador queda igualito al aplicativo
+                    (cancelados sin registrar, comisiones distintas… quedan cubiertos).
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-sm font-black text-slate-400">S/</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      value={saldoRealTxt}
+                      onChange={e => setSaldoRealTxt(e.target.value)}
+                      placeholder={saldo.saldo.toFixed(2)}
+                      autoFocus
+                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-sky-200 outline-none focus:border-sky-400"
+                      data-testid="input-saldo-real-ajustes"
+                    />
+                  </div>
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      onClick={() => setAjustandoSaldo(false)}
+                      className="flex-1 rounded-xl bg-slate-800 py-2 text-[11px] font-bold text-slate-300"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={sincronizarSaldoAjustes}
+                      className="flex-1 rounded-xl bg-sky-600 py-2 text-[11px] font-black text-white transition-all active:scale-[0.98] hover:bg-sky-500"
+                      data-testid="boton-sincronizar-saldo-ajustes"
+                    >
+                      ✅ Sincronizar
+                    </button>
+                  </div>
+                  {saldo.ajustado && (
+                    <button
+                      onClick={quitarAjusteSaldoAjustes}
+                      className="mt-1.5 w-full rounded-xl border border-slate-600 bg-slate-900 py-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-200"
+                    >
+                      Quitar el ajuste (S/ {saldo.ajuste > 0 ? '+' : ''}
+                      {saldo.ajuste.toFixed(2)}) — volver a lo calculado
+                    </button>
+                  )}
+                </div>
               )}
               <button
                 onClick={() => {
@@ -1409,7 +1531,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.18 (🪫 RECARGA FLEXIBLE + CONTADOR DE SALDO VIVO: la recarga ya no es solo semanal — en Configuración → inDrive → 🎯 Recarga tocá «✅ Ya recargué», elegí el monto con los chips rápidos (10/15/20/30/50) o escribilo libre, y la app te dice EN VIVO cuánto te dura según tu ritmo («hoy recargué 15 → te duran ~1 día y medio»); en la sección 🏍️ Viajes inDrive ahora hay un CONTADOR siempre visible del saldo de tu recarga: cuánto te queda, la barra de consumo, los días que te alcanzan y el aviso «⚠️ ya es hora de recargar» que se descuenta solo con cada viaje que haces; la 💰 Caja del día también lo muestra · Lima, PE
+DriverTrack v0.11.19 (❌✏️ CONSUMO HONESTO INDRIVE: los pedidos que se CANCELAN después de aceptarlos ya no engañan al contador — en 🏍️ Viajes inDrive marcá «❌ El pedido se canceló» y quién (😞 te lo cancelaron / 🤚 lo cancelaste vos): inDrive igual te cobró la comisión así que el CONTADOR de saldo se la descuenta, pero el viaje entra con neto S/ 0 y no infla tu Caja (igualito que en el aplicativo); también podés marcar como cancelado un viaje ya registrado con el ✏️ de su tarjeta; y si el contador se te separa del aplicativo (cancelados que no registraste, comisiones distintas), tocá el lapicito ✏️ del contador o «✏️ Sincronizar con mi inDrive» acá, poné el saldo que te muestra tu inDrive y queda clavado — una recarga nueva lo devuelve a cero · Lima, PE
       </p>
     </div>
   );

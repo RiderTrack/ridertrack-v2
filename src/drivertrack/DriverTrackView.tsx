@@ -143,6 +143,9 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
   const hoy = fechaHoy();
   const resumenHoy = useMemo(() => resumenDia(viajes, hoy), [viajes, hoy]);
   const delDia = useMemo(() => viajes.filter(v => v.fecha === hoy), [viajes, hoy]);
+  // FASE AT: para el contador de ENTREGAS de hoy no cuentan los pedidos
+  // CANCELADOS (nunca van a quedar entregados — no hay que "alcanzarlos")
+  const delDiaActivos = useMemo(() => delDia.filter(v => !v.canceladoPor), [delDia]);
   // FASE F: ✓ cuántas entregas del día ya están completadas
   const viajesEntregados = useMemo(() => delDia.filter(v => v.entregado === true).length, [delDia]);
   // F-ID6: lo que quedó EN MANO hoy (neto de viajes − gastos anotados)
@@ -155,6 +158,48 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     () => (config.recarga ? estadoSaldo(viajes, config.recarga) : null),
     [viajes, config.recarga],
   );
+
+  // ═══ FASE AT: ✏️ SINCRONIZAR el contador con el saldo REAL de inDrive ═══
+  // El caso de Rudy: pedidos cancelados (que te cancelaron o que
+  // cancelaste) que no registró, comisiones que difieren… → el contador
+  // se separa del aplicativo. Mirás tu inDrive, ponés lo que te queda de
+  // verdad, y el contador queda CLAVADO a la app. El delta vive en
+  // config.recarga.ajuste; los viajes nuevos siguen descontando desde ahí.
+  const [ajustandoSaldo, setAjustandoSaldo] = useState(false);
+  const [saldoRealTxt, setSaldoRealTxt] = useState('');
+  function sincronizarSaldo() {
+    const real = parseFloat(saldoRealTxt.replace(',', '.'));
+    if (!Number.isFinite(real) || real < 0) {
+      mostrarToast('Poné el saldo que te muestra tu inDrive');
+      return;
+    }
+    if (!config.recarga) return;
+    const delta = +(real - (saldoRecarga?.saldo ?? 0)).toFixed(2);
+    const c: ConfigDT = {
+      ...config,
+      recarga: { ...config.recarga, ajuste: +((config.recarga.ajuste ?? 0) + delta).toFixed(2) },
+    };
+    guardarConfig(c);
+    setConfig(c);
+    setAjustandoSaldo(false);
+    setSaldoRealTxt('');
+    // el resto de las vistas (Caja, Ajustes) se recargan del storage
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    mostrarToast(
+      `✅ Contador sincronizado con tu inDrive — queda S/ ${real.toFixed(2)}` +
+        (delta !== 0 ? ` (${delta > 0 ? '+' : ''}S/ ${delta.toFixed(2)})` : ''),
+    );
+  }
+  function quitarAjusteSaldo() {
+    if (!config.recarga) return;
+    const c: ConfigDT = { ...config, recarga: { ...config.recarga, ajuste: 0 } };
+    guardarConfig(c);
+    setConfig(c);
+    setAjustandoSaldo(false);
+    setSaldoRealTxt('');
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    mostrarToast('✏️ El ajuste se quitó — el contador vuelve a lo calculado');
+  }
 
   // Persistencia automática
   useEffect(() => {
@@ -860,6 +905,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
             const alerta = saldoRecarga.saldo < 0 || saldoRecarga.casiAgotada;
             const pct = Math.round(saldoRecarga.pctUsado * 100);
             return (
+              <>
               <button
                 onClick={() => onIrAAjustes?.()}
                 className={`w-full rounded-xl border px-3 py-2 text-left transition-colors hover:brightness-110 ${
@@ -873,6 +919,29 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-violet-200">
                     {config.recarga?.activa ? '🟣 Comisión prepagada' : '🪫 Saldo inDrive'}
+                    {/* FASE AT: ✏️ editar el contador a mano — clavarlo al
+                        saldo real que te muestra la app de inDrive */}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={e => {
+                        e.stopPropagation();
+                        setAjustandoSaldo(v => !v);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.stopPropagation();
+                          setAjustandoSaldo(v => !v);
+                        }
+                      }}
+                      className={`ml-1.5 rounded px-1 py-0.5 text-[10px] font-black transition-colors ${
+                        saldoRecarga.ajustado ? 'bg-sky-500/30 text-sky-200' : 'bg-slate-700/70 text-slate-300 hover:bg-slate-600'
+                      }`}
+                      title="✏️ Editar el contador: poné el saldo que te muestra tu inDrive y queda igualito"
+                      data-testid="boton-editar-saldo"
+                    >
+                      ✏️{saldoRecarga.ajustado ? ' ajustado' : ''}
+                    </span>
                   </span>
                   <span
                     className={`text-xs font-black tabular-nums ${
@@ -905,6 +974,66 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
                   </p>
                 )}
               </button>
+              {/* FASE AT: ✏️ el panel de sincronización — se abre con el
+                  lapicito del contador. Ponés lo que te muestra tu inDrive
+                  y el contador queda CLAVADO al aplicativo. */}
+              {ajustandoSaldo && (
+                <div
+                  className="mt-1 rounded-xl border border-sky-500/40 bg-sky-500/[0.07] p-3"
+                  data-testid="panel-editar-saldo"
+                >
+                  <p className="text-[11px] font-bold text-sky-200">
+                    ✏️ ¿Cuánto saldo te muestra tu inDrive?
+                  </p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
+                    Abrí tu inDrive, mirá tu saldo real y ponelo acá — el contador queda igualito y sigue
+                    descontando desde ahí (los cancelados que faltaron registrar, comisiones distintas… quedan
+                    cubiertos).
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-sm font-black text-slate-400">S/</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      value={saldoRealTxt}
+                      onChange={e => setSaldoRealTxt(e.target.value)}
+                      placeholder={saldoRecarga.saldo.toFixed(2)}
+                      autoFocus
+                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-base font-black text-sky-200 outline-none focus:border-sky-400"
+                      data-testid="input-saldo-real"
+                    />
+                  </div>
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      onClick={() => setAjustandoSaldo(false)}
+                      className="flex-1 rounded-xl bg-slate-800 py-2 text-[11px] font-bold text-slate-300"
+                      data-testid="boton-cancelar-ajuste"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={sincronizarSaldo}
+                      className="flex-1 rounded-xl bg-sky-600 py-2 text-[11px] font-black text-white transition-all active:scale-[0.98] hover:bg-sky-500"
+                      data-testid="boton-sincronizar-saldo"
+                    >
+                      ✅ Sincronizar
+                    </button>
+                  </div>
+                  {saldoRecarga.ajustado && (
+                    <button
+                      onClick={quitarAjusteSaldo}
+                      className="mt-1.5 w-full rounded-xl border border-slate-600 bg-slate-900 py-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-200"
+                      data-testid="boton-quitar-ajuste"
+                    >
+                      Quitar el ajuste (S/ {saldoRecarga.ajuste > 0 ? '+' : ''}
+                      {saldoRecarga.ajuste.toFixed(2)}) — volver a lo calculado
+                    </button>
+                  )}
+                </div>
+              )}
+              </>
             );
           })()
         ) : config.recarga?.activa ? (
@@ -935,8 +1064,10 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
         />
 
         {/* FASE F: ✓ contador de entregas del día — cuántas hiciste y
-            cuántas te faltan (se marca con el botón ✓ de cada viaje) */}
-        {delDia.length > 0 && (
+            cuántas te faltan (se marca con el botón ✓ de cada viaje).
+            FASE AT: los pedidos CANCELADOS no cuentan (nunca quedan
+            entregados) */}
+        {delDiaActivos.length > 0 && (
           <div
             className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2"
             data-testid="chip-entregas-hoy"
@@ -944,13 +1075,13 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
             <p className="flex items-baseline gap-2 text-xs font-bold text-emerald-300">
               ✓ Entregas de hoy
               <span className="tabular-nums text-emerald-200">
-                {viajesEntregados} de {delDia.length}
+                {viajesEntregados} de {delDiaActivos.length}
               </span>
             </p>
             <p className="text-[10px] font-semibold text-slate-400">
-              {viajesEntregados === delDia.length
+              {viajesEntregados === delDiaActivos.length
                 ? '¡día completo! 🎉'
-                : `te faltan ${delDia.length - viajesEntregados}`}
+                : `te faltan ${delDiaActivos.length - viajesEntregados}`}
             </p>
             {/* barrita de progreso — verde lleno sobre gris */}
             <div className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-slate-700">

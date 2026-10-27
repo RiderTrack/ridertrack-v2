@@ -183,6 +183,50 @@ console.log('\n4) sanearDatos — A y B por separado + observación (FASE I)');
   check('regresión: cliente rescata del yape + número limpio', d.cliente === 'Mk' && d.yapeNumero === '980811297');
 }
 
+// ── 3¾. FASE AT: cancelados descuentan + ✏️ ajuste del contador ──
+console.log('\n3¾) FASE AT — pedidos cancelados y sincronización manual');
+{
+  const rec = { activa: false, metaDiaria: 60, pct: 10, dias: 7, monto: 20, fecha: '2026-10-26 07:00' };
+  const viajes = [
+    { id: '1', fecha: '2026-10-26', hora: '10:00', origen: 'indrive', tarifa: 100 },
+    // FASE AT: cancelados — inDrive igual cobra la comisión → descuentan igual
+    { id: '2', fecha: '2026-10-26', hora: '11:00', origen: 'indrive', tarifa: 50, canceladoPor: 'cliente', comision: 0, neto: 0 },
+    { id: '3', fecha: '2026-10-26', hora: '12:00', origen: 'indrive', tarifa: 40, canceladoPor: 'yo', comision: 0, neto: 0 },
+    // un cancelado de OTRA plataforma no consume el saldo inDrive
+    { id: '4', fecha: '2026-10-26', hora: '13:00', origen: 'rappi', tarifa: 30, canceladoPor: 'cliente' },
+  ];
+  const s = estadoSaldo(viajes, rec);
+  check('cancelados descuentan igual: 100+50+40 al 10% → usado 19.00', s.usado === 19, JSON.stringify(s));
+  check('el rappi cancelado NO consume el saldo inDrive', s.usado === 19 && s.saldo === 1, JSON.stringify(s));
+  check('saldo con cancelados: 20 − 19 = 1.00', s.saldo === 1, String(s.saldo));
+  check('sin ajuste: ajustado false y ajuste 0', s.ajustado === false && s.ajuste === 0);
+
+  // ✏️ sincronización manual con el inDrive real
+  const sAj = estadoSaldo(viajes, { ...rec, ajuste: -0.5 });
+  check('ajuste −0.50 → saldo 0.50 (igualito al aplicativo)', sAj.saldo === 0.5, String(sAj.saldo));
+  check('ajustado true con ajuste ≠ 0', sAj.ajustado === true && sAj.ajuste === -0.5);
+  check('pctUsado sube con el ajuste: (20−0.5)/20 = 97.5%', sAj.pctUsado === 0.975, String(sAj.pctUsado));
+  check('casiAgotada usa el saldo AJUSTADO (0.5 ≤ 3)', sAj.casiAgotada === true);
+
+  // ajuste POSITIVO — el contador puede quedar por encima de la recarga
+  const sPos = estadoSaldo(
+    [{ id: '1', fecha: '2026-10-26', hora: '10:00', origen: 'indrive', tarifa: 40 }],
+    { ...rec, ajuste: 30 },
+  );
+  check('ajuste +30 con consumido 4 → saldo 46', sPos.saldo === 46, String(sPos.saldo));
+  check('pctUsado clamp a 0 cuando el saldo supera la recarga', sPos.pctUsado === 0, String(sPos.pctUsado));
+
+  // regresión: sin ajuste el cálculo queda EXACTAMENTE como en FASE AS
+  check('regresión: ajuste 0 → saldo = monto − usado', estadoSaldo(viajes, { ...rec, ajuste: 0 }).saldo === 1);
+  check('regresión: sin el campo ajuste (recargas viejas) anda igual', estadoSaldo(viajes, { ...rec }).saldo === 1);
+
+  // comisionAcumulada directa: los cancelados entran uno a uno
+  check(
+    'comisionAcumulada cuenta los 3 viajes indrive (incluye los 2 cancelados)',
+    comisionAcumulada(viajes, 10, '2026-10-26 07:00') === 19,
+  );
+}
+
 // ── resumen ───────────────────────────────────────────────
 console.log(`\n═══ RESULTADO: ${ok} ✓ · ${fail} ✗ ═══`);
 if (fail > 0) process.exit(1);

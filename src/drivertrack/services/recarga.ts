@@ -99,6 +99,9 @@ export function claveOrdenViaje(v: { fecha: string; hora: string }): string {
  * % sobre la tarifa de cada viaje INDRIVE posterior a la fecha de la
  * recarga (los viajes guardados con el modo activo traen comisión 0,
  * así que se recalcula acá con el % configurado).
+ * FASE AT: los pedidos CANCELADOS (te lo cancelaron / lo cancelaste)
+ * también entran — inDrive igual te cobró esa comisión del saldo
+ * (la tarifa del viaje queda guardada como referencia del pedido).
  */
 export function comisionAcumulada(viajes: Viaje[], pct: number, desdeFecha: string): number {
   const p = Math.min(Math.max(0, pct || 0), 100);
@@ -113,7 +116,8 @@ export function comisionAcumulada(viajes: Viaje[], pct: number, desdeFecha: stri
 export interface EstadoSaldo {
   /** Recarga registrada (S/). */
   monto: number;
-  /** Comisión consumida por tus viajes desde la recarga. */
+  /** Comisión consumida por tus viajes desde la recarga
+   *  (FASE AT: cancelados incluidos — inDrive los cobra igual). */
   usado: number;
   /** Lo que le queda a la recarga (puede ser negativo = te pasaste). */
   saldo: number;
@@ -125,14 +129,27 @@ export interface EstadoSaldo {
    *  configurado (saldo ÷ comisión por día). null = sin ritmo para
    *  estimar (falta meta o %) · 0 = ya no queda nada. */
   diasRestantes: number | null;
+  /** FASE AT: ✏️ la corrección manual guardada al sincronizar el
+   *  contador con el saldo REAL de tu inDrive (S/, firmada). */
+  ajuste: number;
+  /** FASE AT: true = el contador fue sincronizado a mano (muestra ✏️). */
+  ajustado: boolean;
 }
 
-/** El estado del saldo de la recarga: usaste X de Y, te queda Z. */
+/** El estado del saldo de la recarga: usaste X de Y, te queda Z.
+ * FASE AT: si sincronizaste el contador con tu inDrive real
+ * («me queda 7.50 en la app»), recarga.ajuste guarda el delta y el
+ * saldo sale clavado al aplicativo — los viajes nuevos siguen
+ * descontando desde ahí. */
 export function estadoSaldo(viajes: Viaje[], recarga: RecargaSemanal): EstadoSaldo | null {
   if (!recarga.monto || recarga.monto <= 0 || !recarga.fecha) return null;
   const usado = comisionAcumulada(viajes, recarga.pct, recarga.fecha);
-  const saldo = +(recarga.monto - usado).toFixed(2);
-  const pctUsado = Math.min(1, recarga.monto > 0 ? usado / recarga.monto : 0);
+  const ajuste = +(recarga.ajuste ?? 0); // FASE AT: corrección manual
+  const saldo = +(recarga.monto - usado + ajuste).toFixed(2);
+  const pctUsado = Math.min(
+    1,
+    Math.max(0, recarga.monto > 0 ? (recarga.monto - saldo) / recarga.monto : 0),
+  );
   // FASE AS: días que le quedan al saldo — solo si configuraste ritmo
   const comisionDia = calcularDuracion(recarga.monto, recarga.metaDiaria, recarga.pct).comisionDia;
   const diasRestantes = comisionDia > 0 ? +(Math.max(0, saldo) / comisionDia).toFixed(1) : null;
@@ -142,6 +159,8 @@ export function estadoSaldo(viajes: Viaje[], recarga: RecargaSemanal): EstadoSal
     saldo,
     pctUsado,
     diasRestantes,
+    ajuste,
+    ajustado: ajuste !== 0, // FASE AT
     casiAgotada: saldo <= recarga.monto * 0.15,
   };
 }
