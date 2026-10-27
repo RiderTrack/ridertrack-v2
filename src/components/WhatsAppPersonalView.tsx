@@ -30,6 +30,10 @@ import {
   leerMediaPersonal, reencolarPendientePersonal,
 } from '../utils/chatPersonal';
 import { horaCorta, etiquetaDia } from '../utils/chatBaileys';
+// 🆕 v0.11.20 FASE AU: fotos de perfil REALES en el chat personal — el
+// MISMO mapa vivo de clientes_registrados que ya usa el chat de trabajo
+// (singleton: una sola suscripción para los dos chats, la app no pesa más).
+import { fotoDeCliente, suscribirFotosPerfil } from '../services/fotosPerfil';
 // F5.1: 🎵 apartado de configuración de medios por chat
 import { PanelMediosChat } from './medios/PanelMediosChat';
 import { esComandoMedios, ejecutarComandoMedios } from '../utils/mediosChat';
@@ -69,14 +73,31 @@ function AvatarPersonal({ tel, nombre, esGrupo, enLinea, tamano = 44 }: {
 }) {
   const { bg, texto } = colorAvatar(tel);
   const inicial = String(nombre || tel).trim().charAt(0).toUpperCase() || '?';
+  // 🆕 v0.11.20 FASE AU: si hay foto REAL de WhatsApp para este teléfono
+  // (la guarda el bot de trabajo en clientes_registrados cuando el
+  // cliente le escribe), se muestra en vez de las iniciales. Si la
+  // imagen no carga (URL vencida, sin señal), vuelve a las iniciales.
+  const foto = !esGrupo ? fotoDeCliente(tel) : undefined;
+  const [fotoRota, setFotoRota] = useState(false);
   return (
     <div className="relative shrink-0">
-      <div
-        className={`${bg} ${texto} rounded-full flex items-center justify-center font-black shadow-lg`}
-        style={{ width: tamano, height: tamano, fontSize: tamano * 0.4 }}
-      >
-        {esGrupo ? <Users size={tamano * 0.45} /> : inicial}
-      </div>
+      {foto && !fotoRota ? (
+        <img
+          src={foto}
+          alt={nombre || tel}
+          className="rounded-full object-cover shadow-lg bg-slate-700"
+          style={{ width: tamano, height: tamano }}
+          onError={() => setFotoRota(true)}
+          data-testid="avatar-foto-personal"
+        />
+      ) : (
+        <div
+          className={`${bg} ${texto} rounded-full flex items-center justify-center font-black shadow-lg`}
+          style={{ width: tamano, height: tamano, fontSize: tamano * 0.4 }}
+        >
+          {esGrupo ? <Users size={tamano * 0.45} /> : inicial}
+        </div>
+      )}
       {enLinea && (
         <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-800 animate-pulse" />
       )}
@@ -369,6 +390,14 @@ export function WhatsAppPersonalView({ onShowToast }: WhatsAppPersonalViewProps)
   const pegadoAbajoRef = useRef(true);
 
   // ── Suscripciones ──────────────────────────────────────
+  // 🆕 v0.11.20 FASE AU: fotos de perfil (mapa vivo compartido con el
+  // chat de trabajo — el tick solo re-renderiza cuando llegan fotos).
+  const [, setFotosTick] = useState(0);
+  useEffect(() => {
+    const unsubFotos = suscribirFotosPerfil(() => setFotosTick((t) => t + 1));
+    return unsubFotos;
+  }, []);
+
   useEffect(() => {
     const sub = suscribirChatPersonal((convs, st, pends) => {
       setConversaciones(convs);
