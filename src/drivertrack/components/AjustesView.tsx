@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.22 (🩹 EL SALDO DE TU RECARGA YA NO SE PISA: si te quedaba S/3 de la recarga anterior y recargás S/10, la app acumula y arrancás con S/13 — antes la recarga nueva pisaba a la vieja y el resto se perdía; si te habías pasado de comisión (o el contador tenía corrección manual), la recarga nueva primero cuadra la deuda, igual que inDrive; el gasto en la Caja anota solo lo que pagaste HOY, el modal te muestra el cálculo en vivo y la duración se estima sobre el saldo TOTAL · Lima, PE
+DriverTrack v0.11.23 (📦 PEDIDOS COMPLETOS + 📱 FOTO AL CLIENTE + 🖼️ FOTOS DEL WHATSAPP PERSONAL: en Mi Ruta ya podés leer TODOS los pedidos de cada cliente, por largos que sean — antes la lista se cortaba con «…» cuando un cliente pedía varias cosas; en el reporte con foto a MATE hay una palanca nueva «Enviar también al cliente» — prendida por defecto en «Entregado», le llega la misma foto con un mensajito amigable, como en inDrive (requiere bot v3.10-FOTOCLIENTE); y el bot del WhatsApp personal (v1.9, zip aparte) ahora también guarda la foto de perfil de quien te escribe → los avatares reales aparecen en ese chat sin escribirle al número de trabajo · Lima, PE
       </p>
     </div>
   );

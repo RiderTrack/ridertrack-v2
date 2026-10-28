@@ -291,6 +291,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const [pagoFotoMetodo, setPagoFotoMetodo] = useState<'yape' | 'plin' | 'efectivo' | 'transferencia' | 'pos' | 'mixto'>('yape');
   const [pagoFotoSubiendo, setPagoFotoSubiendo] = useState(false);
   const [pagoFotoTipo, setPagoFotoTipo] = useState<'comprobante' | 'entregado' | 'otro'>('comprobante');
+  // 📱 FASE AX: la foto del reporte TAMBIÉN al cliente (como inDrive
+  // manda la foto al que envía y al que recibe). Prendida por defecto
+  // solo para «Entregado» — el comprobante es asunto interno tuyo.
+  const [pagoFotoAlCliente, setPagoFotoAlCliente] = useState(false);
   const pagoFotoInputRef = useRef<HTMLInputElement>(null);
   const pagoFotoGaleriaRef = useRef<HTMLInputElement>(null);
 
@@ -1945,9 +1949,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       )}
                       {c.hora && <span className="text-[9px] text-slate-500">{c.hora}</span>}
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      {c.prod && <span className="text-[10px] text-slate-400 truncate">{c.prod}</span>}
-                      {c.dist && <span className="text-[10px] text-slate-500">· {c.dist}</span>}
+                    {/* 📦 FASE AX: pedidos COMPLETOS — antes el producto venía
+                        con truncate y cuando un cliente pedía varias cosas la
+                        lista se cortaba con «…» y no podías leer qué llevaba.
+                        Ahora fluye en las líneas que haga falta; el tooltip
+                        trae el texto completo por si querés copiarlo. */}
+                    <div className="mt-0.5 leading-snug" data-testid={`prod-fila-${c.id}`}>
+                      {c.prod && <span className="text-[10px] text-slate-400 break-words" title={c.prod}>{c.prod}</span>}
+                      {c.prod && c.dist && <span className="text-[10px] text-slate-500"> · </span>}
+                      {c.dist && <span className="text-[10px] text-slate-500">{c.dist}</span>}
                     </div>
                   </div>
 
@@ -2319,7 +2329,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <button onClick={() => { abrirWhatsApp(c); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">💬</span> Abrir WhatsApp
                             </button>
-                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoTipo('comprobante'); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoTipo('comprobante'); setPagoFotoAlCliente(false); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📸</span> Pago con foto
                             </button>
                             <button onClick={() => { setBotModalId(null); setMateTab('estado'); setMateEstadoSel(''); setMateReprogramar(''); setMateMinutos(null); setMateMinutosCustom(''); setMatePlantillaSel(''); setMateMensaje(''); setMateMotivo(''); setMateMostrarAgregarFrase(false); setMateMostrarGuardarPlantilla(false); setMateNuevaFrase(''); setMateNuevoNombrePlantilla(''); setReporteMateModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all active:scale-95">
@@ -2811,6 +2821,24 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
                       const mensajeFoto = construirMensajeFoto();
 
+                      // 📱 FASE AX: el mensaje que recibirá el CLIENTE si la
+                      // palanca está prendida. NADA de datos internos (ni
+                      // dirección ni «comprobante») — un mensajito amigable,
+                      // como el de inDrive cuando manda la foto de la entrega.
+                      const celClienteValido = _botCel(c.cel || '');
+                      const construirMensajeCliente = () => {
+                        const partes: string[] = [];
+                        if (c.nombre) partes.push(`👋 Hola ${c.nombre}`);
+                        if (pagoFotoTipo === 'entregado') partes.push('✅ Tu pedido fue entregado');
+                        else if (pagoFotoTipo === 'comprobante') partes.push('💵 Ya registré tu pago');
+                        else partes.push('📦 Reporte de tu pedido');
+                        if (c.prod && c.prod !== '—') partes.push(`📦 ${c.prod}`);
+                        partes.push('📸 Te adjunto la foto.');
+                        partes.push('¡Gracias por tu compra! 🙏');
+                        return partes.join('\n');
+                      };
+                      const mensajeCliente = construirMensajeCliente();
+
                       return (
                       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !pagoFotoSubiendo && setPagoFotoModalId(null)}>
                         <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -2832,15 +2860,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           <div className="mb-3">
                             <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Tipo de reporte</label>
                             <div className="grid grid-cols-3 gap-1.5">
-                              <button onClick={() => setPagoFotoTipo('comprobante')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'comprobante' ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => { setPagoFotoTipo('comprobante'); setPagoFotoAlCliente(false); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'comprobante' ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">📸</span>
                                 Comprobante
                               </button>
-                              <button onClick={() => setPagoFotoTipo('entregado')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'entregado' ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => { setPagoFotoTipo('entregado'); setPagoFotoAlCliente(true); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'entregado' ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">✅</span>
                                 Entregado
                               </button>
-                              <button onClick={() => setPagoFotoTipo('otro')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'otro' ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => { setPagoFotoTipo('otro'); setPagoFotoAlCliente(false); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'otro' ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">📦</span>
                                 Otro
                               </button>
@@ -2931,6 +2959,32 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             </>
                           )}
 
+                          {/* 📱 FASE AX: la foto TAMBIÉN al cliente — como la
+                              sección inDrive manda la foto al que envía y al
+                              que recibe. El celular ya viaja en la acción; si
+                              el cliente no tiene número, la palanca queda
+                              apagada con su razón al pie. */}
+                          <div className="mb-3">
+                            <button
+                              type="button"
+                              data-testid="toggle-foto-cliente"
+                              onClick={() => { if (celClienteValido && !pagoFotoSubiendo) setPagoFotoAlCliente(v => !v); }}
+                              disabled={!celClienteValido || pagoFotoSubiendo}
+                              className={`w-full flex items-center gap-2.5 p-2.5 rounded-lg border-2 text-left transition-all active:scale-[0.98] disabled:opacity-40 ${pagoFotoAlCliente && celClienteValido ? 'bg-emerald-500/15 border-emerald-500/60' : 'bg-slate-800 border-slate-700'}`}
+                            >
+                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0 ${pagoFotoAlCliente && celClienteValido ? 'bg-emerald-500/25' : 'bg-slate-700'}`}>📱</span>
+                              <span className="flex-1 min-w-0">
+                                <span className={`block text-xs font-bold ${pagoFotoAlCliente && celClienteValido ? 'text-emerald-300' : 'text-slate-300'}`}>Enviar también al cliente</span>
+                                <span className="block text-[10px] text-slate-500 truncate">
+                                  {celClienteValido ? `Le llega la foto con un mensajito amigable (${celClienteValido})` : 'Este cliente no tiene celular guardado'}
+                                </span>
+                              </span>
+                              <span className={`w-10 h-6 rounded-full p-0.5 flex shrink-0 transition-all ${pagoFotoAlCliente && celClienteValido ? 'bg-emerald-500' : 'bg-slate-600'}`}>
+                                <span className={`w-5 h-5 rounded-full bg-white transition-all ${pagoFotoAlCliente && celClienteValido ? 'translate-x-4' : ''}`} />
+                              </span>
+                            </button>
+                          </div>
+
                           {/* Vista previa del mensaje */}
                           <div className="mb-3">
                             <label className="text-[10px] text-emerald-400 uppercase font-bold mb-1 block">👁️ Vista previa (lo que recibirá MATE)</label>
@@ -2938,6 +2992,16 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                               <pre className="text-[10px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">{mensajeFoto}</pre>
                             </div>
                           </div>
+
+                          {/* 📱 FASE AX: preview de lo que recibirá el cliente */}
+                          {pagoFotoAlCliente && celClienteValido && (
+                            <div className="mb-3">
+                              <label className="text-[10px] text-emerald-300 uppercase font-bold mb-1 block">📱 Lo que recibirá el CLIENTE</label>
+                              <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-lg p-3 max-h-40 overflow-y-auto">
+                                <pre className="text-[10px] text-slate-200 whitespace-pre-wrap font-sans leading-relaxed" data-testid="preview-msg-cliente">{mensajeCliente}</pre>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Botones */}
                           <div className="flex gap-2">
@@ -2971,6 +3035,13 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     comentario: pagoFotoTipo === 'comprobante'
                                       ? `Método: ${pagoFotoMetodo.toUpperCase()} · Monto recibido: S/ ${parseFloat(pagoFotoMonto || '0').toFixed(2)}`
                                       : '',
+                                    // 📱 FASE AX: la misma foto al cliente con su
+                                    // mensajito amigable — la manda el bot v3.10
+                                    // justo después del grupo. Con un bot viejo
+                                    // los campos extra se ignoran y el reporte
+                                    // al grupo sale igual que siempre.
+                                    enviarCliente: pagoFotoAlCliente && !!celClienteValido,
+                                    mensajeCliente: pagoFotoAlCliente && celClienteValido ? mensajeCliente : '',
                                   });
                                   // Cambiar estado del cliente según tipo
                                   if (pagoFotoTipo === 'entregado') {
@@ -2979,13 +3050,14 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     const estadoMap: Record<string, string> = { yape: 'yape-rudy', plin: 'yape-plin', efectivo: 'efectivo', transferencia: 'transferencia', pos: 'pos', mixto: 'mixto' };
                                     cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
                                   }
-                                  onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado a MATE`, 'success');
+                                  onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado a MATE${pagoFotoAlCliente && celClienteValido ? ' y al cliente 📱' : ''}`, 'success');
                                   setPagoFotoModalId(null);
                                   setPagoFotoArchivo(null);
                                   setPagoFotoPreview(null);
                                   setPagoFotoMonto('');
                                   setPagoFotoMetodo('yape');
                                   setPagoFotoTipo('comprobante');
+                                  setPagoFotoAlCliente(false);
                                 } catch (e: any) {
                                   console.error('❌ Error subiendo foto:', e);
                                   onShowToast?.('❌ Error', e.message || 'No se pudo subir la foto', 'error');
@@ -3001,7 +3073,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           </div>
 
                           <div className="mt-2 text-[10px] text-slate-500 text-center">
-                            La foto y el mensaje se enviarán al grupo MATE
+                            La foto y el mensaje se enviarán al grupo MATE{pagoFotoAlCliente && celClienteValido ? ' y al cliente' : ''}
                           </div>
                         </div>
                       </div>
