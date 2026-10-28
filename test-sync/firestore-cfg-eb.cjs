@@ -1100,6 +1100,10 @@ var CONFIG_CUENTAS_DEFAULT = {
   bcp: { titular: "Rudy Alen", cci: "002-999-999999999999-99", numero: "999-99999999-9-99" },
   bbva: { titular: "Rudy Alen", cci: "011-999-000000000000-00", numero: "0011-9999-9900000000" },
   interbank: { titular: "Rudy Alen", cci: "003-000-999999999-99", numero: "999-999999999-99" },
+  bcpEmpresa: { titular: "", cci: "", numero: "" },
+  bbvaEmpresa: { titular: "", cci: "", numero: "" },
+  interbankEmpresa: { titular: "", cci: "", numero: "" },
+  plantillaCuenta: "",
   plin: { nombre: "Rudy Alen", telefono: "999999999", qrUrl: "" },
   qrEmpresa: { nombre: "", telefono: "", qrUrl: "" },
   empresa: { nombre: "MATE", telefono: "+51999999999", direccion: "Lima, Per\xFA" },
@@ -1160,6 +1164,10 @@ function fusionarConfig(data) {
     bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data?.bcp },
     bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
     interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
+    bcpEmpresa: { ...CONFIG_CUENTAS_DEFAULT.bcpEmpresa, ...data?.bcpEmpresa },
+    bbvaEmpresa: { ...CONFIG_CUENTAS_DEFAULT.bbvaEmpresa, ...data?.bbvaEmpresa },
+    interbankEmpresa: { ...CONFIG_CUENTAS_DEFAULT.interbankEmpresa, ...data?.interbankEmpresa },
+    plantillaCuenta: typeof data?.plantillaCuenta === "string" ? data.plantillaCuenta : "",
     plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
     qrEmpresa: { ...CONFIG_CUENTAS_DEFAULT.qrEmpresa, ...data?.qrEmpresa },
     empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },
@@ -1604,13 +1612,59 @@ function _botCel(cel) {
   if (d.length === 13 && d.startsWith("0051")) return d.slice(2);
   return d.length >= 9 ? "51" + d.slice(-9) : null;
 }
+function comprimirFotoParaStorage(file, maxDim = 1280, calidad = 0.72) {
+  return new Promise((resolver) => {
+    try {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round(h * maxDim / w);
+              w = maxDim;
+            } else {
+              w = Math.round(w * maxDim / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          canvas.toBlob(
+            (b) => {
+              URL.revokeObjectURL(url);
+              resolver(b && b.size > 0 && b.size <= file.size ? b : file);
+            },
+            "image/jpeg",
+            calidad
+          );
+        } catch {
+          URL.revokeObjectURL(url);
+          resolver(file);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolver(file);
+      };
+      img.src = url;
+    } catch {
+      resolver(file);
+    }
+  });
+}
 async function subirFotoPago(uid, clienteId, file) {
   if (!import_firebase.storage) throw new Error("Storage no inicializado");
+  const archivo = await comprimirFotoParaStorage(file);
+  console.log("\u{1F5DC}\uFE0F Comprobante comprimido: " + Math.round(file.size / 1024) + " KB \u2192 " + Math.round(archivo.size / 1024) + " KB");
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
   const ruta = `pagos/${uid}/${safeId}_${timestamp}.jpg`;
   const refImg = (0, import_storage.ref)(import_firebase.storage, ruta);
-  await (0, import_storage.uploadBytes)(refImg, file, {
+  await (0, import_storage.uploadBytes)(refImg, archivo, {
     contentType: "image/jpeg",
     customMetadata: {
       clienteId: String(clienteId),
@@ -1625,11 +1679,12 @@ async function subirFotoPago(uid, clienteId, file) {
 async function subirFotoEntrega(uid, clienteId, file, dataUrlFallback) {
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const archivo = await comprimirFotoParaStorage(file);
   if (import_firebase.storage) {
     try {
       const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
       const refImg = (0, import_storage.ref)(import_firebase.storage, ruta);
-      await (0, import_storage.uploadBytes)(refImg, file, {
+      await (0, import_storage.uploadBytes)(refImg, archivo, {
         contentType: "image/jpeg",
         customMetadata: {
           clienteId: String(clienteId),

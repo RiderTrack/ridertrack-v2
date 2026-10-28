@@ -1950,12 +1950,67 @@ function _botCel(cel: string): string | null {
 export { _botCel };
 
 // ═══════════════════════════════════════════════════════════
+// 🗜️ v0.11.24 — comprimir ANTES de subir a Storage
+// ═══════════════════════════════════════════════════════════
+// REPORTA Rudy (28-oct): subir el comprobante de pago en Trabajo
+// demoraba 15+ MINUTOS y terminaba mandándolo a mano. CAUSA: la
+// foto de la cámara viaja CRUDA (3-8 MB en un Android moderno) y
+// subirFotoPago la subía tal cual a Storage — en datos móviles +
+// la conexión zombie del WebView, eternidad. La sección inDrive
+// comprime antes de viajar (máx 720 px ≈ 60-150 KB) y por eso
+// vuela. Ahora los comprobantes de Trabajo tienen el mismo trato:
+// se re-dimensiona a máx 1280 px y se re-codifica JPEG 0.72 ANTES
+// de subir (~100-350 KB) — la subida queda ~20x más liviana y el
+// bot también descarga la imagen más rápido. Si la compresión
+// falla (formato raro / canvas caído), se sube la ORIGINAL: el
+// flujo nunca se rompe, solo vuelve a ser lento.
+function comprimirFotoParaStorage(file: File | Blob, maxDim = 1280, calidad = 0.72): Promise<Blob> {
+  return new Promise((resolver) => {
+    try {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(
+            (b) => {
+              URL.revokeObjectURL(url);
+              // solo usa la comprimida si salió decente (no vacía ni más pesada)
+              resolver(b && b.size > 0 && b.size <= file.size ? b : file);
+            },
+            'image/jpeg',
+            calidad
+          );
+        } catch {
+          URL.revokeObjectURL(url);
+          resolver(file);
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolver(file); };
+      img.src = url;
+    } catch {
+      resolver(file); // nunca rompe el envío
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
 // 📸 SUBIR FOTO A STORAGE (Reportar pago con foto)
 // ═══════════════════════════════════════════════════════════
 
 /**
  * Sube una foto del comprobante de pago a Firebase Storage.
  * Ruta: pagos/{uid}/{clienteId}_{timestamp}.jpg
+ * 🗜️ v0.11.24: comprime ANTES de subir (la cruda de 3-8 MB →
+ * ~100-350 KB) — la subida que demoraba 15+ min queda en segundos.
  * @returns URL pública de la imagen subida
  */
 export async function subirFotoPago(
@@ -1965,13 +2020,16 @@ export async function subirFotoPago(
 ): Promise<string> {
   if (!storage) throw new Error('Storage no inicializado');
 
+  const archivo = await comprimirFotoParaStorage(file);
+  console.log('🗜️ Comprobante comprimido: ' + Math.round(file.size / 1024) + ' KB → ' + Math.round(archivo.size / 1024) + ' KB');
+
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
   const ruta = `pagos/${uid}/${safeId}_${timestamp}.jpg`;
   const refImg = storageRef(storage, ruta);
 
   // Subir con metadata para optimizar cache
-  await uploadBytes(refImg, file, {
+  await uploadBytes(refImg, archivo, {
     contentType: 'image/jpeg',
     customMetadata: {
       clienteId: String(clienteId),
@@ -2004,12 +2062,16 @@ export async function subirFotoEntrega(
   const timestamp = Date.now();
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, '_');
 
+  // 🗜️ v0.11.24: misma compresión que el comprobante — la evidencia
+  // cruda de 3-8 MB también demoraba una eternidad en subir.
+  const archivo = await comprimirFotoParaStorage(file);
+
   if (storage) {
     try {
       const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
       const refImg = storageRef(storage, ruta);
 
-      await uploadBytes(refImg, file, {
+      await uploadBytes(refImg, archivo, {
         contentType: 'image/jpeg',
         customMetadata: {
           clienteId: String(clienteId),
