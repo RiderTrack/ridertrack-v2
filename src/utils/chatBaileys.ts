@@ -744,6 +744,8 @@ export function etiquetaAccionBot(tipo?: string): string {
     case 'solicitar_ubicacion': return '📍 Pedido de ubicación enviado';
     case 'enviar_yape': return '💰 QR de Yape enviado';
     case 'enviar_plin': return '💚 QR de Plin enviado';
+    // 🏦 FASE AV: el clic que antes moría en silencio
+    case 'cuentas_banco': return '🏦 Datos de cuenta enviados';
     case 'broadcast_inicio': return '📢 Aviso de inicio de ruta';
     case 'enviar_texto_directo': return '💬 Mensaje del bot';
     case 'enviar_grupo_mate': return '👥 Reporte al grupo MATE';

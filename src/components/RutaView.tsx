@@ -59,6 +59,8 @@ import { compartirQRWhatsApp } from '../utils/shareQR';
 import { Flag, MapPinned, ClipboardList, Copy, Check, Bike, Navigation as NavigationIcon } from 'lucide-react';
 // Fase 2.8: exportación a la app Circuit (formato de importación)
 import { exportarCircuitRuta } from '../utils/exportarExcel';
+// 🏦 FASE AV: las cuentas de banco — texto estilo Yape + números viajan en la acción
+import { construirTextoCuenta, construirCuentasAccion, hayCuentasCategoria, cuentaDeCategoria, CategoriaCuenta } from '../utils/cuentasBanco';
 // Fase 3.12: navegación GPS propia con voz (modal de pantalla completa)
 import { NavegacionGpsModal } from './navegacion/NavegacionGpsModal';
 import type { ParadaNav } from '../services/navegacionGps';
@@ -274,6 +276,8 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
 
   // Estados modal 🏦 Cuentas de la Empresa
   const [cuentasModalId, setCuentasModalId] = useState<string | number | null>(null);
+  // 🏦 FASE AV: ¿le llega al cliente la cuenta MÍA o la de la EMPRESA?
+  const [cuentasCategoria, setCuentasCategoria] = useState<CategoriaCuenta>('mia');
 
   // Estados modal 💬 Otros temas a MATE
   const [otrosMateModalId, setOtrosMateModalId] = useState<string | number | null>(null);
@@ -2639,41 +2643,46 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                     {cuentasModalId === c.id && (
                       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setCuentasModalId(null)}>
                         <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-base font-bold text-white">🏦 Cuentas de la Empresa</h3>
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-base font-bold text-white">🏦 Cuentas Bancarias</h3>
                             <button onClick={() => setCuentasModalId(null)} className="text-slate-400 hover:text-white">
                               <X className="w-5 h-5" />
                             </button>
                           </div>
-                          <p className="text-[11px] text-slate-400 mb-3">El bot le enviará los datos bancarios al cliente</p>
+                          <p className="text-[11px] text-slate-400 mb-3">El bot le enviará los datos de la cuenta que elijas — mensaje bonito estilo QR de Yape</p>
+
+                          {/* 🏦 FASE AV: ¿le llega la cuenta MÍA o la de la EMPRESA? */}
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            <button onClick={() => setCuentasCategoria('mia')} className={`py-2 rounded-xl text-xs font-bold border transition-all ${cuentasCategoria === 'mia' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>👤 Mi cuenta</button>
+                            <button onClick={() => setCuentasCategoria('empresa')} className={`py-2 rounded-xl text-xs font-bold border transition-all ${cuentasCategoria === 'empresa' ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>🏢 De la empresa</button>
+                          </div>
 
                           <div className="space-y-2">
-                            <button onClick={async () => { onShowToast?.('🏦 BCP', 'Enviando cuenta BCP...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: 'bcp' }); setCuentasModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">🔵</span>
-                              <div className="text-left">
-                                <div>BCP</div>
-                                <div className="text-[10px] text-slate-500">Banco de Crédito del Perú</div>
-                              </div>
-                            </button>
-                            <button onClick={async () => { onShowToast?.('🏦 BBVA', 'Enviando cuenta BBVA...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: 'bbva' }); setCuentasModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">🔷</span>
-                              <div className="text-left">
-                                <div>BBVA</div>
-                                <div className="text-[10px] text-slate-500">Banco BBVA Continental</div>
-                              </div>
-                            </button>
-                            <button onClick={async () => { onShowToast?.('🏦 Interbank', 'Enviando cuenta Interbank...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: 'interbank' }); setCuentasModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">🟢</span>
-                              <div className="text-left">
-                                <div>Interbank</div>
-                                <div className="text-[10px] text-slate-500">Banco Interbank</div>
-                              </div>
-                            </button>
-                            <button onClick={async () => { onShowToast?.('🏦 Todas', 'Enviando todas las cuentas...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: 'todas' }); setCuentasModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-bold transition-all active:scale-95">
+                            {(['bcp', 'bbva', 'interbank'] as const).map(bancoId => {
+                              const datos = cuentaDeCategoria(config, bancoId, cuentasCategoria);
+                              const hay = !!String(datos.numero || '').trim();
+                              const nombre = bancoId === 'bcp' ? 'BCP' : bancoId === 'bbva' ? 'BBVA' : 'Interbank';
+                              const icono = bancoId === 'bcp' ? '🔵' : bancoId === 'bbva' ? '🔷' : '🟢';
+                              const cls = bancoId === 'bcp'
+                                ? 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30 text-blue-400'
+                                : bancoId === 'bbva'
+                                  ? 'bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/30 text-sky-400'
+                                  : 'bg-green-500/10 hover:bg-green-500/20 border-green-500/30 text-green-400';
+                              return (
+                                <button key={bancoId} disabled={!hay} onClick={async () => { onShowToast?.(`${icono} ${nombre}`, 'Enviando tu cuenta de ' + nombre + '...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: bancoId, categoria: cuentasCategoria, texto: construirTextoCuenta(config, { nombre: c.nombre, producto: c.prod, monto: c.cobrar || (c as any).precio }, bancoId, cuentasCategoria), cuentas: construirCuentasAccion(config, bancoId, cuentasCategoria) }); setCuentasModalId(null); }} className={`w-full flex items-center gap-3 p-3 rounded-xl border text-sm font-bold transition-all active:scale-95 ${cls} ${!hay ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                                  <span className="text-lg">{icono}</span>
+                                  <div className="text-left flex-1">
+                                    <div>{nombre}</div>
+                                    <div className="text-[10px] text-slate-500">{hay ? ('Titular: ' + (String(datos.titular || '').trim() || '—')) : 'Sin configurar — ponela en Configuración'}</div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                            <button disabled={!hayCuentasCategoria(config, cuentasCategoria)} onClick={async () => { onShowToast?.('📋 Todas', 'Enviando todas las cuentas...', 'info'); await enviarAccionBot(c, 'cuentas_banco', { banco: 'todas', categoria: cuentasCategoria, texto: construirTextoCuenta(config, { nombre: c.nombre, producto: c.prod, monto: c.cobrar || (c as any).precio }, 'todas', cuentasCategoria), cuentas: construirCuentasAccion(config, 'todas', cuentasCategoria) }); setCuentasModalId(null); }} className={`w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-bold transition-all active:scale-95 ${!hayCuentasCategoria(config, cuentasCategoria) ? 'opacity-40 cursor-not-allowed' : ''}`}>
                               <span className="text-lg">📋</span>
                               <div className="text-left">
                                 <div>Todas las cuentas</div>
-                                <div className="text-[10px] text-slate-500">Envía BCP + BBVA + Interbank + Yape</div>
+                                <div className="text-[10px] text-slate-500">Envía todos los bancos configurados de la categoría</div>
                               </div>
                             </button>
                           </div>

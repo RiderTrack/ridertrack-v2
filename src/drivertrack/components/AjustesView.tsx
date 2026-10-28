@@ -1531,7 +1531,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.19 (❌✏️ CONSUMO HONESTO INDRIVE: los pedidos que se CANCELAN después de aceptarlos ya no engañan al contador — en 🏍️ Viajes inDrive marcá «❌ El pedido se canceló» y quién (😞 te lo cancelaron / 🤚 lo cancelaste vos): inDrive igual te cobró la comisión así que el CONTADOR de saldo se la descuenta, pero el viaje entra con neto S/ 0 y no infla tu Caja (igualito que en el aplicativo); también podés marcar como cancelado un viaje ya registrado con el ✏️ de su tarjeta; y si el contador se te separa del aplicativo (cancelados que no registraste, comisiones distintas), tocá el lapicito ✏️ del contador o «✏️ Sincronizar con mi inDrive» acá, poné el saldo que te muestra tu inDrive y queda clavado — una recarga nueva lo devuelve a cero · Lima, PE
+DriverTrack v0.11.21 (🏦 CUENTAS DE BANCO QUE LLEGAN: el botón «Cuentas» de Mi Ruta ya FUNCIONA — antes tu clic moría en silencio porque el bot nunca tuvo el manejador y el guardián de pagos bloqueaba el mensaje; ahora al cliente le llega un mensaje bonito estilo QR de Yape con su nombre, su producto, el monto a pagar y los datos del banco que elijas: 👤 TU cuenta o 🏢 la de la EMPRESA — configurá las dos por banco en Configuración → Cuentas Bancarias, y el texto del mensaje también se edita ahí; el guardián sigue protegiéndote de números inventados · Lima, PE
       </p>
     </div>
   );

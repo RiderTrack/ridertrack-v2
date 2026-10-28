@@ -1059,6 +1059,17 @@ export interface ConfigCuentas {
   bcp?: { titular: string; cci: string; numero: string; };
   bbva?: { titular: string; cci: string; numero: string; };
   interbank?: { titular: string; cci: string; numero: string; };
+  /** 🏦 FASE AV: cuentas de la EMPRESA — el mismo banco DOS veces:
+   * la tuya (bcp) y la de la empresa (bcpEmpresa). En el modal de
+   * Mi Ruta elegís cuál le llega al cliente (👤 mía / 🏢 empresa). */
+  bcpEmpresa?: { titular: string; cci: string; numero: string; };
+  bbvaEmpresa?: { titular: string; cci: string; numero: string; };
+  interbankEmpresa?: { titular: string; cci: string; numero: string; };
+  /** 🏦 FASE AV: texto del mensaje de cuentas, editable en el panel
+   * (Configuración → Cuentas Bancarias). Vacío = plantilla de fábrica.
+   * Etiquetas: {nombre} {producto} {monto} {bancos} — {bancos} es
+   * donde entran los datos del banco elegido. */
+  plantillaCuenta?: string;
   /** Fase 2.2: Plin ahora también admite QR (igual que Yape) */
   plin?: { nombre: string; telefono: string; qrUrl?: string; qrBase64?: string; };
   /** 🏪 FASE AG: QR de la EMPRESA — el que le dieron a Rudy para que
@@ -1107,6 +1118,10 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
   bcp: { titular: 'Rudy Alen', cci: '002-999-999999999999-99', numero: '999-99999999-9-99' },
   bbva: { titular: 'Rudy Alen', cci: '011-999-000000000000-00', numero: '0011-9999-9900000000' },
   interbank: { titular: 'Rudy Alen', cci: '003-000-999999999-99', numero: '999-999999999-99' },
+  bcpEmpresa: { titular: '', cci: '', numero: '' },
+  bbvaEmpresa: { titular: '', cci: '', numero: '' },
+  interbankEmpresa: { titular: '', cci: '', numero: '' },
+  plantillaCuenta: '',
   plin: { nombre: 'Rudy Alen', telefono: '999999999', qrUrl: '' },
   qrEmpresa: { nombre: '', telefono: '', qrUrl: '' },
   empresa: { nombre: 'MATE', telefono: '+51999999999', direccion: 'Lima, Perú' },
@@ -1210,6 +1225,10 @@ function fusionarConfig(data: any): ConfigCuentas {
     bcp: { ...CONFIG_CUENTAS_DEFAULT.bcp, ...data?.bcp },
     bbva: { ...CONFIG_CUENTAS_DEFAULT.bbva, ...data?.bbva },
     interbank: { ...CONFIG_CUENTAS_DEFAULT.interbank, ...data?.interbank },
+    bcpEmpresa: { ...CONFIG_CUENTAS_DEFAULT.bcpEmpresa, ...data?.bcpEmpresa },
+    bbvaEmpresa: { ...CONFIG_CUENTAS_DEFAULT.bbvaEmpresa, ...data?.bbvaEmpresa },
+    interbankEmpresa: { ...CONFIG_CUENTAS_DEFAULT.interbankEmpresa, ...data?.interbankEmpresa },
+    plantillaCuenta: typeof data?.plantillaCuenta === 'string' ? data.plantillaCuenta : '',
     plin: { ...CONFIG_CUENTAS_DEFAULT.plin, ...data?.plin },
     qrEmpresa: { ...CONFIG_CUENTAS_DEFAULT.qrEmpresa, ...data?.qrEmpresa },
     empresa: { ...CONFIG_CUENTAS_DEFAULT.empresa, ...data?.empresa },

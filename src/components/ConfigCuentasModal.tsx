@@ -4,9 +4,10 @@
 // ═══════════════════════════════════════════════════════════
 
 import React, { useState, useEffect } from 'react';
-import { X, Save, Building2, Smartphone, Phone, MapPin, Loader2, Heart } from 'lucide-react';
+import { X, Save, Building2, Smartphone, Phone, MapPin, Loader2, Heart, FileText } from 'lucide-react';
 import { ConfigCuentas, CONFIG_CUENTAS_DEFAULT } from '../services/firestore';
 import { useConfig } from '../hooks/useConfig';
+import { PLANTILLA_CUENTA_DEFAULT } from '../utils/cuentasBanco';
 
 interface ConfigCuentasModalProps {
   onClose: () => void;
@@ -107,9 +108,16 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-sky-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> BCP
             </div>
+            <div className="text-[10px] text-slate-300 uppercase font-bold">👤 Mi cuenta</div>
             <CampoInput label="Titular" value={configLocal.bcp?.titular || ''} onChange={v => actualizarCampo('bcp', 'titular', v)} placeholder="Nombre del titular" color="sky" />
             <CampoInput label="Número de cuenta" value={configLocal.bcp?.numero || ''} onChange={v => actualizarCampo('bcp', 'numero', v)} placeholder="999-99999999-9-99" color="sky" mono />
             <CampoInput label="CCI" value={configLocal.bcp?.cci || ''} onChange={v => actualizarCampo('bcp', 'cci', v)} placeholder="002-999-999999999999-99" color="sky" mono />
+            <div className="pt-1 mt-1 border-t border-slate-700/60">
+              <div className="text-[10px] text-amber-400 uppercase font-bold mb-1">🏢 Cuenta de la empresa</div>
+              <CampoInput label="Titular empresa" value={configLocal.bcpEmpresa?.titular || ''} onChange={v => actualizarCampo('bcpEmpresa', 'titular', v)} placeholder="Titular de la cuenta de la empresa" color="amber" />
+              <CampoInput label="Número de cuenta empresa" value={configLocal.bcpEmpresa?.numero || ''} onChange={v => actualizarCampo('bcpEmpresa', 'numero', v)} placeholder="999-99999999-9-99" color="amber" mono />
+              <CampoInput label="CCI empresa" value={configLocal.bcpEmpresa?.cci || ''} onChange={v => actualizarCampo('bcpEmpresa', 'cci', v)} placeholder="002-999-999999999999-99" color="amber" mono />
+            </div>
           </div>
 
           {/* BBVA */}
@@ -117,9 +125,16 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-blue-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> BBVA
             </div>
+            <div className="text-[10px] text-slate-300 uppercase font-bold">👤 Mi cuenta</div>
             <CampoInput label="Titular" value={configLocal.bbva?.titular || ''} onChange={v => actualizarCampo('bbva', 'titular', v)} placeholder="Nombre del titular" color="blue" />
             <CampoInput label="Número de cuenta" value={configLocal.bbva?.numero || ''} onChange={v => actualizarCampo('bbva', 'numero', v)} placeholder="0011-9999-9900000000" color="blue" mono />
             <CampoInput label="CCI" value={configLocal.bbva?.cci || ''} onChange={v => actualizarCampo('bbva', 'cci', v)} placeholder="011-999-000000000000-00" color="blue" mono />
+            <div className="pt-1 mt-1 border-t border-slate-700/60">
+              <div className="text-[10px] text-amber-400 uppercase font-bold mb-1">🏢 Cuenta de la empresa</div>
+              <CampoInput label="Titular empresa" value={configLocal.bbvaEmpresa?.titular || ''} onChange={v => actualizarCampo('bbvaEmpresa', 'titular', v)} placeholder="Titular de la cuenta de la empresa" color="amber" />
+              <CampoInput label="Número de cuenta empresa" value={configLocal.bbvaEmpresa?.numero || ''} onChange={v => actualizarCampo('bbvaEmpresa', 'numero', v)} placeholder="0011-9999-9900000000" color="amber" mono />
+              <CampoInput label="CCI empresa" value={configLocal.bbvaEmpresa?.cci || ''} onChange={v => actualizarCampo('bbvaEmpresa', 'cci', v)} placeholder="011-999-000000000000-00" color="amber" mono />
+            </div>
           </div>
 
           {/* INTERBANK */}
@@ -127,9 +142,16 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <div className="text-[11px] text-green-400 uppercase font-bold flex items-center gap-1">
               <Building2 className="w-3 h-3" /> Interbank
             </div>
+            <div className="text-[10px] text-slate-300 uppercase font-bold">👤 Mi cuenta</div>
             <CampoInput label="Titular" value={configLocal.interbank?.titular || ''} onChange={v => actualizarCampo('interbank', 'titular', v)} placeholder="Nombre del titular" color="green" />
             <CampoInput label="Número de cuenta" value={configLocal.interbank?.numero || ''} onChange={v => actualizarCampo('interbank', 'numero', v)} placeholder="999-999999999-99" color="green" mono />
             <CampoInput label="CCI" value={configLocal.interbank?.cci || ''} onChange={v => actualizarCampo('interbank', 'cci', v)} placeholder="003-000-999999999-99" color="green" mono />
+            <div className="pt-1 mt-1 border-t border-slate-700/60">
+              <div className="text-[10px] text-amber-400 uppercase font-bold mb-1">🏢 Cuenta de la empresa</div>
+              <CampoInput label="Titular empresa" value={configLocal.interbankEmpresa?.titular || ''} onChange={v => actualizarCampo('interbankEmpresa', 'titular', v)} placeholder="Titular de la cuenta de la empresa" color="amber" />
+              <CampoInput label="Número de cuenta empresa" value={configLocal.interbankEmpresa?.numero || ''} onChange={v => actualizarCampo('interbankEmpresa', 'numero', v)} placeholder="999-999999999-99" color="amber" mono />
+              <CampoInput label="CCI empresa" value={configLocal.interbankEmpresa?.cci || ''} onChange={v => actualizarCampo('interbankEmpresa', 'cci', v)} placeholder="003-000-999999999-99" color="amber" mono />
+            </div>
           </div>
 
           {/* EQUIPO DE VENTAS (Fase 3.10 — los contactos que envía el bot con 🩷 Venta) */}
@@ -146,6 +168,23 @@ export const ConfigCuentasModal: React.FC<ConfigCuentasModalProps> = ({ onClose,
             <CampoInput label="Karla — celular" value={configLocal.ventas?.karla?.celular || ''} onChange={v => actualizarVentas('karla', 'celular', v)} placeholder="999999999" color="pink" mono />
             <CampoInput label="Tocho — nombre" value={configLocal.ventas?.tocho?.nombre || ''} onChange={v => actualizarVentas('tocho', 'nombre', v)} placeholder="Tocho" color="pink" />
             <CampoInput label="Tocho — celular" value={configLocal.ventas?.tocho?.celular || ''} onChange={v => actualizarVentas('tocho', 'celular', v)} placeholder="999999999" color="pink" mono />
+          </div>
+
+          {/* 🏦 FASE AV: mensaje de las cuentas EDITABLE */}
+          <div className="bg-slate-800 rounded-lg p-3 space-y-2">
+            <div className="text-[11px] text-amber-400 uppercase font-bold flex items-center gap-1">
+              <FileText className="w-3 h-3" /> Mensaje que se envía
+            </div>
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              Es el texto que el bot le manda al cliente cuando tocás «Cuentas» en Mi Ruta. Etiquetas: <span className="font-mono text-slate-300">{'{nombre}'} {'{producto}'} {'{monto}'} {'{bancos}'}</span> — donde dice {'{bancos}'} entran los datos del banco elegido (no la borres). Dejalo vacío para usar el mensaje de fábrica.
+            </p>
+            <textarea
+              value={configLocal.plantillaCuenta || ''}
+              onChange={e => setConfigLocal(prev => ({ ...prev, plantillaCuenta: e.target.value }))}
+              placeholder={PLANTILLA_CUENTA_DEFAULT}
+              rows={12}
+              className="w-full bg-slate-900 text-white text-[11px] font-mono rounded-lg px-3 py-2 border border-slate-700 focus:border-amber-500 outline-none resize-y"
+            />
           </div>
 
           {/* Botones */}
@@ -179,6 +218,7 @@ const CampoInput: React.FC<{
     sky: 'focus:border-sky-500',
     green: 'focus:border-green-500',
     pink: 'focus:border-pink-500',
+    amber: 'focus:border-amber-500',
   };
   return (
     <div>
