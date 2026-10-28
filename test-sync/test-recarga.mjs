@@ -18,7 +18,7 @@ await build({
   outfile: OUT,
   logLevel: 'silent',
 });
-const { calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje, calcularDuracion, textoDias } = await import(OUT);
+const { acumularRecarga, calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje, calcularDuracion, textoDias } = await import(OUT);
 
 // escanerIA.ts es 100% autocontenido (sin imports) → import directo
 import { sanearDatos } from '../src/drivertrack/services/escanerIA.ts';
@@ -228,5 +228,43 @@ console.log('\n3¾) FASE AT — pedidos cancelados y sincronización manual');
 }
 
 // ── resumen ───────────────────────────────────────────────
+// ── 5. 🩹 FIX AW: el saldo de la recarga anterior se ACUMULA ─
+// Reporte de Rudy (28-oct): «tenía 3 soles de saldo, recargué 10 y
+// quedó en 10 en vez de 13». La nueva ya no pisa a la vieja.
+console.log('\n5) acumularRecarga — tenías S/3, recargás S/10 → S/13');
+{
+  const v = (fecha, hora, tarifa, origen = 'indrive') => ({
+    id: `${fecha}-${hora}`, fecha, hora, origen, tarifa,
+  });
+  // recarga anterior: S/13 el 20-oct al 10% → un viaje de S/100 consumió S/10 → quedaban S/3
+  const previa = { activa: true, metaDiaria: 60, pct: 10, dias: 7, monto: 13, fecha: '2026-10-20 09:00', ajuste: 0 };
+  const viajes = [v('2026-10-21', '10:00', 100)];
+
+  const r1 = acumularRecarga(10, previa, viajes);
+  check('🩹 resto 3 + recarga 10 → monto final 13', r1.montoFinal === 13, JSON.stringify(r1));
+  check('reporta el resto anterior 3', r1.resto === 3, String(r1.resto));
+
+  const r2 = acumularRecarga(10, null, viajes);
+  check('sin recarga previa → 10 tal cual (resto 0)', r2.montoFinal === 10 && r2.resto === 0, JSON.stringify(r2));
+
+  const r3 = acumularRecarga(10, { ...previa, monto: 0, fecha: '' }, viajes);
+  check('recarga previa sin monto ni fecha → 10 tal cual', r3.montoFinal === 10 && r3.resto === 0);
+
+  // gastó 15 de comisión con recarga de 13 → resto −2 (deuda)
+  const viajesDeuda = [v('2026-10-21', '10:00', 150)];
+  const r4 = acumularRecarga(10, previa, viajesDeuda);
+  check('deuda −2 + recarga 10 → 8 (la recarga cuadra la deuda primero)', r4.montoFinal === 8 && r4.resto === -2, JSON.stringify(r4));
+
+  // FASE AT: la corrección manual del contador entra en el resto
+  const r5 = acumularRecarga(10, { ...previa, ajuste: -1 }, viajes);
+  check('ajuste manual −1 respeta el resto: 3−1=2 + 10 → 12', r5.montoFinal === 12 && r5.resto === 2, JSON.stringify(r5));
+
+  const r6 = acumularRecarga(0, previa, viajes);
+  check('pago 0 = solo consultar el resto → 3 (preview del modal)', r6.montoFinal === 3 && r6.resto === 3);
+
+  const r7 = acumularRecarga(-5, previa, viajes);
+  check('pago negativo se blinda a 0 → monto final = resto', r7.montoFinal === 3, String(r7.montoFinal));
+}
+
 console.log(`\n═══ RESULTADO: ${ok} ✓ · ${fail} ✗ ═══`);
 if (fail > 0) process.exit(1);

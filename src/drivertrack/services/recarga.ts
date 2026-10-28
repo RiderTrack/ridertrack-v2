@@ -164,3 +164,25 @@ export function estadoSaldo(viajes: Viaje[], recarga: RecargaSemanal): EstadoSal
     casiAgotada: saldo <= recarga.monto * 0.15,
   };
 }
+
+/**
+ * 🩹 FIX AW (reporte de Rudy, 28-oct): el saldo que le quedaba de la
+ * recarga ANTERIOR ya no se pierde al registrar una nueva — se acumula.
+ *   Tenías S/3 de resto + recargás S/10 → la nueva arranca en S/13
+ *   (antes la nueva PISABA a la vieja y quedabas en 10: el resto se esfumaba).
+ * Si el resto era NEGATIVO (comisión gastada de más) también se acumula:
+ * igual que inDrive, la recarga nueva primero cubre lo que le debés.
+ * FASE AT: el resto respeta la corrección manual del contador (ajuste)
+ * → la recarga nueva arranca clavada al saldo REAL que marcaba el contador.
+ * Con pagado 0 sirve de "consultor": te devuelve solo el resto anterior.
+ */
+export function acumularRecarga(
+  pagado: number,
+  previa: RecargaSemanal | null | undefined,
+  viajes: Viaje[],
+): { montoFinal: number; resto: number } {
+  const p = Math.max(0, pagado || 0);
+  const est = previa && previa.monto > 0 && previa.fecha ? estadoSaldo(viajes, previa) : null;
+  const resto = est ? est.saldo : 0;
+  return { montoFinal: +(p + resto).toFixed(2), resto };
+}

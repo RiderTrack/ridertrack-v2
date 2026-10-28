@@ -25,7 +25,8 @@ import {
 import { ConfigDT, Gasto, ORIGENES, TipoGasto } from '../types';
 import { CONFIG_DEFECTO, cargarGastos, cargarViajes, fechaHoy, guardarConfig, guardarGastos, horaAhora } from '../storage';
 // FASE K: 🎯 recarga semanal — calculadora + saldo consumido
-import { calcularDuracion, calcularRecarga, estadoSaldo, textoDias } from '../services/recarga';
+// 🩹 FIX AW: acumularRecarga — el resto de la recarga anterior se SUMA
+import { acumularRecarga, calcularDuracion, calcularRecarga, estadoSaldo, textoDias } from '../services/recarga';
 import { probarKeyIA } from '../services/escanerIA';
 import { AppNavegacion, EVENTO_NAV_CHANGED, getAppNavegacion, setAppNavegacion } from '../services/navegacion';
 // FASE B: el robot va por Firestore (cola acciones_dt) — la prueba
@@ -401,16 +402,22 @@ export default function AjustesView({
   // lo anota como gasto 📶 Recarga de HOY en la Caja (así el "En mano"
   // queda con la verdad: la comisión prepagada ya salió del bolsillo)
   function registrarRecarga() {
-    const monto = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
-    if (monto <= 0) {
+    const pagado = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
+    if (pagado <= 0) {
       onToast('Poné cuánto recargaste 💡');
       return;
     }
     const fecha = `${fechaHoy()} ${horaAhora()}`;
-    const m = +monto.toFixed(2);
+    // 🩹 FIX AW (28-oct, reporte de Rudy): lo que le quedaba de la recarga
+    // ANTERIOR ya no se pisa — se acumula. Tenías S/3 de resto y recargás
+    // S/10 → la nueva arranca en S/13 (antes quedaba en 10 y el resto se
+    // perdía). Si el resto era negativo (comisión gastada de más, con la
+    // corrección manual de FASE AT incluida), la recarga nueva primero la
+    // cuadra — igual que hace inDrive.
+    const { montoFinal: m, resto } = acumularRecarga(pagado, recargaActual(), viajesSaldo);
     setRecargaMonto(m);
     setRecargaFecha(fecha);
-    setRecargaAjuste(0); // FASE AT: recarga nueva → contador fresco, sin ajuste viejo
+    setRecargaAjuste(0); // FASE AT: el ajuste viejo ya quedó horneado en el monto acumulado
     setConfirmandoRecarga(false);
     setMontoRecargaTxt('');
 
@@ -420,14 +427,16 @@ export default function AjustesView({
     guardarConfig(c);
     onGuardar(c);
 
-    // 2) gasto 📶 Recarga en la Caja de hoy (opcional, default ON)
+    // 2) gasto 📶 Recarga en la Caja de hoy (opcional, default ON) — se
+    //    anota lo que PAGASTE hoy, no el acumulado (el saldo heredado ya
+    //    salió del bolsillo cuando se recargó la primera vez)
     if (anotarGastoRecarga) {
       const gasto: Gasto = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         fecha: fechaHoy(),
         hora: horaAhora(),
         tipo: 'saldo' as TipoGasto,
-        monto: m,
+        monto: +pagado.toFixed(2),
         nota: 'Recarga semanal inDrive (comisión prepagada)',
       };
       guardarGastos([...cargarGastos(), gasto]);
@@ -435,10 +444,16 @@ export default function AjustesView({
 
     // 3) que la Caja y el header se enteren al toque (recargan del storage)
     window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+    const detalle =
+      resto > 0
+        ? ` + saldo anterior S/ ${resto.toFixed(2)} → S/ ${m.toFixed(2)}`
+        : resto < 0
+          ? ` (primero cuadró S/ ${(-resto).toFixed(2)} de comisión) → S/ ${m.toFixed(2)}`
+          : '';
     onToast(
       anotarGastoRecarga
-        ? `✅ Recarga de S/ ${m.toFixed(2)} registrada (anotada en la Caja de hoy)`
-        : `✅ Recarga de S/ ${m.toFixed(2)} registrada`,
+        ? `✅ Recarga de S/ ${pagado.toFixed(2)}${detalle} (anotada en la Caja de hoy)`
+        : `✅ Recarga de S/ ${pagado.toFixed(2)}${detalle}`,
     );
   }
 
@@ -857,19 +872,39 @@ export default function AjustesView({
                 data-testid="recarga-monto-input"
               />
             </div>
-            {/* FASE AS: la pregunta de Rudy — «hoy recargué 15, ¿cuánto
-                me va a durar?» — respondida EN VIVO mientras escribís */}
+            {/* 🩹 FIX AW: preview en vivo — el saldo que te quedaba de la
+                recarga anterior ya NO se pierde: se acumula a esta nueva */}
             {(() => {
+              const resto = acumularRecarga(0, recargaActual(), viajesSaldo).resto;
+              if (resto === 0) return null;
+              const monto = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
+              const total = +(monto + resto).toFixed(2);
+              return (
+                <p className="mt-1.5 text-[10px] font-bold text-violet-300" data-testid="recarga-preview-acumular">
+                  {resto > 0
+                    ? `🟣 Se le suma el saldo anterior S/ ${resto.toFixed(2)}`
+                    : `🟣 Se descuenta S/ ${(-resto).toFixed(2)} de comisión que te quedó debiendo`}
+                  {monto > 0 ? ` → la recarga queda en S/ ${total.toFixed(2)}` : ''}
+                </p>
+              );
+            })()}
+            {/* FASE AS: la pregunta de Rudy — «hoy recargué 15, ¿cuánto
+                me va a durar?» — respondida EN VIVO mientras escribís.
+                🩹 FIX AW: la duración se estima sobre el SALDO TOTAL (lo
+                que recargás + lo que te quedaba), no solo lo de hoy */}
+            {(() => {
+              const resto = acumularRecarga(0, recargaActual(), viajesSaldo).resto;
               const monto = parseFloat(montoRecargaTxt.replace(',', '.')) || 0;
               if (monto <= 0) return null;
+              const total = +(monto + resto).toFixed(2);
               const dur = calcularDuracion(
-                monto,
+                total,
                 parseFloat(recargaMeta.replace(',', '.')) || 0,
                 parseFloat(recargaPct.replace(',', '.')) || 0,
               );
               return dur.estimable ? (
                 <p className="mt-1.5 text-[10px] font-semibold leading-snug text-emerald-300" data-testid="recarga-duracion">
-                  🪫 S/ {monto.toFixed(2)} te duran <b>{dur.diasTexto}</b> — comisión S/ {dur.comisionDia.toFixed(2)} por
+                  🪫 S/ {total.toFixed(2)} te duran <b>{dur.diasTexto}</b> — comisión S/ {dur.comisionDia.toFixed(2)} por
                   día a tu ritmo
                 </p>
               ) : (
@@ -1531,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.21 (🏦 CUENTAS DE BANCO QUE LLEGAN: el botón «Cuentas» de Mi Ruta ya FUNCIONA — antes tu clic moría en silencio porque el bot nunca tuvo el manejador y el guardián de pagos bloqueaba el mensaje; ahora al cliente le llega un mensaje bonito estilo QR de Yape con su nombre, su producto, el monto a pagar y los datos del banco que elijas: 👤 TU cuenta o 🏢 la de la EMPRESA — configurá las dos por banco en Configuración → Cuentas Bancarias, y el texto del mensaje también se edita ahí; el guardián sigue protegiéndote de números inventados · Lima, PE
+DriverTrack v0.11.22 (🩹 EL SALDO DE TU RECARGA YA NO SE PISA: si te quedaba S/3 de la recarga anterior y recargás S/10, la app acumula y arrancás con S/13 — antes la recarga nueva pisaba a la vieja y el resto se perdía; si te habías pasado de comisión (o el contador tenía corrección manual), la recarga nueva primero cuadra la deuda, igual que inDrive; el gasto en la Caja anota solo lo que pagaste HOY, el modal te muestra el cálculo en vivo y la duración se estima sobre el saldo TOTAL · Lima, PE
       </p>
     </div>
   );
