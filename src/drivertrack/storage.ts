@@ -4,6 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 
 import { ConfigDT, Gasto, RECARGA_DEFECTO, RecargaSemanal, ResumenDia, TIPOS_GASTO, TipoGasto, Viaje } from './types';
+// FASE BA: 📊 migración del % de inDrive al valor real (14.9%)
+import { migrarPctIndrive } from './services/recarga';
 // FASE C: ☁️ cada cambio en el storage avisa al sync de la nube
 // (si hay sesión abierta, sube con debounce; si no, no hace nada)
 import { avisarCambioDT } from './services/syncDT';
@@ -15,7 +17,7 @@ const K_META_FECHA = 'dt_meta_celebrada_fecha';
 
 export const CONFIG_DEFECTO: ConfigDT = {
   metaDiaria: 100,
-  comisiones: { indrive: 10, rappi: 25, pedidosya: 25, directo: 0 },
+  comisiones: { indrive: 14.9, rappi: 25, pedidosya: 25, directo: 0 }, // FASE BA: % real de inDrive (antes 10)
   yape: { numero: '', titular: '', qrBase64: '' },
   plin: { numero: '', titular: '', qrBase64: '' },
   geminiKey: '',
@@ -154,12 +156,18 @@ export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
     claudeKey = geminiKey;
     geminiKey = '';
   }
+  // FASE BA: la comisión de inDrive se migra AL VALOR REAL (14.9%) —
+  // el 10.89/10 viejo atrasaba el contador del saldo contra inDrive.
+  // migrarPctIndrive es auto-curativa: cubre config local, nube y
+  // backups (TODO pasa por acá). 0 = sin configurar, se respeta.
+  const comisiones = { ...CONFIG_DEFECTO.comisiones, ...(c.comisiones ?? {}) };
+  const recarga = normalizarRecarga(c.recarga); // FASE K
   return {
     ...CONFIG_DEFECTO,
     ...c,
     geminiKey,
     claudeKey,
-    comisiones: { ...CONFIG_DEFECTO.comisiones, ...(c.comisiones ?? {}) },
+    comisiones: { ...comisiones, indrive: migrarPctIndrive(comisiones.indrive) }, // FASE BA
     yape: { ...CONFIG_DEFECTO.yape, ...(c.yape ?? {}) },
     plin: { ...CONFIG_DEFECTO.plin, ...(c.plin ?? {}) },
     miNombre: (c.miNombre ?? '').trim(),
@@ -167,7 +175,7 @@ export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
     robotActivo: c.robotActivo === true,
     robotUrl: (c.robotUrl ?? '').trim() || 'http://127.0.0.1:3001',
     robotToken: (c.robotToken ?? '').trim() || 'rudy-drivertrack',
-    recarga: normalizarRecarga(c.recarga), // FASE K
+    recarga: { ...recarga, pct: migrarPctIndrive(recarga.pct) }, // FASE BA: el contador recalcula vivo
   };
 }
 
@@ -180,9 +188,13 @@ export function cargarConfig(): ConfigDT {
     // F-ID2.5: si la migración movió el token de Claude de campo (o
     // recortó espacios), se persiste en el ACTO — el storage se
     // autocura solo, sin esperar a que el usuario toque Ajustes
+    // FASE BA: ídem la migración del % de inDrive (10/10.89 → 14.9) —
+    // así el localStorage nunca vuelve a guardar el valor viejo
     if (
       normalizada.geminiKey !== (c.geminiKey ?? '').trim() ||
-      normalizada.claudeKey !== (c.claudeKey ?? '').trim()
+      normalizada.claudeKey !== (c.claudeKey ?? '').trim() ||
+      normalizada.comisiones.indrive !== (c.comisiones ?? {}).indrive ||
+      normalizada.recarga.pct !== (c.recarga ?? RECARGA_DEFECTO).pct
     ) {
       guardarConfig(normalizada);
     }

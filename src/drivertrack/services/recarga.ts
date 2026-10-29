@@ -186,3 +186,26 @@ export function acumularRecarga(
   const resto = est ? est.saldo : 0;
   return { montoFinal: +(p + resto).toFixed(2), resto };
 }
+
+// ═══ FASE BA (29-oct, reporte de Rudy): 📊 % real de inDrive ═══
+// «la app descuenta 10.89% del monto del viaje, pero inDriver descuenta
+//  en realidad aprox 14.9%: viaje de S/ 8.00 → inDrive descontó S/ 1.19
+//  (quedó 7.36), mi app calculó S/ 0.87 (quedó 7.68)».
+// El 10.89 era el valor MEDIDO hace tiempo (y el default de fábrica era
+// 10) → el contador del saldo se atrasaba contra el saldo real de la
+// app de inDrive. Como el contador RECALCULA vivo todo el historial de
+// la recarga con el % configurado, corregir el % autocorrige el saldo
+// retroactivamente.
+// Migración AUTO-CURATIVA: todo % de inDrive viejo (valor entre 0 y 11)
+// pasa al valor real 14.9:
+//   · 0 = «sin configurar» → se respeta (hereda el default, ya 14.9)
+//   · 14.9 o más (ya actualizado o elegido a mano) → se respeta
+// A PROPÓSITO sin banderita de «una sola vez»: si la nube o un backup
+// viejo devuelven el 10.89 (p. ej. el otro cel todavía con el APK
+// viejo), la PRÓXIMA carga lo vuelve a curar solo. Si algún día inDrive
+// cambia su comisión, se cambia COMISION_INDRIVE_REAL y chala.
+export const COMISION_INDRIVE_REAL = 14.9;
+export function migrarPctIndrive(pct: number): number {
+  const p = Number(pct) || 0;
+  return p > 0 && p < 11 ? COMISION_INDRIVE_REAL : p;
+}

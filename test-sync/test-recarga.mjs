@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // 🎯 TEST recarga semanal + escáner v4 — FASE F
 // 🪫 TEST recarga FLEXIBLE (calcularDuracion + diasRestantes) — FASE AS
+// 📊 TEST % real de inDrive 14.9% (migrarPctIndrive + storage REAL) — FASE BA
 // Corre con: node test-sync/test-recarga.mjs
 // (puro — sin Firebase, sin React, igual que pagoPedidosCore)
 // ═══════════════════════════════════════════════════════════
@@ -18,7 +19,7 @@ await build({
   outfile: OUT,
   logLevel: 'silent',
 });
-const { acumularRecarga, calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje, calcularDuracion, textoDias } = await import(OUT);
+const { acumularRecarga, calcularRecarga, comisionAcumulada, estadoSaldo, claveOrdenViaje, calcularDuracion, textoDias, migrarPctIndrive, COMISION_INDRIVE_REAL } = await import(OUT);
 
 // escanerIA.ts es 100% autocontenido (sin imports) → import directo
 import { sanearDatos } from '../src/drivertrack/services/escanerIA.ts';
@@ -264,6 +265,120 @@ console.log('\n5) acumularRecarga — tenías S/3, recargás S/10 → S/13');
 
   const r7 = acumularRecarga(-5, previa, viajes);
   check('pago negativo se blinda a 0 → monto final = resto', r7.montoFinal === 3, String(r7.montoFinal));
+}
+
+// ── 6. 📊 FASE BA: % real de inDrive (14.9%) ──────────────
+// Reporte de Rudy (29-oct): «la app descuenta 10.89% pero inDriver
+// descuenta en realidad aprox 14.9%: viaje de S/ 8.00 → inDrive se
+// llevó S/ 1.19 (quedó 7.36), mi app calculó S/ 0.87 (quedó 7.68)».
+console.log('\n6) FASE BA — migrarPctIndrive + el caso real de Rudy');
+{
+  // la función pura: todo % viejo (0–11) → 14.9 real
+  check('10.89 (el valor medido viejo) → 14.9', migrarPctIndrive(10.89) === 14.9, String(migrarPctIndrive(10.89)));
+  check('10 (el default de fábrica viejo) → 14.9', migrarPctIndrive(10) === 14.9);
+  check('10.875 (el % del ejemplo de Rudy) → 14.9', migrarPctIndrive(10.875) === 14.9);
+  check('10.9 también cae en la banda vieja → 14.9', migrarPctIndrive(10.9) === 14.9);
+  check('0 = sin configurar → se respeta (hereda el default)', migrarPctIndrive(0) === 0);
+  check('14.9 ya actualizado → queda igual (idempotente)', migrarPctIndrive(14.9) === 14.9);
+  check('15 elegido a mano → se respeta', migrarPctIndrive(15) === 15);
+  check('11 (borde de la banda) → se respeta', migrarPctIndrive(11) === 11);
+  check('25 (rappi/pedidosya) → se respeta', migrarPctIndrive(25) === 25);
+  check('la constante real es 14.9', COMISION_INDRIVE_REAL === 14.9);
+
+  // EL CASO REAL: viaje de S/ 8.00
+  const v8 = [{ id: '1', fecha: '2026-10-29', hora: '10:00', origen: 'indrive', tarifa: 8 }];
+  const nuevo = comisionAcumulada(v8, 14.9, '2026-10-29 09:00');
+  check('viaje S/ 8.00 × 14.9% = S/ 1.19 (lo que inDrive descontó DE VERDAD)', nuevo === 1.19, String(nuevo));
+  const viejo = comisionAcumulada(v8, 10.89, '2026-10-29 09:00');
+  check('regresión: con el 10.89 viejo salía S/ 0.87 (el error reportado)', viejo === 0.87, String(viejo));
+  const saldo = estadoSaldo(v8, {
+    activa: true, metaDiaria: 60, pct: 14.9, dias: 7,
+    monto: 8.55, fecha: '2026-10-29 09:00', ajuste: 0,
+  });
+  check('contador NUEVO: 8.55 − 1.19 = 7.36 (clavado al inDrive real)', saldo.saldo === 7.36, String(saldo.saldo));
+  const saldoViejo = estadoSaldo(v8, {
+    activa: true, metaDiaria: 60, pct: 10.89, dias: 7,
+    monto: 8.55, fecha: '2026-10-29 09:00', ajuste: 0,
+  });
+  check('regresión: el contador VIEJO decía 7.68 (se atrasaba 0.32)', saldoViejo.saldo === 7.68, String(saldoViejo.saldo));
+}
+
+// ── 7. 📊 FASE BA (integración): el storage.ts REAL migra la config ──
+// Compila src/drivertrack/storage.ts con esbuild + stub de syncDT
+// (igual que test-config-honesta compila el firestore real).
+console.log('\n7) FASE BA integración — normalizarConfig migra config guardada');
+{
+  const OUT_STORAGE = new URL('./.tmp-storage-ba.mjs', import.meta.url).pathname;
+  const STUB_SYNC = new URL('./stub-syncdt-ba.cjs', import.meta.url).pathname;
+  await build({
+    entryPoints: [new URL('../src/drivertrack/storage.ts', import.meta.url).pathname],
+    bundle: true,
+    format: 'esm',
+    outfile: OUT_STORAGE,
+    logLevel: 'silent',
+    plugins: [{
+      name: 'stub-syncdt-ba',
+      setup(b) {
+        b.onResolve({ filter: /^\.\/services\/syncDT$/ }, () => ({ path: STUB_SYNC }));
+      },
+    }],
+  });
+
+  // localStorage de mentira (Map) — se instala ANTES de importar
+  const almacen = new Map();
+  globalThis.localStorage = {
+    getItem: k => (almacen.has(k) ? almacen.get(k) : null),
+    setItem: (k, v) => almacen.set(k, String(v)),
+    removeItem: k => almacen.delete(k),
+  };
+  const storage = await import(OUT_STORAGE);
+  const { normalizarConfig, cargarConfig, guardarConfig, CONFIG_DEFECTO } = storage;
+
+  // default de fábrica: ya 14.9
+  check('default de fábrica indrive = 14.9', CONFIG_DEFECTO.comisiones.indrive === 14.9);
+
+  // config guardada con el 10.89 viejo (la de Rudy hoy) → migra ENTERA
+  const guardadaVieja = {
+    metaDiaria: 60,
+    comisiones: { indrive: 10.89, rappi: 25, pedidosya: 25, directo: 0 },
+    recarga: { activa: true, metaDiaria: 60, pct: 10.89, dias: 7, monto: 8.55, fecha: '2026-10-29 09:00', ajuste: 0 },
+  };
+  almacen.set('dt_config_v1', JSON.stringify(guardadaVieja));
+  const c = cargarConfig();
+  check('comisiones.indrive 10.89 → 14.9', c.comisiones.indrive === 14.9, String(c.comisiones.indrive));
+  check('recarga.pct 10.89 → 14.9 (el contador recalcula con el real)', c.recarga.pct === 14.9, String(c.recarga.pct));
+  check('rappi 25 queda INTACTO (solo inDrive se migra)', c.comisiones.rappi === 25);
+  check('la recarga no pierde monto ni fecha en la migración', c.recarga.monto === 8.55 && c.recarga.fecha === '2026-10-29 09:00');
+
+  // autocura: el localStorage quedó re-guardado con el valor NUEVO
+  const reGuardada = JSON.parse(almacen.get('dt_config_v1'));
+  check('autocura: el localStorage ya guarda 14.9 (no vuelve al viejo)', reGuardada.comisiones.indrive === 14.9 && reGuardada.recarga.pct === 14.9);
+
+  // idempotente: una segunda carga no toca nada más
+  const c2 = cargarConfig();
+  check('segunda carga → estable en 14.9', c2.comisiones.indrive === 14.9 && c2.recarga.pct === 14.9);
+
+  // % a mano respetado: 15 queda 15 (banda 0–11 nomás)
+  guardarConfig({ ...c2, comisiones: { ...c2.comisiones, indrive: 15 }, recarga: { ...c2.recarga, pct: 15 } });
+  const c3 = cargarConfig();
+  check('15 elegido a mano → se respeta (no se toca)', c3.comisiones.indrive === 15 && c3.recarga.pct === 15);
+
+  // la nube devolviendo el 10.89 viejo (cel con APK viejo) → se re-cura
+  const deLaNube = normalizarConfig({
+    ...c3,
+    comisiones: { ...c3.comisiones, indrive: 10.89 },
+    recarga: { ...c3.recarga, pct: 10.89 },
+  });
+  check('la nube manda el 10.89 viejo → normalizarConfig lo re-cura a 14.9', deLaNube.comisiones.indrive === 14.9 && deLaNube.recarga.pct === 14.9);
+
+  // config sin comisiones (cel nuevo) → default 14.9
+  const cNueva = normalizarConfig({ metaDiaria: 100 });
+  check('cel sin config → hereda el default real 14.9', cNueva.comisiones.indrive === 14.9);
+
+  // y el caso concreto: el contador con el % migrado clava el 7.36 de inDrive
+  const v8 = [{ id: '1', fecha: '2026-10-29', hora: '10:00', origen: 'indrive', tarifa: 8 }];
+  const s = estadoSaldo(v8, deLaNube.recarga);
+  check('con la config migrada: 8.55 − 1.19 = 7.36 (el inDrive real)', s.saldo === 7.36, String(s.saldo));
 }
 
 console.log(`\n═══ RESULTADO: ${ok} ✓ · ${fail} ✗ ═══`);

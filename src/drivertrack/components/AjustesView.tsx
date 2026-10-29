@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.26 (🙏 EL GRACIAS YA NO SE ADELANTA + ⏱️ LA SUBIDA NUNCA MÁS SE CUELGA: al enviar la foto de entrega o el comprobante, el cliente ya no recibe ADEMÁS la tarjeta «gracias por tu compra» al unísono — esa tarjeta sale solo cuando marcás el tipo de pago con los botones de siempre (efectivo/yape/plin…); y si la red del celular se trababa, la subida de la foto quedaba colgada hasta 15 minutos con el botón «Subiendo…» eterno — ahora cada intento tiene tope, se cancela de verdad y reintenta una vez sola, y si igual no pudo te avisa en el acto para que decidas (mandarla por WhatsApp a mano o reintentar) · Lima, PE
+DriverTrack v0.11.27 (📊 COMISIÓN DE INDRIVE AL VALOR REAL: inDrive te descuenta ~14.9% por viaje (de un viaje de S/ 8.00 te quita S/ 1.19) pero la app seguía con el 10.89% viejo — el contador del saldo se atrasaba contra tu inDrive real; ahora el % se actualiza SOLO a 14.9 en tu config (tarjeta de la recarga, comisiones y contador), y como el contador recalcula vivo, todo el historial de tu recarga actual se corrige retroactivo — si queda una diferencia chica por viajes sin registrar, sincronizá con ✏️ y queda clavado · Lima, PE
       </p>
     </div>
   );
