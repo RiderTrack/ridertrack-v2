@@ -490,7 +490,16 @@ export function useClientes() {
   }, [clientes, guardar]);
 
   // Cambiar estado (pago) - sincroniza con ruta_activa en tiempo real
-  const cambiarEstado = useCallback((id: string | number, estado: string) => {
+  // 🙏 FASE AZ (v0.11.26): opts.sinGracias — el modal 📸 Reporte con
+  // foto marca el estado al enviar la foto, y eso DISPARABA el
+  // "gracias por tu compra" automático de la 3.46: el cliente recibía
+  // la foto con su mensajito Y ADEMÁS la tarjeta gracias al unísono.
+  // Regla de Rudy: el gracias sale SOLO cuando él marca el tipo de
+  // pago con los botones de siempre (efectivo/yape/plin…), nunca
+  // como efecto secundario de mandar una foto. Con sinGracias NO se
+  // encola el aviso NI se marca graciasEnviado (así el gracias de
+  // verdad puede salir después, cuando Rudy toque el botón de pago).
+  const cambiarEstado = useCallback((id: string | number, estado: string, opts?: { sinGracias?: boolean }) => {
     const hora = estado !== 'pendiente' ? new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
     const previa = clientes.find((c) => c.id === id) || null;
 
@@ -504,12 +513,14 @@ export function useClientes() {
     // (persistente) + el guard de 5 min. Si se calla, la app te dice
     // POR QUÉ con un toast — nunca más silencio misterioso.
     const clave = previa ? claveAviso(previa.cel) : null;
-    const decision = decidirGracias(
-      previa ? { cel: previa.cel, aviso: previa.aviso, graciasEnviado: previa.graciasEnviado } : null,
-      estado,
-      ST_ENTREGADOS,
-      clave ? avisoEnviadoHacePoco(clave) : false
-    );
+    const decision = opts?.sinGracias
+      ? { dispara: false }
+      : decidirGracias(
+          previa ? { cel: previa.cel, aviso: previa.aviso, graciasEnviado: previa.graciasEnviado } : null,
+          estado,
+          ST_ENTREGADOS,
+          clave ? avisoEnviadoHacePoco(clave) : false
+        );
 
     const nuevos = clientes.map(c => {
       if (c.id === id) {

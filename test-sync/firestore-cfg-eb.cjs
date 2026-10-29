@@ -175,7 +175,9 @@ var require_stub_xlsx = __commonJS({
 var firestore_exports = {};
 __export(firestore_exports, {
   CONFIG_CUENTAS_DEFAULT: () => CONFIG_CUENTAS_DEFAULT,
+  LIMITES_ACCIONES: () => LIMITES_ACCIONES,
   LIMITES_CONFIG: () => LIMITES_CONFIG,
+  LIMITES_SUBIDA: () => LIMITES_SUBIDA,
   _botCel: () => _botCel,
   actualizarClienteEnRutaActiva: () => actualizarClienteEnRutaActiva,
   actualizarRutaActiva: () => actualizarRutaActiva,
@@ -1433,7 +1435,7 @@ async function finalizarRutaActivaBot() {
   }
 }
 async function encolarAccionBot(userId, accion) {
-  if (!import_firebase.db || !userId) return;
+  if (!import_firebase.db || !userId) return "local";
   const accionData = {
     ...accion,
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -1442,10 +1444,16 @@ async function encolarAccionBot(userId, accion) {
   try {
     const pendientesRef = (0, import_firestore.collection)(import_firebase.db, "acciones_bot", userId, "pendientes");
     const newDocRef = (0, import_firestore.doc)(pendientesRef);
-    await (0, import_firestore.setDoc)(newDocRef, accionData);
+    await conTimeout((0, import_firestore.setDoc)(newDocRef, accionData), LIMITES_ACCIONES.topeMs, "accion-local");
     console.log("\u{1F916} Acci\xF3n encolada:", accion.tipo);
+    return "servidor";
   } catch (e) {
+    if (String(e?.message || e) === "accion-local") {
+      console.warn("\u23F3 Acci\xF3n " + accion.tipo + " qued\xF3 PENDIENTE (red trabada) \u2014 el SDK la sube al volver la se\xF1al");
+      return "local";
+    }
     console.error("\u274C Error encolando acci\xF3n:", e);
+    throw e;
   }
 }
 function subscribeEstadoBot(userId, cb) {
@@ -1656,6 +1664,63 @@ function comprimirFotoParaStorage(file, maxDim = 1280, calidad = 0.72) {
     }
   });
 }
+function _topeSubidaMs(bytes) {
+  const kb = Math.max(0, Math.round(bytes / 1024));
+  return Math.min(LIMITES_SUBIDA.topeDuroMs, LIMITES_SUBIDA.baseMs + Math.round(kb * LIMITES_SUBIDA.msPorKb));
+}
+var LIMITES_SUBIDA = {
+  /** tope base por intento (se le suma el peso) */
+  baseMs: 6e4,
+  /** margen por KB (300 KB → +36s) */
+  msPorKb: 120,
+  /** tope duro por intento */
+  topeDuroMs: 18e4,
+  /** espera entre el intento fallido y el reintento */
+  reintentoMs: 1500
+};
+var LIMITES_ACCIONES = {
+  /** tope del setDoc antes de declararlo "pendiente" */
+  topeMs: 2e4
+};
+async function _subirConTope(refImg, archivo, metadata, intentos = 2) {
+  let ultimoError = null;
+  for (let i = 1; i <= intentos; i++) {
+    const tarea = (0, import_storage.uploadBytesResumable)(refImg, archivo, metadata);
+    const topeMs = _topeSubidaMs(archivo.size);
+    try {
+      await new Promise((resolver, rechazar) => {
+        const t = setTimeout(() => {
+          try {
+            tarea.cancel();
+          } catch {
+          }
+          rechazar(new Error(`\u23F1 La subida se trab\xF3 (red congelada) \u2014 cancelada a los ${Math.round(topeMs / 1e3)}s`));
+        }, topeMs);
+        tarea.on(
+          "state_changed",
+          void 0,
+          (e) => {
+            clearTimeout(t);
+            rechazar(e);
+          },
+          () => {
+            clearTimeout(t);
+            resolver();
+          }
+        );
+      });
+      return;
+    } catch (e) {
+      ultimoError = e;
+      if (e?.code === "storage/canceled" || String(e?.code || "").startsWith("storage/unauthorized") || e?.code === "storage/quota-exceeded") throw e;
+      if (i < intentos) {
+        console.warn(`\u{1F4E4} Subida intento ${i}/${intentos} fall\xF3 (${e?.message || e}) \u2014 reintentando con conexi\xF3n fresca...`);
+        await new Promise((r) => setTimeout(r, LIMITES_SUBIDA.reintentoMs));
+      }
+    }
+  }
+  throw ultimoError instanceof Error ? new Error(ultimoError.message + " \u2014 prob\xE1 de nuevo; si sigue, cerr\xE1 y abr\xED la app") : new Error("La subida se trab\xF3 dos veces \u2014 prob\xE1 de nuevo");
+}
 async function subirFotoPago(uid, clienteId, file) {
   if (!import_firebase.storage) throw new Error("Storage no inicializado");
   const archivo = await comprimirFotoParaStorage(file);
@@ -1664,7 +1729,7 @@ async function subirFotoPago(uid, clienteId, file) {
   const safeId = String(clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
   const ruta = `pagos/${uid}/${safeId}_${timestamp}.jpg`;
   const refImg = (0, import_storage.ref)(import_firebase.storage, ruta);
-  await (0, import_storage.uploadBytes)(refImg, archivo, {
+  await _subirConTope(refImg, archivo, {
     contentType: "image/jpeg",
     customMetadata: {
       clienteId: String(clienteId),
@@ -1684,7 +1749,7 @@ async function subirFotoEntrega(uid, clienteId, file, dataUrlFallback) {
     try {
       const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
       const refImg = (0, import_storage.ref)(import_firebase.storage, ruta);
-      await (0, import_storage.uploadBytes)(refImg, archivo, {
+      await _subirConTope(refImg, archivo, {
         contentType: "image/jpeg",
         customMetadata: {
           clienteId: String(clienteId),
@@ -2122,7 +2187,9 @@ async function guardarAutoBackupVivo(userId, clientes) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CONFIG_CUENTAS_DEFAULT,
+  LIMITES_ACCIONES,
   LIMITES_CONFIG,
+  LIMITES_SUBIDA,
   _botCel,
   actualizarClienteEnRutaActiva,
   actualizarRutaActiva,

@@ -25,7 +25,7 @@ import {
 } from 'firebase/firestore';
 import {
   ref as storageRef,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
 } from 'firebase/storage';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
@@ -1666,8 +1666,8 @@ export async function encolarAccionBot(
     numero?: string;
     titular?: string;
   }
-): Promise<void> {
-  if (!db || !userId) return;
+): Promise<'servidor' | 'local'> {
+  if (!db || !userId) return 'local';
 
   const accionData = {
     ...accion,
@@ -1675,14 +1675,28 @@ export async function encolarAccionBot(
     processed: false,
   };
 
+  // ⏱️ FASE AZ (v0.11.26): TOPE de 20s — el setDoc sin tope dejaba el
+  // botón "Subiendo..." colgado 15 min cuando la conexión del WebView
+  // quedaba zombi. Patrón FASE AJ (guardado-local): si vence el tope
+  // NO se reintenta ni se lanza error — el write queda en el SDK y
+  // sale cuando la red revive (reintentarlo crearía OTRO doc y el
+  // cliente recibiría el mensaje DOBLE). La app es avisada con el
+  // retorno 'local' para tostar la verdad. Errores duros sí revientan
+  // (los callers ya tienen try/catch con sus toasts).
   try {
     const pendientesRef = collection(db, 'acciones_bot', userId, 'pendientes');
     // Usar setDoc con ID aleatorio
     const newDocRef = doc(pendientesRef);
-    await setDoc(newDocRef, accionData);
+    await conTimeout(setDoc(newDocRef, accionData), LIMITES_ACCIONES.topeMs, 'accion-local');
     console.log('🤖 Acción encolada:', accion.tipo);
-  } catch (e) {
+    return 'servidor';
+  } catch (e: any) {
+    if (String(e?.message || e) === 'accion-local') {
+      console.warn('⏳ Acción ' + accion.tipo + ' quedó PENDIENTE (red trabada) — el SDK la sube al volver la señal');
+      return 'local';
+    }
     console.error('❌ Error encolando acción:', e);
+    throw e;
   }
 }
 
@@ -2003,6 +2017,90 @@ function comprimirFotoParaStorage(file: File | Blob, maxDim = 1280, calidad = 0.
 }
 
 // ═══════════════════════════════════════════════════════════
+// ⏱️ FASE AZ (v0.11.26) — SUBIDA CON TOPE + CANCEL + REINTENTO
+// ═══════════════════════════════════════════════════════════
+// REPORTE Rudy (29-oct): «en la parte de comprobante tenemos la
+// misma dificultad, se demora en subir» — la compresión de la
+// v0.11.24 arregló el PESO (la entrega vuela), pero uploadBytes
+// sigue SIN tope: si la conexión del WebView queda zombi (la
+// cámara manda la app a background y Android le congela la red —
+// el clásico de FASE AK), el XHR de Storage queda colgado hasta
+// que el SO la declare muerta (~10-15 min) → el botón "Subiendo..."
+// eterno y Rudy termina mandando la foto a mano.
+//
+// Arreglo (mismo espíritu que imagenesBot FASE AK):
+//   · tope por intento: 60s base + 0.12s por KB (300KB → ~96s,
+//     tope duro 3 min) — para la foto COMPRIMIDA sobra
+//   · al vencer el tope se CANCELA de verdad la subida
+//     (uploadBytesResumable.cancel()) — nada queda zombi
+//   · UN reintento con intento fresco (la cancelación + nueva
+//     subida renegocian la conexión; misma ruta de Storage →
+//     sobrescribe, jamás duplica)
+//   · dos intentos trabados → error HONESTO para el toast
+// ═══════════════════════════════════════════════════════════
+function _topeSubidaMs(bytes: number): number {
+  const kb = Math.max(0, Math.round(bytes / 1024));
+  return Math.min(LIMITES_SUBIDA.topeDuroMs, LIMITES_SUBIDA.baseMs + Math.round(kb * LIMITES_SUBIDA.msPorKb));
+}
+
+/** Límites de la subida de fotos — mutables para los tests */
+export const LIMITES_SUBIDA = {
+  /** tope base por intento (se le suma el peso) */
+  baseMs: 60_000,
+  /** margen por KB (300 KB → +36s) */
+  msPorKb: 120,
+  /** tope duro por intento */
+  topeDuroMs: 180_000,
+  /** espera entre el intento fallido y el reintento */
+  reintentoMs: 1_500,
+};
+
+/** Límites del encolado de acciones al bot — mutable para tests */
+export const LIMITES_ACCIONES = {
+  /** tope del setDoc antes de declararlo "pendiente" */
+  topeMs: 20_000,
+};
+
+async function _subirConTope(
+  refImg: ReturnType<typeof storageRef>,
+  archivo: Blob,
+  metadata: { contentType: string; customMetadata: Record<string, string> },
+  intentos = 2
+): Promise<void> {
+  let ultimoError: any = null;
+  for (let i = 1; i <= intentos; i++) {
+    const tarea = uploadBytesResumable(refImg, archivo, metadata);
+    const topeMs = _topeSubidaMs(archivo.size);
+    try {
+      await new Promise<void>((resolver, rechazar) => {
+        const t = setTimeout(() => {
+          try { tarea.cancel(); } catch { /* ya terminó */ }
+          rechazar(new Error(`⏱ La subida se trabó (red congelada) — cancelada a los ${Math.round(topeMs / 1000)}s`));
+        }, topeMs);
+        tarea.on(
+          'state_changed',
+          undefined,
+          (e: any) => { clearTimeout(t); rechazar(e); },
+          () => { clearTimeout(t); resolver(); }
+        );
+      });
+      return; // ✅ subida completa
+    } catch (e: any) {
+      ultimoError = e;
+      // cancelada por el usuario o error definitivo de Storage → no reintentar
+      if (e?.code === 'storage/canceled' || String(e?.code || '').startsWith('storage/unauthorized') || e?.code === 'storage/quota-exceeded') throw e;
+      if (i < intentos) {
+        console.warn(`📤 Subida intento ${i}/${intentos} falló (${e?.message || e}) — reintentando con conexión fresca...`);
+        await new Promise(r => setTimeout(r, LIMITES_SUBIDA.reintentoMs));
+      }
+    }
+  }
+  throw ultimoError instanceof Error
+    ? new Error(ultimoError.message + ' — probá de nuevo; si sigue, cerrá y abrí la app')
+    : new Error('La subida se trabó dos veces — probá de nuevo');
+}
+
+// ═══════════════════════════════════════════════════════════
 // 📸 SUBIR FOTO A STORAGE (Reportar pago con foto)
 // ═══════════════════════════════════════════════════════════
 
@@ -2028,8 +2126,9 @@ export async function subirFotoPago(
   const ruta = `pagos/${uid}/${safeId}_${timestamp}.jpg`;
   const refImg = storageRef(storage, ruta);
 
-  // Subir con metadata para optimizar cache
-  await uploadBytes(refImg, archivo, {
+  // ⏱️ FASE AZ: subida con tope + cancel + reintento — jamás vuelve
+  // a quedar colgada 15 min con la red zombi del WebView.
+  await _subirConTope(refImg, archivo, {
     contentType: 'image/jpeg',
     customMetadata: {
       clienteId: String(clienteId),
@@ -2071,7 +2170,9 @@ export async function subirFotoEntrega(
       const ruta = `entregas/${uid}/${safeId}_${timestamp}.jpg`;
       const refImg = storageRef(storage, ruta);
 
-      await uploadBytes(refImg, archivo, {
+      // ⏱️ FASE AZ: mismo blindaje del comprobante — la evidencia
+      // tampoco puede quedar colgada con la red trabada.
+      await _subirConTope(refImg, archivo, {
         contentType: 'image/jpeg',
         customMetadata: {
           clienteId: String(clienteId),

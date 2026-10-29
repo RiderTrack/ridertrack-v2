@@ -786,16 +786,20 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   };
 
   // 🤖 Enviar acción al bot de Baileys vía Firestore
-  const enviarAccionBot = async (cliente: Cliente, tipo: string, extra?: Record<string, any>) => {
+  // ⏱️ FASE AZ: devuelve de dónde salió la acción ('servidor' llegó
+  // a la nube / 'local' quedó pendiente por red trabada) para que
+  // el modal de foto toastee la verdad — nunca más "✅ enviado"
+  // cuando en realidad no pudo subir.
+  const enviarAccionBot = async (cliente: Cliente, tipo: string, extra?: Record<string, any>): Promise<'servidor' | 'local'> => {
     if (!user) {
       onShowToast?.('Error', 'No hay sesión activa', 'error');
-      return;
+      return 'local';
     }
 
     const telefono = _botCel(cliente.cel || '');
     if (!telefono) {
       onShowToast?.('Sin celular', `${cliente.nombre} no tiene celular válido`, 'warning');
-      return;
+      return 'local';
     }
 
     // 🖼️ AM (22-oct): el QR VIAJA EN LA PROPIA ACCIÓN. Antes el bot
@@ -818,7 +822,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
     }
 
     try {
-      await encolarAccionBot(user.uid, {
+      const fuente = await encolarAccionBot(user.uid, {
         tipo: tipo,
         clienteId: cliente.id,
         telefono: telefono,
@@ -843,9 +847,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         registrarAvisoEnviado(claveAviso(cliente.cel));
         actualizarCliente(cliente.id, { graciasEnviado: true });
       }
-      onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
+      if (fuente === 'local') {
+        onShowToast?.('⏳ Pendiente', 'La acción quedó esperando la señal — saldrá sola al reconectar', 'warning');
+      } else {
+        onShowToast?.('🤖 Bot', `Acción enviada: ${tipo}`, 'success');
+      }
+      return fuente;
     } catch (e: any) {
       onShowToast?.('Error', e.message || 'No se pudo enviar', 'error');
+      return 'local';
     }
   };
 
@@ -3053,7 +3063,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   // 📌 Usamos el tipo 'enviar_foto_grupo_mate' que el bot YA conoce
                                   // El bot construye el caption con: titulo, nombre, prod, cobrar, dir, distrito, comentario
                                   // Por eso NO pasamos el mensaje completo en comentario (se duplicaría)
-                                  await enviarAccionBot(c, 'enviar_foto_grupo_mate', {
+                                  const fuenteAccion = await enviarAccionBot(c, 'enviar_foto_grupo_mate', {
                                     imagenUrl: fotoUrl,
                                     nombre: c.nombre,
                                     prod: c.prod,
@@ -3081,13 +3091,25 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                     enviarMate: aMate,
                                   });
                                   // Cambiar estado del cliente según tipo
+                                  // 🙏 FASE AZ: sinGracias — el cliente ya
+                                  // recibió la foto con su mensajito; la
+                                  // tarjeta "gracias por tu compra" NO
+                                  // tiene que salir acá (sale cuando Rudy
+                                  // marca el pago con los botones de siempre).
                                   if (pagoFotoTipo === 'entregado') {
-                                    cambiarEstado(c.id, 'efectivo');
+                                    cambiarEstado(c.id, 'efectivo', { sinGracias: true });
                                   } else if (pagoFotoTipo === 'comprobante') {
                                     const estadoMap: Record<string, string> = { yape: 'yape-rudy', plin: 'yape-plin', efectivo: 'efectivo', transferencia: 'transferencia', pos: 'pos', mixto: 'mixto' };
-                                    cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo');
+                                    cambiarEstado(c.id, estadoMap[pagoFotoMetodo] || 'efectivo', { sinGracias: true });
                                   }
-                                  onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado ${destinosTxt}`, 'success');
+                                  // ⏱️ FASE AZ: si la acción quedó pendiente
+                                  // (red trabada) se toastea la verdad — no
+                                  // "✅ Enviado" mintiendo.
+                                  if (fuenteAccion === 'local') {
+                                    onShowToast?.('⏳ Quedó pendiente', `La foto subió, pero el envío a ${destinosTxt || 'MATE'} espera la señal — saldrá sola al reconectar`, 'warning');
+                                  } else {
+                                    onShowToast?.('✅ Enviado', `Reporte de ${pagoFotoTipo} enviado ${destinosTxt}`, 'success');
+                                  }
                                   setPagoFotoModalId(null);
                                   setPagoFotoArchivo(null);
                                   setPagoFotoPreview(null);

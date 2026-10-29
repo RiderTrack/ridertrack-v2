@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.25 (🗜️ COMPROBANTES AL VUELO + 🎯 ELIGE QUIÉN RECIBE LA FOTO + 🧲 CHAT PERSONAL UNIDO: subir el comprobante de pago demoraba 15+ minutos porque la foto viajaba CRUDA (3-8 MB) — ahora se comprime antes de subir (~100-350 KB) y sale en segundos, igual que en inDrive; en el reporte con foto hay DOS palancas de destino: «👥 Grupo MATE» y «📱 Cliente» — mandale SOLO a MATE, SOLO al cliente, o a los dos (si apagás las dos, el botón se bloquea; requiere bot v3.11); y el WhatsApp personal ya no parte los chats en dos: cuando escribías, el eco de tu mensaje volvía con otro identificador (LID) y aparecía un chat duplicado con el número — el bot personal v1.11 lo une de vuelta y no vuelve a pasar · Lima, PE
+DriverTrack v0.11.26 (🙏 EL GRACIAS YA NO SE ADELANTA + ⏱️ LA SUBIDA NUNCA MÁS SE CUELGA: al enviar la foto de entrega o el comprobante, el cliente ya no recibe ADEMÁS la tarjeta «gracias por tu compra» al unísono — esa tarjeta sale solo cuando marcás el tipo de pago con los botones de siempre (efectivo/yape/plin…); y si la red del celular se trababa, la subida de la foto quedaba colgada hasta 15 minutos con el botón «Subiendo…» eterno — ahora cada intento tiene tope, se cancela de verdad y reintenta una vez sola, y si igual no pudo te avisa en el acto para que decidas (mandarla por WhatsApp a mano o reintentar) · Lima, PE
       </p>
     </div>
   );
