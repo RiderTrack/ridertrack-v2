@@ -214,8 +214,19 @@ export function linkWhatsApp(numero: string, texto: string): string {
 //   • undefined → los dos juntos (el mensaje de siempre, "Ambos")
 export type MetodoCobro = 'yape' | 'plin';
 
+/** 💜 FASE BB: los datos de un cobro — `mensajeEditado` es el texto
+ * que Rudy RETOCÓ a mano en la visualización del formulario (o el
+ * modal del QR) justo antes de mandar. Si viene, ESE texto viaja
+ * tal cual; si no, se arma el de siempre (armarMensajeCobro). */
+export interface DatosCobro {
+  cliente: string;
+  monto: number;
+  direccion: string;
+  mensajeEditado?: string;
+}
+
 export function armarMensajeCobro(
-  datos: { cliente: string; monto: number; direccion: string },
+  datos: DatosCobro,
   config: ConfigDT,
   metodo?: MetodoCobro,
 ): string {

@@ -28,9 +28,9 @@
 //   • ✓ marcar la ENTREGA ahí mismo y que cierre solo.
 // ═════════════════════════════════════════════════════════════
 import { useState } from 'react';
-import { Bot, Check, Loader2, MessageCircle, QrCode, X } from 'lucide-react';
+import { Bot, Check, Loader2, MessageCircle, Pencil, QrCode, X } from 'lucide-react';
 import { ConfigDT, Viaje } from '../types';
-import { MetodoCobro, fmtSoles, vibrar } from '../utils';
+import { MetodoCobro, DatosCobro, armarMensajeCobro, fmtSoles, vibrar } from '../utils';
 
 interface Props {
   viaje: Viaje;
@@ -38,9 +38,11 @@ interface Props {
   onCerrar: () => void;
   /** 💜 FASE AA: el cobro por el flujo COMPARTIDO de siempre —
    *  con la billetera del chip ya elegida viaja directo (el shell
-   *  ya no vuelve a preguntar Yape/Plin/ambos). */
+   *  ya no vuelve a preguntar Yape/Plin/ambos).
+   *  💜 FASE BB: puede viajar `mensajeEditado` (lo que retocaste en
+   *  ✏️ Mensaje) — ese texto sale tal cual. */
   onMandarCobro?: (
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     celular: string,
     metodo?: MetodoCobro,
   ) => Promise<void> | void;
@@ -64,6 +66,11 @@ export default function QrViajeModal({
   const hayYape = !!(config.yape.qrBase64 || config.yape.numero.trim());
   const hayPlin = !!(config.plin.qrBase64 || config.plin.numero.trim());
   const [wallet, setWallet] = useState<'yape' | 'plin'>(!hayYape && hayPlin ? 'plin' : 'yape');
+  // 💜 FASE BB: el mensaje del cobro — editable acá mismo antes de
+  // mandar. null = automático (el de siempre con la billetera que
+  // estás mostrando); string = tu texto retocado.
+  const [msgAbierto, setMsgAbierto] = useState(false);
+  const [mensajeEditado, setMensajeEditado] = useState<string | null>(null);
 
   const esYape = wallet === 'yape';
   const billetera = esYape ? config.yape : config.plin;
@@ -84,11 +91,17 @@ export default function QrViajeModal({
     vibrar(30);
   }
 
-  /** 🤖/💬 mandar el cobro — viaja la billetera que estás mostrando */
+  /** 🤖/💬 mandar el cobro — viaja la billetera que estás mostrando
+   *  💜 FASE BB: y TU mensaje si lo retocaste (✏️) */
   function mandarWhatsApp() {
     if (!onMandarCobro) return;
     onMandarCobro(
-      { cliente: viaje.cliente, monto, direccion: viaje.direccion },
+      {
+        cliente: viaje.cliente,
+        monto,
+        direccion: viaje.direccion,
+        mensajeEditado: mensajeEditado ?? undefined,
+      },
       telCobro,
       wallet, // FASE AA: ya elegiste acá — no vuelve a preguntar
     );
@@ -208,6 +221,83 @@ export default function QrViajeModal({
             )}
           </div>
         </div>
+
+        {/* 💜 FASE BB — ✏️ el MENSAJE del cobro, editable acá mismo:
+            tocá, retocá y mandá TU versión (el automático queda para
+            los demás). Colapsado por defecto para no tapar el QR. */}
+        {onMandarCobro && (
+          <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-2.5" data-testid="qr-viaje-mensaje">
+            <button
+              onClick={() => setMsgAbierto(!msgAbierto)}
+              className="flex w-full items-center justify-between gap-2 text-left"
+            >
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-200">
+                <Pencil size={12} className="text-emerald-400" />
+                Mensaje del cobro
+                {mensajeEditado !== null && (
+                  <span className="rounded border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-px text-[8px] font-black text-emerald-300">
+                    EDITADO
+                  </span>
+                )}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500">{msgAbierto ? 'ocultar ▲' : 'editar ▼'}</span>
+            </button>
+
+            {msgAbierto && (
+              <div className="mt-2">
+                {mensajeEditado === null ? (
+                  <>
+                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[11px] leading-relaxed text-white siempre-blanco">
+                      {armarMensajeCobro(
+                        { cliente: viaje.cliente, monto, direccion: viaje.direccion },
+                        config,
+                        wallet,
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setMensajeEditado(
+                          armarMensajeCobro(
+                            { cliente: viaje.cliente, monto, direccion: viaje.direccion },
+                            config,
+                            wallet,
+                          ),
+                        );
+                        vibrar(30);
+                      }}
+                      className="mt-1.5 w-full rounded-lg bg-emerald-500/15 py-1.5 text-[10px] font-bold text-emerald-300 transition-colors hover:bg-emerald-500/25 active:scale-95"
+                      data-testid="qr-viaje-editar-msg"
+                    >
+                      ✏️ Editar este mensaje
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <textarea
+                      value={mensajeEditado}
+                      onChange={e => setMensajeEditado(e.target.value)}
+                      rows={6}
+                      className="w-full resize-none rounded-xl border border-emerald-500/40 bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-200 outline-none focus:border-emerald-400"
+                      data-testid="qr-viaje-input-msg"
+                    />
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <p className="text-[9px] leading-snug text-emerald-400/90">
+                        Tu edición sale con este cobro
+                      </p>
+                      <button
+                        onClick={() => { setMensajeEditado(null); vibrar(30); }}
+                        className="shrink-0 rounded-lg bg-slate-800 px-2 py-1 text-[9px] font-bold text-slate-300 transition-colors hover:bg-slate-700"
+                        data-testid="qr-viaje-auto-msg"
+                      >
+                        ↩️ Automático
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 💜 FASE AA — todo el cobro en la puerta SIN salir del QR
             (patrón FASE Z del trabajo): mandarle el mensaje por

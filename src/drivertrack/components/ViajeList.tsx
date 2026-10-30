@@ -19,7 +19,7 @@
 import { useEffect, useState } from 'react';
 import { Camera, CheckCircle2, Pencil, Phone, QrCode, Route, Trash2 } from 'lucide-react';
 import { ConfigDT, nombreOrigen, Viaje } from '../types';
-import { MetodoCobro, fmtSoles, vibrar } from '../utils';
+import { MetodoCobro, DatosCobro, fmtSoles, vibrar } from '../utils';
 import { formatearDuracion } from '../services/gps';
 // FASE H: 🛣️ TODO lo de la ruta (navegar A/B, copiar, GPS, km) vive
 // ahora adentro del RutaModal — antes eran botoncitos A + B + GPS
@@ -89,7 +89,7 @@ interface Props {
   // VIAJE, viaja la billetera que ya estás mostrando (el shell no
   // vuelve a preguntar Yape/Plin/ambos).
   onMandarCobro: (
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     celular: string,
     metodo?: MetodoCobro,
   ) => Promise<void> | void;

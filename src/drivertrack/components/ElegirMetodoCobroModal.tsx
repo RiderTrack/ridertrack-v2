@@ -17,10 +17,10 @@
 // ═════════════════════════════════════════════════════════════
 import { X } from 'lucide-react';
 import { ConfigDT } from '../types';
-import { MetodoCobro, fmtSoles } from '../utils';
+import { MetodoCobro, DatosCobro, fmtSoles } from '../utils';
 
 interface Props {
-  datos: { cliente: string; monto: number; direccion: string };
+  datos: DatosCobro; // 💜 FASE BB: puede traer mensajeEditado (tu texto retocado)
   config: ConfigDT;
   /** undefined = "Ambos" (el mensaje de siempre) */
   onElegir: (metodo?: MetodoCobro) => void;

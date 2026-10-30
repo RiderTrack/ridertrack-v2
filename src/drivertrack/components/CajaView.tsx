@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, History as HistoryIcon, MessageCircle, Minus, QrCode, Trash2 } from 'lucide-react';
 import { ConfigDT, emojiGasto, Gasto, nombreOrigen, nombreGasto, TIPOS_GASTO, TipoGasto, Viaje } from '../types';
 import { fechaBonita, fechaHoy, horaAhora, resumenDia, totalGastosDia } from '../storage';
-import { armarMensajeCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
+import { armarMensajeCobro, DatosCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
 // FASE K: saldo de la recarga semanal (banner comisión prepagada)
 import { estadoSaldo, textoDias } from '../services/recarga';
 // FASE T: 📜 historial — todos tus días con sus números
@@ -28,7 +28,7 @@ interface Props {
   onIniciarGPS?: (id: string) => void;    // F-ID3
   onDetenerGPS?: () => void;              // F-ID3
   // F-ID5: flujo de cobro compartido (robot si está activo) — pasa through
-  onMandarCobro?: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
+  onMandarCobro?: (datos: DatosCobro, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean;
   /** ✏️ Editar viaje ya cargado (pasa through a la lista — mismo
    *  modal de la sección Viajes de inDrive, aplica el shell) */
@@ -492,7 +492,8 @@ export default function CajaView({
           onMandarCobro ??
           ((datos, cel) => {
             // sin shell-passthrough (no debería pasar): WhatsApp manual
-            window.open(linkWhatsApp(normalizarCelular(cel), armarMensajeCobro(datos, config)), '_blank');
+            // 💜 FASE BB: respeta tu edición si viaja en la acción
+            window.open(linkWhatsApp(normalizarCelular(cel), (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config)), '_blank');
           })
         }
         cobroEnCurso={cobroEnCurso}

@@ -46,6 +46,9 @@ import { useClientes } from '../hooks/useClientes';
 import { useAuth } from '../hooks/useAuth';
 import { useConfig } from '../hooks/useConfig';
 import { FotoEntregaModal } from './FotoEntregaModal';
+// 🩷 FASE BB: chicos de venta — contacto + mensaje editable + biblioteca
+import VentaModal from './VentaModal';
+import { sanearBiblioteca } from '../utils/ventaMensajes';
 import { AddressAutocomplete, DireccionElegida } from './AddressAutocomplete';
 import { UbicarClienteModal } from './UbicarClienteModal';
 import { CronometroRuta } from './CronometroRuta';
@@ -89,6 +92,10 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const { user, profile } = useAuth();
   const { clientes, loading, sincronizando, stats, cambiarEstado, agregarCliente, eliminarCliente, importarDesdeExcel, sincronizarDesdeModular, finalizarRutaActual, limpiarRuta, optimizarRuta, moverCliente, editarNumeroOrden, actualizarCliente, marcarVerificacion, reprogramados, ultimaCerrada, agendarReprogramado, agregarDeCola, agregarNoEntregado, descartarDeCola } = useClientes();
   const { config, guardar: guardarConfig } = useConfig();
+
+  // 🩷 FASE BB: la biblioteca de mensajes de los chicos de venta
+  // (config_empresa.ventasMensajes — saneada por si algo viejo quedó raro)
+  const bibliotecaVentas = useMemo(() => sanearBiblioteca(config?.ventasMensajes), [config?.ventasMensajes]);
 
   // 💜 FASE Y: QR de cobro por cliente — botoncito en cada fila que
   // abre tu QR (Yape/Plin del TRABAJO, "Mi QR Yape/Plin" → config_empresa)
@@ -2624,43 +2631,26 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                       </div>
                     )}
 
-                    {/* ═══ Modal 🩷 Chicos de Venta ═══ */}
+                    {/* ═══ Modal 🩷 Chicos de Venta — FASE BB: mensaje
+                        editable + biblioteca + el número a la vista ═══ */}
                     {ventaModalId === c.id && (
-                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setVentaModalId(null)}>
-                        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-base font-bold text-white">🩷 Chicos de Venta</h3>
-                            <button onClick={() => setVentaModalId(null)} className="text-slate-400 hover:text-white">
-                              <X className="w-5 h-5" />
-                            </button>
-                          </div>
-                          <p className="text-[11px] text-slate-400 mb-3">El bot le enviará el contacto al cliente</p>
-
-                          <div className="space-y-2">
-                            <button onClick={async () => { onShowToast?.('🩷 Venta', 'Enviando contacto de Fabiana...', 'info'); await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'fabiana' }); setVentaModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">👩</span>
-                              <div className="text-left">
-                                <div>Fabiana</div>
-                                <div className="text-[10px] text-slate-500">Ejecutiva de ventas</div>
-                              </div>
-                            </button>
-                            <button onClick={async () => { onShowToast?.('🩷 Venta', 'Enviando contacto de Karla...', 'info'); await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'karla' }); setVentaModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">👩</span>
-                              <div className="text-left">
-                                <div>Karla</div>
-                                <div className="text-[10px] text-slate-500">Ejecutiva de ventas</div>
-                              </div>
-                            </button>
-                            <button onClick={async () => { onShowToast?.('🩷 Venta', 'Enviando contacto de Tocho...', 'info'); await enviarAccionBot(c, 'chicos_venta', { ventas_persona: 'tocho' }); setVentaModalId(null); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 text-sm font-bold transition-all active:scale-95">
-                              <span className="text-lg">👨</span>
-                              <div className="text-left">
-                                <div>Tocho</div>
-                                <div className="text-[10px] text-slate-500">Ejecutivo de ventas</div>
-                              </div>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                      <VentaModal
+                        clienteNombre={c.nombre || 'Cliente'}
+                        ventas={config?.ventas}
+                        mensajesGuardados={bibliotecaVentas}
+                        empresa={config?.empresa?.nombre || 'MATE'}
+                        onGuardarMensajes={list => guardarConfig({ ...config, ventasMensajes: list })}
+                        onEnviar={async (persona, texto) => {
+                          await enviarAccionBot(c, 'chicos_venta', {
+                            ventas_persona: persona.clave,
+                            ventas_nombre: persona.nombre,
+                            ventas_celular: persona.celular,
+                            mensaje: texto, // ya resuelto — viaja PEGADO en la acción
+                          });
+                        }}
+                        onCerrar={() => setVentaModalId(null)}
+                        onToast={onShowToast}
+                      />
                     )}
 
                     {/* ═══ Modal 🏦 Cuentas de la Empresa ═══ */}

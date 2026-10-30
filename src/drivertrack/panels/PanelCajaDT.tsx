@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { useTema } from '../../theme/useTema';
 import { ConfigDT, Gasto, Viaje } from '../types';
 import { cargarConfig, cargarGastos, cargarViajes, guardarGastos, guardarViajes } from '../storage';
-import { armarMensajeCobro, qrDelMetodo, alivianarQrBase64, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from '../utils';
+import { armarMensajeCobro, DatosCobro, qrDelMetodo, alivianarQrBase64, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from '../utils';
 import { encolarAccionDT, escucharResultadoDT, uidDisponible } from '../services/robotBot';
 import { escucharImagenesDT, ImagenDT } from '../services/imagenesDT';
 import CajaView from '../components/CajaView';
@@ -105,7 +105,7 @@ export default function PanelCajaDT({ onToast }: Props) {
 
   // 🟣 FASE R: el cobro que espera la elección del método (Yape/Plin)
   const [cobroPendiente, setCobroPendiente] = useState<{
-    datos: { cliente: string; monto: number; direccion: string };
+    datos: DatosCobro; // 💜 FASE BB: puede traer mensajeEditado (tu texto retocado)
     cel: string;
   } | null>(null);
 
@@ -113,7 +113,7 @@ export default function PanelCajaDT({ onToast }: Props) {
   // 🟣 FASE R: si tenés los DOS números (Yape y Plin) te pregunta cómo
   // cobrarle — el mensaje sale SOLO con el método que elijas y SU QR.
   function mandarCobro(
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     celular: string,
   ): void {
     const cel = normalizarCelular(celular);
@@ -135,11 +135,12 @@ export default function PanelCajaDT({ onToast }: Props) {
    *  resultado REAL del bot: si no pudo, te avisa el motivo y abre
    *  WhatsApp de respaldo. El QR viaja con presupuesto de peso. */
   async function ejecutarCobro(
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     cel: string,
     metodo?: MetodoCobro,
   ): Promise<void> {
-    const texto = armarMensajeCobro(datos, config, metodo);
+    // 💜 FASE BB: si retocaste el mensaje (✏️), TU versión viaja tal cual
+    const texto = (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config, metodo);
     if (!config.robotActivo) {
       window.open(linkWhatsApp(cel, texto), '_blank');
       vibrar(60);

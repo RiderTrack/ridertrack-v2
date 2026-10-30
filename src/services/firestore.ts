@@ -29,6 +29,10 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import { hoyISO, desglosarCobros, conTotalesCorregidos } from '../utils/stats'; // ⚡ F3.48 fecha Lima · ⚡ F3.50 desglose único de cobros
+// 🩷 FASE BB: la biblioteca de mensajes de los chicos de venta vive
+// en config_empresa.ventasMensajes — el tipo es de los helpers puros
+import type { MensajeVenta } from '../utils/ventaMensajes';
+export type { MensajeVenta };
 // 📅 FASE AD: motor puro de reprogramados (noEntregados para el
 // cierre) + tipos de la cola. `import type` se borra al compilar
 // → sin ciclo runtime firestore↔reprog.
@@ -1086,6 +1090,12 @@ export interface ConfigCuentas {
     karla?: { nombre: string; celular: string; };
     tocho?: { nombre: string; celular: string; };
   };
+  /** 🩷 FASE BB: biblioteca de MENSAJES guardados para los chicos de
+   *  venta — cada uno con su nombre y su texto (con etiquetas
+   *  {cliente} {ventas_nombre} {ventas_celular} {empresa}). Se editan
+   * en el propio modal 🩷 de Mi Ruta y viajan PEGADOS en la acción
+   * (el bot no lee Firestore extra — lección AM/AN). */
+  ventasMensajes?: MensajeVenta[];
   /** Inicio/fin de ruta para optimizar y dibujar en el mapa (Fase 1.4) */
   ruta?: ConfigRuta;
   /** Fase 3.14: WhatsApp oficial de Meta (Cloud API) — config del
@@ -1130,6 +1140,7 @@ export const CONFIG_CUENTAS_DEFAULT: ConfigCuentas = {
     karla: { nombre: 'Karla', celular: '' },
     tocho: { nombre: 'Tocho', celular: '' },
   },
+  ventasMensajes: [], // 🩷 FASE BB: arranca vacía — los presets de fábrica viven en ventaMensajes.ts
   ruta: { inicio: null, fin: null, volverAlInicio: false },
   whatsappMeta: { phoneNumberId: '', token: '', numero: '', nombreVerificado: '' },
   apariencia: { logoBase64: '' },

@@ -1114,6 +1114,8 @@ var CONFIG_CUENTAS_DEFAULT = {
     karla: { nombre: "Karla", celular: "" },
     tocho: { nombre: "Tocho", celular: "" }
   },
+  ventasMensajes: [],
+  // 🩷 FASE BB: arranca vacía — los presets de fábrica viven en ventaMensajes.ts
   ruta: { inicio: null, fin: null, volverAlInicio: false },
   whatsappMeta: { phoneNumberId: "", token: "", numero: "", nombreVerificado: "" },
   apariencia: { logoBase64: "" }

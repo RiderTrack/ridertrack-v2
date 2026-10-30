@@ -41,7 +41,7 @@ import { EvArchivo } from '../tipos';
 import { Bot, Camera, Check, Compass, ImageUp, Loader2, MapPin, MessageCircle, Navigation, Phone, Plus, X, Zap } from 'lucide-react';
 import { CanceladoPor, ConfigDT, OrigenViaje, ORIGENES, Viaje } from '../types';
 import { fechaHoy, horaAhora } from '../storage';
-import { armarMensajeCobro, fmtSoles, normalizarCelular, vibrar } from '../utils';
+import { armarMensajeCobro, DatosCobro, fmtSoles, normalizarCelular, vibrar } from '../utils';
 import { escanearDireccion } from '../services/escanerIA';
 import { abrirNavegacion, tieneDestino, DestinoNav } from '../services/navegacion';
 // FASE F: km A→B calculados solos (Google por calles / recta de respaldo)
@@ -141,7 +141,9 @@ interface Props {
   onGuardarMiYape: (numero: string, titular: string) => void; // F-ID2.7: tu Yape queda guardado 1 sola vez
   onNecesitaKey: () => void; // F-ID2: te manda a Ajustes si no hay key Gemini
   // F-ID5: cobro compartido — robot automático si está activo, si no WhatsApp
-  onMandarCobro: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
+  // 💜 FASE BB: `datos` ahora puede traer mensajeEditado (el texto que
+  // retocaste en la visualización) — viaja tal cual al cliente
+  onMandarCobro: (datos: DatosCobro, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo (spinner)
 }
 
@@ -214,6 +216,10 @@ export default function ViajeForm({
   const [miYapeNum, setMiYapeNum] = useState('');
   const [miYapeTitular, setMiYapeTitular] = useState('');
   const [editarMiYape, setEditarMiYape] = useState(false);
+  // 💜 FASE BB: el mensaje del cobro EDITADO a mano. null = automático
+  // (se arma vivo con los datos del viaje); string = lo que Rudy
+  // escribió/retocó — ese texto viaja tal cual con el cobro.
+  const [mensajeEditado, setMensajeEditado] = useState<string | null>(null);
 
   // ── F-ID2: estado del escáner ──
   const [escaneando, setEscaneando] = useState(false);
@@ -407,11 +413,11 @@ export default function ViajeForm({
     }
   }
 
-  // F-ID2.5 → F-ID2.8: 💬 mensaje de cobro por WhatsApp — delega a la
-  // función COMPARTIDA de utils: el botoncito 💬 de la lista de abajo
-  // manda EXACTAMENTE este mismo mensaje (antes mandaba uno viejo
-  // sin tu Yape). Bloques: saludo → pedido → cómo pagar (TU Yape) → gracias
+  // F-ID2.5 → F-ID2.8 → 💜 FASE BB: 💬 mensaje de cobro por WhatsApp.
+  // Si retocaste el texto en la visualización (✏️), ESA versión es la
+  // que viaja; si no, el automático de siempre.
   function armarMensaje(): string {
+    if (mensajeEditado !== null) return mensajeEditado;
     return armarMensajeCobro(
       { cliente, monto: parseFloat(tarifa) || 0, direccion },
       config,
@@ -451,7 +457,13 @@ export default function ViajeForm({
     setError('');
     vibrar(60);
     onMandarCobro(
-      { cliente, monto: parseFloat(tarifa) || 0, direccion },
+      {
+        cliente,
+        monto: parseFloat(tarifa) || 0,
+        direccion,
+        // 💜 FASE BB: tu edición (si tocaste ✏️) viaja con ESTE cobro
+        mensajeEditado: mensajeEditado ?? undefined,
+      },
       celularPrincipal,
     );
   }
@@ -1129,17 +1141,62 @@ export default function ViajeForm({
         </div>
       )}
 
-      {/* ── F-ID2.7: vista previa del mensaje — SIEMPRE visible, en vivo ── */}
+      {/* ── F-ID2.7: vista previa del mensaje — SIEMPRE visible, en vivo ──
+          💜 FASE BB: y ahora EDITABLE — ✏️ retoca el texto acá mismo y el
+          botón Cobrar manda TU versión (el automático queda para los
+          demás viajes). Volver al automático con ↩️. */}
       <div className="mt-2 rounded-xl border border-[#25D366]/25 bg-[#25D366]/5 p-3" data-testid="preview-mensaje">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/80">
-          💬 Así le va a llegar a tu cliente
-        </p>
-        <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
-          <TextoWhatsApp texto={armarMensaje()} />
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/80">
+            💬 Así le va a llegar a tu cliente
+          </p>
+          {mensajeEditado === null ? (
+            <button
+              onClick={() => { setMensajeEditado(armarMensaje()); vibrar(30); }}
+              className="shrink-0 rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-bold text-emerald-300 transition-colors hover:bg-emerald-500/25 active:scale-95"
+              data-testid="boton-editar-mensaje"
+              title="Retocar el mensaje de este cobro (el automático queda para los demás)"
+            >
+              ✏️ Editar
+            </button>
+          ) : (
+            <button
+              onClick={() => { setMensajeEditado(null); vibrar(30); }}
+              className="shrink-0 rounded-lg bg-slate-700 px-2 py-1 text-[10px] font-bold text-slate-300 transition-colors hover:bg-slate-600 active:scale-95"
+              data-testid="boton-auto-mensaje"
+              title="Vuelve a armarse solo con los datos del viaje"
+            >
+              ↩️ Automático
+            </button>
+          )}
         </div>
-        <p className="mt-1 text-[10px] text-slate-500">
-          Se arma solo con los datos del viaje — el botón Cobrar lo manda tal cual al WhatsApp del cliente
-        </p>
+
+        {mensajeEditado === null ? (
+          <>
+            <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
+              <TextoWhatsApp texto={armarMensaje()} />
+            </div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              Se arma solo con los datos del viaje — el botón Cobrar lo manda tal cual al WhatsApp del cliente
+            </p>
+          </>
+        ) : (
+          <>
+            <textarea
+              value={mensajeEditado}
+              onChange={e => setMensajeEditado(e.target.value)}
+              rows={7}
+              className="mt-1.5 w-full resize-none rounded-xl border border-emerald-500/40 bg-slate-900 px-3 py-2.5 text-[12px] leading-relaxed text-slate-200 outline-none focus:border-emerald-400"
+              data-testid="input-mensaje-editado"
+            />
+            <div className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
+              <TextoWhatsApp texto={mensajeEditado} />
+            </div>
+            <p className="mt-1 text-[10px] text-emerald-400/90">
+              ✏️ Tu edición viaja con <b>este</b> cobro — el mensaje automático queda para los demás viajes
+            </p>
+          </>
+        )}
       </div>
 
       {/* F-ID2.6: yape del PEDIDO — con el que pagó el CLIENTE (distinto del tuyo) */}

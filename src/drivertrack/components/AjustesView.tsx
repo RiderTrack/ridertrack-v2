@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.27 (📊 COMISIÓN DE INDRIVE AL VALOR REAL: inDrive te descuenta ~14.9% por viaje (de un viaje de S/ 8.00 te quita S/ 1.19) pero la app seguía con el 10.89% viejo — el contador del saldo se atrasaba contra tu inDrive real; ahora el % se actualiza SOLO a 14.9 en tu config (tarjeta de la recarga, comisiones y contador), y como el contador recalcula vivo, todo el historial de tu recarga actual se corrige retroactivo — si queda una diferencia chica por viajes sin registrar, sincronizá con ✏️ y queda clavado · Lima, PE
+DriverTrack v0.11.28 (✏️ EL MENSAJE DEL QR YA ES TUYO: en inDrive → Viajes, la visualización "Así le va a llegar a tu cliente" ahora se EDITA con ✏️ — retocá el texto y el botón Cobrar manda TU versión (↩️ vuelve al automático); igual en el botoncito QR de cada viaje, sección "Mensaje del cobro" · 🩷 CHICOS DE VENTA CON MENSAJE: en Trabajo → Mi Ruta, el botón 🩷 ahora manda la tarjeta de contacto + un MENSAJE EDITABLE con biblioteca de guardados (devolución, reclamo, cualquier cosita) y te muestra el número de cada chico — los que estén ⚠️ sin número no se mandan; requiere el bot v3.10-VENTAS para que el contacto LLEGUE de verdad (antes el clic moría en silencio) · Lima, PE
       </p>
     </div>
   );

@@ -47,7 +47,7 @@ import {
   resumenDia,
   totalGastosDia,
 } from './storage';
-import { armarMensajeCobro, qrDelMetodo, alivianarQrBase64, sanearQrPesados, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from './utils';
+import { armarMensajeCobro, DatosCobro, qrDelMetodo, alivianarQrBase64, sanearQrPesados, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from './utils';
 // FASE B: 🤖 el robot ahora escucha por Firestore (acciones_dt) —
 // cola propia de inDrive, sobrevive reinicios del bot. El viejo
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
@@ -372,7 +372,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
 
   // 🟣 FASE R: el cobro que espera la elección del método (Yape/Plin)
   const [cobroPendiente, setCobroPendiente] = useState<{
-    datos: { cliente: string; monto: number; direccion: string };
+    datos: DatosCobro; // 💜 FASE BB: puede traer mensajeEditado (tu texto retocado)
     cel: string;
   } | null>(null);
 
@@ -407,7 +407,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
    *  vuelve a preguntar); si esa billetera no tuviera número, cae
    *  al flujo de siempre (nunca se pierde). */
   function mandarCobro(
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     celular: string,
     metodo?: MetodoCobro,
   ): void {
@@ -442,11 +442,13 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
    *  ser mentira): si el robot falla, te avisa con el motivo y te abre
    *  WhatsApp de respaldo — el cobro nunca se pierde en silencio. */
   async function ejecutarCobro(
-    datos: { cliente: string; monto: number; direccion: string },
+    datos: DatosCobro,
     cel: string,
     metodo?: MetodoCobro,
   ): Promise<void> {
-    const texto = armarMensajeCobro(datos, config, metodo);
+    // 💜 FASE BB: si retocaste el mensaje (✏️ en el formulario o el QR
+    // por viaje), TU versión viaja tal cual; si no, el automático.
+    const texto = (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config, metodo);
 
     // Robot apagado → como siempre: WhatsApp manual (revisás y envía vos)
     if (!config.robotActivo) {

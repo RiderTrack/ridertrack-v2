@@ -27,6 +27,7 @@ import { useState } from 'react';
 import { Bot, CheckCircle2, Flag, MapPin, Send, Timer, Wallet, X } from 'lucide-react';
 import { Viaje } from '../types';
 import { TipoAviso } from '../services/robotBot';
+import { DatosCobro } from '../utils';
 
 interface Props {
   viaje: Viaje;
@@ -39,7 +40,7 @@ interface Props {
     telefono?: string | string[],
   ) => Promise<void> | void;
   onPedirUbicacion: (viaje: Viaje, telefono?: string | string[]) => Promise<void> | void;
-  onCobrar: (datos: { cliente: string; monto: number; direccion: string }, celular: string) => Promise<void> | void;
+  onCobrar: (datos: DatosCobro, celular: string) => Promise<void> | void;
   /** FASE B2: qué tipos tienen imagen subida (para el badge 🖼️) */
   tiposConImagen?: string[];
 }
