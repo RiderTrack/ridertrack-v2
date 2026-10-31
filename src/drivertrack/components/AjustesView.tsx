@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.28 (✏️ EL MENSAJE DEL QR YA ES TUYO: en inDrive → Viajes, la visualización "Así le va a llegar a tu cliente" ahora se EDITA con ✏️ — retocá el texto y el botón Cobrar manda TU versión (↩️ vuelve al automático); igual en el botoncito QR de cada viaje, sección "Mensaje del cobro" · 🩷 CHICOS DE VENTA CON MENSAJE: en Trabajo → Mi Ruta, el botón 🩷 ahora manda la tarjeta de contacto + un MENSAJE EDITABLE con biblioteca de guardados (devolución, reclamo, cualquier cosita) y te muestra el número de cada chico — los que estén ⚠️ sin número no se mandan; requiere el bot v3.10-VENTAS para que el contacto LLEGUE de verdad (antes el clic moría en silencio) · Lima, PE
+DriverTrack v0.11.29 (💜🔷 LOS MENSAJES DEL QR, LOS QUE DE VERDAD LLEGAN: en inDrive, el botoncito QR de cada viaje → "✏️ Mensaje del cobro" ahora edita el mensaje de CADA billetera (Yape y Plin, cada uno el suyo) con etiquetas que se llenan solas al enviar; 💾 "Guardar como MI mensaje" lo deja fijito para TODOS los cobros (también desde el menú del robot y la Caja, y viaja a tu otro celular) + 📚 LIBRERÍA de variantes por billetera para cargar en un toque; el ✏️ viejo del formulario se fue (editaba un mensaje que el flujo real no usaba) y ahora el menú "¿Cómo le cobrás?" te muestra el mensaje que va a salir con cada opción · 📦 CAJA: el cuadre al jefe ahora lleva el DETALLE de pedidos — cuántos de S/9, cuántos de S/12 y cuántos fallidos ({'{detallePedidos}'} en la plantilla, y las variables {'{pedidos9}'} {'{pedidos12}'} {'{fallidos}'} para armarla a tu gusto) · Lima, PE
       </p>
     </div>
   );

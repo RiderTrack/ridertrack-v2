@@ -47,7 +47,7 @@ import {
   resumenDia,
   totalGastosDia,
 } from './storage';
-import { armarMensajeCobro, DatosCobro, qrDelMetodo, alivianarQrBase64, sanearQrPesados, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from './utils';
+import { mensajeCobroFinal, DatosCobro, qrDelMetodo, alivianarQrBase64, sanearQrPesados, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from './utils';
 // FASE B: 🤖 el robot ahora escucha por Firestore (acciones_dt) —
 // cola propia de inDrive, sobrevive reinicios del bot. El viejo
 // puente localhost:3001 (F-ID5) queda jubilado: nunca llegó a
@@ -397,6 +397,16 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 💜 FASE BC: persiste la config de inDrive (TU mensaje por
+  // billetera + la librería) — el editor del QR por viaje la usa.
+  // Mismo patrón de sincronizarSaldo: guarda, actualiza el estado y
+  // avisa a las demás vistas para que se recarguen del storage.
+  function actualizarConfigDT(c: ConfigDT) {
+    guardarConfig(c);
+    setConfig(c);
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
+  }
+
   /** 🟣 FASE R: intercepta TODOS los caminos de cobro (formulario,
    *  lista, menú del robot, contactos). Si tenés los DOS números
    *  configurados te pregunta cómo cobrarle (💜 solo Yape / 🔷 solo
@@ -446,9 +456,12 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
     cel: string,
     metodo?: MetodoCobro,
   ): Promise<void> {
-    // 💜 FASE BB: si retocaste el mensaje (✏️ en el formulario o el QR
-    // por viaje), TU versión viaja tal cual; si no, el automático.
-    const texto = (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config, metodo);
+    // 💜 FASE BC: el mensaje que DE VERDAD viaja — UN resolutor para
+    // todos los caminos: tu edición del momento → TU plantilla
+    // guardada de la billetera (✏️ del QR, con librería) → el
+    // automático de siempre. Antes la edición del formulario quedaba
+    // en un mensaje que este flujo nunca usaba.
+    const texto = mensajeCobroFinal(datos, config, metodo);
 
     // Robot apagado → como siempre: WhatsApp manual (revisás y envía vos)
     if (!config.robotActivo) {
@@ -1113,6 +1126,7 @@ export default function DriverTrackView({ activa, onIrAYape, onIrAAjustes, pagoT
           onGuardarFoto={guardarFotoEntrega}
           onToast={mostrarToast}
           onEditar={editarViaje}
+          onGuardarConfig={actualizarConfigDT}
         />
 
         {/* FASE C: cartelito para que no busqués con el viejo hábito —

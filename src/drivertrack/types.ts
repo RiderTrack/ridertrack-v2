@@ -158,6 +158,16 @@ export interface ConfigDT {
   /** FASE K: 🎯 recarga semanal — comisión prepagada + calculadora.
    *  Viaja al cel 2 con el sync de la config (objeto anidado → merge). */
   recarga?: RecargaSemanal;
+  /** 💜 FASE BC: TU mensaje del cobro por QR de Yape (con etiquetas
+   *  {cliente} {monto} {direccion} {numero} {titular}). Vacío/sin
+   *  guardar → el automático de siempre. Viaja al cel 2 y a los
+   *  backups con el sync de la config. */
+  mensajeQrYape?: string;
+  /** 💜 FASE BC: ídem Plin */
+  mensajeQrPlin?: string;
+  /** 💜 FASE BC: la LIBRERÍA de variantes guardadas por billetera
+   *  (chips con nombre para cargar en un toque). */
+  libreriaQr?: { yape?: { id: string; nombre: string; texto: string }[]; plin?: { id: string; nombre: string; texto: string }[] };
 }
 
 export interface ResumenDia {

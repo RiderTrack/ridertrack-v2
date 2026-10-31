@@ -45,6 +45,12 @@ export interface ClienteCajaLike {
   mVt?: number | string;
 }
 
+/** 💜 FASE BC: st que cuentan como FALLIDOS en el mensaje al jefe —
+ *  los MISMOS 6 del contador ❌ del header de Mi Ruta (useClientes
+ *  cuenta 'reprogramar' como fallido) para que el número del cuadre
+ *  cuadre con el que ves todo el día. */
+const ST_FALLIDOS_CAJA = ['fallida', 'rechazado', 'cancelado', 'ausente', 'no-contesta', 'reprogramar'];
+
 /** Resumen vivo de la caja del día */
 export interface ResumenCaja {
   /** entregas cobradas (st entregado) */
@@ -67,6 +73,10 @@ export interface ResumenCaja {
   esperado: number;
   /** lo que el día te deja: efectivo + digital − gastos */
   netoDelDia: number;
+  /** 💜 FASE BC: pedidos FALLIDOS de hoy (fallida, rechazado,
+   *  cancelado, ausente, no-contesta, reprogramar — el mismo ❌ del
+   *  header) → viaja en el cuadre al jefe ({fallidos}) */
+  fallidos: number;
 }
 
 /** Cierre guardado — snapshot inmutable del día */
@@ -88,6 +98,10 @@ export interface CierreCaja {
   /** snapshot de los gastos del día (para el detalle) */
   gastos: Gasto[];
   nota?: string;
+  /** 💜 FASE BC: pedidos FALLIDOS del día, congelados al cierre (los
+   *  6 estados del ❌ del header) → viajan en el cuadre al jefe con
+   *  {fallidos} / {detallePedidos}. Cierres viejos sin el campo → 0. */
+  fallidos?: number;
   /** 🛵 FASE Q: tu paga por pedidos del día, congelada al cierre
    * (S/9 por entrega normal, S/12 en distrito lejano — FASE D).
    * Se descuenta del cuadre al jefe. Cierres viejos sin este
@@ -165,10 +179,16 @@ export function resumenCajaDia(clientes: ClienteCajaLike[], gastos: Gasto[], fon
   let efectivoCobrado = 0;
   let digitalRider = 0;
   let empresa = 0;
+  let fallidos = 0; // 💜 FASE BC: el ❌ del header, para el cuadre al jefe
 
   for (const c of clientes || []) {
     const st = c.st || '';
-    if (!ST_ENTREGADOS.includes(st)) continue;
+    if (!ST_ENTREGADOS.includes(st)) {
+      // 💜 FASE BC: los fallidos se cuentan aunque no paguen — el jefe
+      // quiere saber cuántos pedidos no llegaron
+      if (ST_FALLIDOS_CAJA.includes(st)) fallidos++;
+      continue;
+    }
     entregas++;
     const cobrar = num(c.cobrar);
     const mEf = num(c.mEf);
@@ -230,6 +250,7 @@ export function resumenCajaDia(clientes: ClienteCajaLike[], gastos: Gasto[], fon
     nGastos: (gastos || []).length,
     esperado,
     netoDelDia,
+    fallidos,
   };
 }
 
@@ -475,6 +496,7 @@ export const PLANTILLA_CUADRE_DEFECTO = [
   '📅 {fecha}',
   '',
   '💵 *Cobrado del día: {cobrado}*',
+  '{detallePedidos}',
   '{empresa}',
   '{gastos}',
   '{loTuyo}',
@@ -501,6 +523,12 @@ export const VARIABLES_CUADRE: { clave: string; ej: string }[] = [
   { clave: 'gastos', ej: '· gastos de la ruta: S/ 20.00 (2) — ya descontados (vacío si no hay)' },
   { clave: 'empresa', ej: '· la empresa cobra directo: S/ 80.00 (vacío si no hay)' },
   { clave: 'nota', ej: '📝 tu nota del cierre (vacío si no hay)' },
+  // 💜 FASE BC: el detalle de pedidos que pidió Rudy — “cuántos
+  // pedidos son de 9, cuántos de 12, cuántos fallidos”
+  { clave: 'detallePedidos', ej: '📦 Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) · 10 entregados · ❌ fallidos: 1 (vacío si no hubo)' },
+  { clave: 'pedidos9', ej: '8 (los de tarifa normal)' },
+  { clave: 'pedidos12', ej: '2 (los de distrito lejano)' },
+  { clave: 'fallidos', ej: '1 (fallida, rechazado, cancelado, ausente, no-contesta o reprogramar)' },
 ];
 
 /**
@@ -524,6 +552,25 @@ export function aplicarPlantillaCuadre(texto: string, cierre: CierreCaja, riderN
     efectivo: mon(q.efectivo),
     yape: mon(q.yape),
     total: mon(q.total),
+    // 💜 FASE BC: el detalle de pedidos que pidió Rudy — “que sea un
+    // poco más detallado: cuántos pedidos son de 9, cuántos de 12,
+    // cuántos fallidos”. pedidos9/pedidos12 salen del snapshot de la
+    // temporada (pagoRuta); fallidos, del cierre. Sin temporada → la
+    // línea solo dice entregados + fallidos.
+    pedidos9: String(pr?.cantidadNormal ?? 0),
+    pedidos12: String(pr?.cantidadLejos ?? 0),
+    fallidos: String(cierre.fallidos ?? 0),
+    detallePedidos: (() => {
+      const fall = cierre.fallidos ?? 0;
+      const entregados = cierre.entregas ?? 0;
+      if (entregados <= 0 && fall <= 0) return '';
+      if (pr && (pr.cantidadNormal > 0 || pr.cantidadLejos > 0)) {
+        const partes = [`${pr.cantidadNormal} de S/ ${pr.tarifaNormal.toFixed(0)}`];
+        if (pr.cantidadLejos > 0) partes.push(`${pr.cantidadLejos} de S/ ${pr.tarifaLejos.toFixed(0)} (lejos)`);
+        return `📦 Pedidos: ${partes.join(' + ')} · ${entregados} entregados · ❌ fallidos: ${fall}`;
+      }
+      return `📦 Pedidos: ${entregados} entregados · ❌ fallidos: ${fall}`;
+    })(),
     // 🛵 FASE S: la línea de tu paga ahora dice DE DÓNDE la restaste —
     // del Yape (lo normal), del efectivo (día sin digital) o mezcla
     loTuyo: (() => {

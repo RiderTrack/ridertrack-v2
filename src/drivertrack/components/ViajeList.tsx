@@ -119,6 +119,10 @@ interface Props {
    *  tarifa/notas SIN borrar. El shell aplica el cambio al estado
    *  (y viaja a la nube por el sync de siempre). */
   onEditar?: (v: Viaje) => void;
+  /** 💜 FASE BC: persiste la config de inDrive (TU mensaje de la
+   *  billetera + la librería de variantes) — lo aporta el shell y
+   *  lo usa el editor del QR por viaje. */
+  onGuardarConfig?: (c: ConfigDT) => void;
 }
 
 export default function ViajeList({
@@ -139,6 +143,7 @@ export default function ViajeList({
   onGuardarFoto,
   onToast,
   onEditar,
+  onGuardarConfig,
 }: Props) {
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   // FASE B: qué viaje tiene abierto el menú del robot 🤖
@@ -721,6 +726,7 @@ export default function ViajeList({
               onCerrar={() => setQrViajeId(null)}
               onMandarCobro={onMandarCobro}
               cobroEnCurso={cobroEnCurso}
+              onGuardarConfig={onGuardarConfig}
               onToggleEntregado={onToggleEntregado}
               onToast={onToast}
             />

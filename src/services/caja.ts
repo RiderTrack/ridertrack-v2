@@ -505,6 +505,9 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
     netoDelDia: r.netoDelDia,
     gastos: gastosDeHoy(estado),
     nota: (datos.nota || '').trim().slice(0, 200) || undefined,
+    // 💜 FASE BC: los pedidos FALLIDOS del día viajan congelados en el
+    // cierre → el cuadre al jefe los muestra ({fallidos} / {detallePedidos})
+    fallidos: r.fallidos || 0,
     // 🛵 FASE Q: la paga del día viaja DENTRO del cierre (a la
     // nube por el mismo doc usuarios/{uid}.caja — sin reglas nuevas)
     ...(datos.pagoRuta ? { pagoRuta: datos.pagoRuta } : {}),

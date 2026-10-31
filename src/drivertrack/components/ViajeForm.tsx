@@ -141,8 +141,10 @@ interface Props {
   onGuardarMiYape: (numero: string, titular: string) => void; // F-ID2.7: tu Yape queda guardado 1 sola vez
   onNecesitaKey: () => void; // F-ID2: te manda a Ajustes si no hay key Gemini
   // F-ID5: cobro compartido — robot automático si está activo, si no WhatsApp
-  // 💜 FASE BB: `datos` ahora puede traer mensajeEditado (el texto que
-  // retocaste en la visualización) — viaja tal cual al cliente
+  // 💜 FASE BC: el mensaje que viaja es el de la BILLETERA que elijas
+  // al cobrar (lo editás y guardás en el botoncito QR del viaje, con
+  // su librería) — el formulario ya no edita el mensaje (el ✏️ de la
+  // FASE BB quedaba en un texto que el flujo real no usaba)
   onMandarCobro: (datos: DatosCobro, celular: string) => Promise<void> | void;
   cobroEnCurso?: boolean; // F-ID5: hay un cobro del robot en vuelo (spinner)
 }
@@ -216,10 +218,10 @@ export default function ViajeForm({
   const [miYapeNum, setMiYapeNum] = useState('');
   const [miYapeTitular, setMiYapeTitular] = useState('');
   const [editarMiYape, setEditarMiYape] = useState(false);
-  // 💜 FASE BB: el mensaje del cobro EDITADO a mano. null = automático
-  // (se arma vivo con los datos del viaje); string = lo que Rudy
-  // escribió/retocó — ese texto viaja tal cual con el cobro.
-  const [mensajeEditado, setMensajeEditado] = useState<string | null>(null);
+  // 💜 FASE BC: la edición del mensaje se fue del formulario — vive en
+  // el botoncito QR de cada viaje (por billetera, con librería), que
+  // es el mensaje que de verdad viaja al cliente. Acá queda solo la
+  // VISUALIZACIÓN (se arma viva con los datos del viaje).
 
   // ── F-ID2: estado del escáner ──
   const [escaneando, setEscaneando] = useState(false);
@@ -413,11 +415,11 @@ export default function ViajeForm({
     }
   }
 
-  // F-ID2.5 → F-ID2.8 → 💜 FASE BB: 💬 mensaje de cobro por WhatsApp.
-  // Si retocaste el texto en la visualización (✏️), ESA versión es la
-  // que viaja; si no, el automático de siempre.
+  // F-ID2.5 → F-ID2.8 → 💜 FASE BC: 💬 mensaje de cobro por WhatsApp —
+  // solo VISUALIZACIÓN (se arma vivo con los datos del viaje). El
+  // mensaje que viaja es el de la billetera que elijas al cobrar; lo
+  // editás y guardás en el botoncito QR de cada viaje.
   function armarMensaje(): string {
-    if (mensajeEditado !== null) return mensajeEditado;
     return armarMensajeCobro(
       { cliente, monto: parseFloat(tarifa) || 0, direccion },
       config,
@@ -461,8 +463,6 @@ export default function ViajeForm({
         cliente,
         monto: parseFloat(tarifa) || 0,
         direccion,
-        // 💜 FASE BB: tu edición (si tocaste ✏️) viaja con ESTE cobro
-        mensajeEditado: mensajeEditado ?? undefined,
       },
       celularPrincipal,
     );
@@ -1142,61 +1142,24 @@ export default function ViajeForm({
       )}
 
       {/* ── F-ID2.7: vista previa del mensaje — SIEMPRE visible, en vivo ──
-          💜 FASE BB: y ahora EDITABLE — ✏️ retoca el texto acá mismo y el
-          botón Cobrar manda TU versión (el automático queda para los
-          demás viajes). Volver al automático con ↩️. */}
+          💜 FASE BC: solo VISUALIZACIÓN (el ✏️ de la FASE BB se fue de
+          acá — quedaba en un mensaje que el flujo real de cobro no
+          usaba). El mensaje que viaja al cliente es el de la BILLETERA
+          que elijas al cobrar: lo editás y guardás una sola vez en el
+          botoncito QR de cada viaje, con su librería por billetera. */}
       <div className="mt-2 rounded-xl border border-[#25D366]/25 bg-[#25D366]/5 p-3" data-testid="preview-mensaje">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/80">
-            💬 Así le va a llegar a tu cliente
-          </p>
-          {mensajeEditado === null ? (
-            <button
-              onClick={() => { setMensajeEditado(armarMensaje()); vibrar(30); }}
-              className="shrink-0 rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-bold text-emerald-300 transition-colors hover:bg-emerald-500/25 active:scale-95"
-              data-testid="boton-editar-mensaje"
-              title="Retocar el mensaje de este cobro (el automático queda para los demás)"
-            >
-              ✏️ Editar
-            </button>
-          ) : (
-            <button
-              onClick={() => { setMensajeEditado(null); vibrar(30); }}
-              className="shrink-0 rounded-lg bg-slate-700 px-2 py-1 text-[10px] font-bold text-slate-300 transition-colors hover:bg-slate-600 active:scale-95"
-              data-testid="boton-auto-mensaje"
-              title="Vuelve a armarse solo con los datos del viaje"
-            >
-              ↩️ Automático
-            </button>
-          )}
+        <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/80">
+          💬 Así le va a llegar a tu cliente
+        </p>
+        <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
+          <TextoWhatsApp texto={armarMensaje()} />
         </div>
-
-        {mensajeEditado === null ? (
-          <>
-            <div className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
-              <TextoWhatsApp texto={armarMensaje()} />
-            </div>
-            <p className="mt-1 text-[10px] text-slate-500">
-              Se arma solo con los datos del viaje — el botón Cobrar lo manda tal cual al WhatsApp del cliente
-            </p>
-          </>
-        ) : (
-          <>
-            <textarea
-              value={mensajeEditado}
-              onChange={e => setMensajeEditado(e.target.value)}
-              rows={7}
-              className="mt-1.5 w-full resize-none rounded-xl border border-emerald-500/40 bg-slate-900 px-3 py-2.5 text-[12px] leading-relaxed text-slate-200 outline-none focus:border-emerald-400"
-              data-testid="input-mensaje-editado"
-            />
-            <div className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[12px] leading-relaxed text-white siempre-blanco">
-              <TextoWhatsApp texto={mensajeEditado} />
-            </div>
-            <p className="mt-1 text-[10px] text-emerald-400/90">
-              ✏️ Tu edición viaja con <b>este</b> cobro — el mensaje automático queda para los demás viajes
-            </p>
-          </>
-        )}
+        <p className="mt-1 text-[10px] leading-snug text-slate-500">
+          Se arma solo con los datos del viaje. El mensaje exacto sale con la billetera que elijas al
+          cobrar (💜 Yape o 🔷 Plin) — para dejarlo a tu gusto, usá el botoncito{' '}
+          <b className="text-violet-300">QR</b> del viaje → <b>✏️ Mensaje del cobro</b> (ahí lo editás,
+          lo guardás para siempre y tenés tu librería).
+        </p>
       </div>
 
       {/* F-ID2.6: yape del PEDIDO — con el que pagó el CLIENTE (distinto del tuyo) */}

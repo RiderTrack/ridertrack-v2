@@ -10,8 +10,8 @@
 import { useEffect, useState } from 'react';
 import { useTema } from '../../theme/useTema';
 import { ConfigDT, Gasto, Viaje } from '../types';
-import { cargarConfig, cargarGastos, cargarViajes, guardarGastos, guardarViajes } from '../storage';
-import { armarMensajeCobro, DatosCobro, qrDelMetodo, alivianarQrBase64, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from '../utils';
+import { cargarConfig, cargarGastos, cargarViajes, guardarConfig, guardarGastos, guardarViajes } from '../storage';
+import { mensajeCobroFinal, DatosCobro, qrDelMetodo, alivianarQrBase64, linkWhatsApp, normalizarCelular, vibrar, MetodoCobro } from '../utils';
 import { encolarAccionDT, escucharResultadoDT, uidDisponible } from '../services/robotBot';
 import { escucharImagenesDT, ImagenDT } from '../services/imagenesDT';
 import CajaView from '../components/CajaView';
@@ -60,6 +60,16 @@ export default function PanelCajaDT({ onToast }: Props) {
     setToast(msg);
     window.setTimeout(() => setToast(''), 2600);
     onToast?.(msg);
+  }
+
+  // 💜 FASE BC: persiste la config de inDrive (TU mensaje por
+  // billetera + la librería del QR) — el editor del QR por viaje
+  // (dentro de la lista de la Caja) la usa. Guarda, actualiza el
+  // estado y avisa al shell/paneles para que se recarguen.
+  function actualizarConfig(c: ConfigDT) {
+    guardarConfig(c);
+    setConfig(c);
+    window.dispatchEvent(new CustomEvent('dt:sync-remoto'));
   }
 
   function agregarGasto(g: Gasto) {
@@ -139,8 +149,11 @@ export default function PanelCajaDT({ onToast }: Props) {
     cel: string,
     metodo?: MetodoCobro,
   ): Promise<void> {
-    // 💜 FASE BB: si retocaste el mensaje (✏️), TU versión viaja tal cual
-    const texto = (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config, metodo);
+    // 💜 FASE BC: el mensaje que DE VERDAD viaja (edición del momento →
+    // TU plantilla guardada de la billetera → automático) — igual que
+    // el ejecutarCobro del shell, para que sea EL MISMO texto en todos
+    // los caminos de cobro.
+    const texto = mensajeCobroFinal(datos, config, metodo);
     if (!config.robotActivo) {
       window.open(linkWhatsApp(cel, texto), '_blank');
       vibrar(60);
@@ -221,6 +234,7 @@ export default function PanelCajaDT({ onToast }: Props) {
         onMandarCobro={mandarCobro}
         cobroEnCurso={cobroEnCurso}
         onEditar={editarViaje}
+        onGuardarConfig={actualizarConfig}
       />
 
       {cobrarAbierto && (

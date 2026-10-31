@@ -1,4 +1,4 @@
-// ═════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
 // 💜 FASE AA: QR POR VIAJE — el mismo modal del APK de trabajo,
 // ahora en cada viaje de inDrive.
 // Pedido literal de Rudy: "cuando acepta un viaje ahí están el
@@ -26,11 +26,18 @@
 //   • 🤖/💬 mandar el cobro por WhatsApp — con la billetera que
 //     estás MOSTRANDO ya elegida (no vuelve a preguntar);
 //   • ✓ marcar la ENTREGA ahí mismo y que cierre solo.
-// ═════════════════════════════════════════════════════════════
+//
+// 💜 FASE BC: "✏️ Mensaje del cobro" — el mensaje de ESTA billetera
+// (el que de verdad viaja al cliente) ahora se EDITA y se GUARDA
+// para siempre, con su LIBRERÍA de variantes propia por billetera
+// (chips 💾). Antes (FASE BB) solo se podía retocar el texto de un
+// envío suelto y la edición no llegaba a los demás caminos.
+// ═══════════════════════════════════════════════════════════
 import { useState } from 'react';
-import { Bot, Check, Loader2, MessageCircle, Pencil, QrCode, X } from 'lucide-react';
+import { Bot, Check, Loader2, MessageCircle, Pencil, QrCode, Save, Trash2, X } from 'lucide-react';
 import { ConfigDT, Viaje } from '../types';
-import { MetodoCobro, DatosCobro, armarMensajeCobro, fmtSoles, vibrar } from '../utils';
+import { MetodoCobro, DatosCobro, fmtSoles, vibrar } from '../utils';
+import { MensajeQr, PRESETS_QR, PLANTILLA_QR_DEF, idMensajeQr, resolverMensajeQr, sanearLibreriaQr } from '../mensajesQr';
 
 interface Props {
   viaje: Viaje;
@@ -39,14 +46,17 @@ interface Props {
   /** 💜 FASE AA: el cobro por el flujo COMPARTIDO de siempre —
    *  con la billetera del chip ya elegida viaja directo (el shell
    *  ya no vuelve a preguntar Yape/Plin/ambos).
-   *  💜 FASE BB: puede viajar `mensajeEditado` (lo que retocaste en
-   *  ✏️ Mensaje) — ese texto sale tal cual. */
+   *  💜 FASE BC: sin `mensajeEditado` → viaja TU plantilla guardada
+   *  de esta billetera (o el automático si nunca guardaste nada). */
   onMandarCobro?: (
     datos: DatosCobro,
     celular: string,
     metodo?: MetodoCobro,
   ) => Promise<void> | void;
   cobroEnCurso?: boolean;
+  /** 💜 FASE BC: persiste TU mensaje de la billetera y la librería
+   *  (viaja a tu otro celular con el sync de la config). */
+  onGuardarConfig?: (c: ConfigDT) => void;
   /** ✓ FASE AA: marcar la entrega sin salir del QR (como el
    *  "cobró efectivo" del trabajo — cierra el modal solo). */
   onToggleEntregado?: (id: string) => void;
@@ -59,6 +69,7 @@ export default function QrViajeModal({
   onCerrar,
   onMandarCobro,
   cobroEnCurso = false,
+  onGuardarConfig,
   onToggleEntregado,
   onToast,
 }: Props) {
@@ -66,11 +77,15 @@ export default function QrViajeModal({
   const hayYape = !!(config.yape.qrBase64 || config.yape.numero.trim());
   const hayPlin = !!(config.plin.qrBase64 || config.plin.numero.trim());
   const [wallet, setWallet] = useState<'yape' | 'plin'>(!hayYape && hayPlin ? 'plin' : 'yape');
-  // 💜 FASE BB: el mensaje del cobro — editable acá mismo antes de
-  // mandar. null = automático (el de siempre con la billetera que
-  // estás mostrando); string = tu texto retocado.
+  // 💜 FASE BC: el editor del mensaje — `texto` null = mostrá el
+  // activo (TU plantilla guardada de esta billetera, o la de
+  // fábrica si nunca guardaste). Cambiás de chip de billetera →
+  // el editor arranca limpio con SU mensaje.
   const [msgAbierto, setMsgAbierto] = useState(false);
-  const [mensajeEditado, setMensajeEditado] = useState<string | null>(null);
+  const [texto, setTexto] = useState<string | null>(null);
+  const [activoId, setActivoId] = useState<string>('');
+  const [guardandoLib, setGuardandoLib] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState('');
 
   const esYape = wallet === 'yape';
   const billetera = esYape ? config.yape : config.plin;
@@ -86,13 +101,117 @@ export default function QrViajeModal({
   const telCobro = ((viaje.celularEnvia ?? '').trim() || viaje.celular.trim() || (viaje.celularRecibe ?? '').trim()).trim();
   const yaEntregado = viaje.entregado === true;
 
+  // ── 💜 FASE BC: el mensaje de ESTA billetera ──
+  // 1. TU plantilla guardada (config, viaja al otro cel); si no →
+  // 2. la de FÁBRICA (dice lo mismo que el automático de siempre);
+  // lo que ves en el editor es lo que va a salir.
+  const plantillaGuardada = ((esYape ? config.mensajeQrYape : config.mensajeQrPlin) ?? '').trim();
+  const textoBase = plantillaGuardada || PLANTILLA_QR_DEF[wallet];
+  const textoEditor = texto ?? textoBase;
+  const tocado = texto !== null && textoEditor.trim() !== textoBase.trim();
+  const varsViaje = {
+    cliente: viaje.cliente,
+    monto,
+    direccion: viaje.direccion,
+    numero: billetera.numero,
+    titular: billetera.titular,
+  };
+  const preview = resolverMensajeQr(textoEditor, varsViaje);
+  const guardados: MensajeQr[] = sanearLibreriaQr(
+    (esYape ? config.libreriaQr?.yape : config.libreriaQr?.plin) ?? [],
+  );
+
   function cambiarWallet(w: 'yape' | 'plin') {
     setWallet(w);
+    setTexto(null); // 💜 FASE BC: cada billetera tiene SU mensaje
+    setActivoId('');
+    setGuardandoLib(false);
+    setNuevoNombre('');
     vibrar(30);
   }
 
+  /** 💜 FASE BC: guarda el texto del editor como TU mensaje de esta
+   *  billetera → de ahora en más TODOS los cobros de Yape/Plin salen
+   *  con él (QR del viaje, "¿cómo le cobrás?", Contacto, Caja). */
+  function guardarComoMio() {
+    if (!onGuardarConfig) return;
+    if (!textoEditor.trim()) {
+      onToast?.('El mensaje está vacío — escribí algo o tocá ↩️ Automático');
+      return;
+    }
+    onGuardarConfig({
+      ...config,
+      ...(esYape ? { mensajeQrYape: textoEditor } : { mensajeQrPlin: textoEditor }),
+    });
+    setTexto(null);
+    setActivoId('');
+    vibrar(60);
+    onToast?.(
+      `✓ Guardado — todos tus cobros por ${esYape ? 'Yape 💜' : 'Plin 🔷'} salen con este mensaje (también en tu otro cel)`,
+    );
+  }
+
+  /** 💜 FASE BC: vuelve al automático de siempre (borra TU plantilla
+   *  de esta billetera — la librería queda intacta). */
+  function volverAlAutomatico() {
+    if (!onGuardarConfig) return;
+    onGuardarConfig({
+      ...config,
+      ...(esYape ? { mensajeQrYape: '' } : { mensajeQrPlin: '' }),
+    });
+    setTexto(PLANTILLA_QR_DEF[wallet]);
+    setActivoId('');
+    vibrar(30);
+    onToast?.('↩️ Vuelve el mensaje automático de siempre');
+  }
+
+  /** 💜 FASE BC: guarda el texto del editor en la LIBRERÍA de esta
+   *  billetera (para cargarlo en un toque otra vez). */
+  function guardarEnLibreria() {
+    if (!onGuardarConfig) return;
+    const nombre = nuevoNombre.trim();
+    if (!nombre) {
+      onToast?.('Ponle un nombre a la variante (ej: "Corto")');
+      return;
+    }
+    if (!textoEditor.trim()) {
+      onToast?.('El mensaje está vacío');
+      return;
+    }
+    const nuevo: MensajeQr = { id: idMensajeQr(), nombre: nombre.slice(0, 40), texto: textoEditor.slice(0, 1500) };
+    onGuardarConfig({
+      ...config,
+      libreriaQr: {
+        ...(config.libreriaQr ?? {}),
+        [wallet]: [...guardados, nuevo].slice(0, 30),
+      },
+    });
+    setActivoId(nuevo.id);
+    setNuevoNombre('');
+    setGuardandoLib(false);
+    vibrar(60);
+    onToast?.(`📚 Guardado "${nuevo.nombre}" en la librería de ${esYape ? 'Yape' : 'Plin'}`);
+  }
+
+  function borrarDeLibreria(id: string) {
+    if (!onGuardarConfig) return;
+    onGuardarConfig({
+      ...config,
+      libreriaQr: {
+        ...(config.libreriaQr ?? {}),
+        [wallet]: guardados.filter((m) => m.id !== id),
+      },
+    });
+    if (activoId === id) setActivoId('');
+    vibrar(30);
+    onToast?.('Variante borrada de la librería');
+  }
+
   /** 🤖/💬 mandar el cobro — viaja la billetera que estás mostrando
-   *  💜 FASE BB: y TU mensaje si lo retocaste (✏️) */
+   *  💜 FASE BC: y el mensaje del editor. Si lo retocaste (o cargaste
+   *  una variante) va ESO, ya resuelto con los datos del viaje; si no
+   *  lo tocaste, sale TU plantilla guardada de la billetera (o el
+   *  automático) — el mismo texto en TODOS los caminos de cobro. */
   function mandarWhatsApp() {
     if (!onMandarCobro) return;
     onMandarCobro(
@@ -100,7 +219,9 @@ export default function QrViajeModal({
         cliente: viaje.cliente,
         monto,
         direccion: viaje.direccion,
-        mensajeEditado: mensajeEditado ?? undefined,
+        // FASE BC: solo viaja como edición si RETOCASTE algo — lo que
+        // ves resuelto en la vista previa es lo que sale
+        mensajeEditado: tocado ? resolverMensajeQr(textoEditor, varsViaje) : undefined,
       },
       telCobro,
       wallet, // FASE AA: ya elegiste acá — no vuelve a preguntar
@@ -123,7 +244,7 @@ export default function QrViajeModal({
       onClick={onCerrar}
       data-testid="qr-viaje-modal"
     >
-      <div className="relative max-w-sm w-full" onClick={e => e.stopPropagation()}>
+      <div className="relative max-w-sm w-full max-h-[94vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <button
           onClick={onCerrar}
           data-testid="qr-viaje-cerrar"
@@ -222,77 +343,179 @@ export default function QrViajeModal({
           </div>
         </div>
 
-        {/* 💜 FASE BB — ✏️ el MENSAJE del cobro, editable acá mismo:
-            tocá, retocá y mandá TU versión (el automático queda para
-            los demás). Colapsado por defecto para no tapar el QR. */}
+        {/* 💜 FASE BC — ✏️ el MENSAJE de ESTA billetera: editable,
+            guardable para siempre y con SU librería de variantes.
+            Colapsado por defecto para no tapar el QR. */}
         {onMandarCobro && (
-          <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-2.5" data-testid="qr-viaje-mensaje">
+          <div className="mt-2.5 rounded-xl border border-slate-700 bg-slate-900/80 p-2.5" data-testid="qr-viaje-mensaje">
             <button
               onClick={() => setMsgAbierto(!msgAbierto)}
               className="flex w-full items-center justify-between gap-2 text-left"
             >
-              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-200">
-                <Pencil size={12} className="text-emerald-400" />
-                Mensaje del cobro
-                {mensajeEditado !== null && (
-                  <span className="rounded border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-px text-[8px] font-black text-emerald-300">
+              <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold text-slate-200">
+                <Pencil size={12} className={esYape ? 'text-purple-400' : 'text-cyan-400'} />
+                <span className="truncate">
+                  Mensaje del cobro — {esYape ? '💜 Yape' : '🔷 Plin'}
+                </span>
+                {plantillaGuardada && (
+                  <span className="shrink-0 rounded border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-px text-[8px] font-black text-emerald-300">
+                    TUYO
+                  </span>
+                )}
+                {tocado && (
+                  <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-px text-[8px] font-black text-amber-300">
                     EDITADO
                   </span>
                 )}
               </span>
-              <span className="text-[10px] font-bold text-slate-500">{msgAbierto ? 'ocultar ▲' : 'editar ▼'}</span>
+              <span className="shrink-0 text-[10px] font-bold text-slate-500">{msgAbierto ? 'ocultar ▲' : 'editar ▼'}</span>
             </button>
 
             {msgAbierto && (
               <div className="mt-2">
-                {mensajeEditado === null ? (
-                  <>
-                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[11px] leading-relaxed text-white siempre-blanco">
-                      {armarMensajeCobro(
-                        { cliente: viaje.cliente, monto, direccion: viaje.direccion },
-                        config,
-                        wallet,
-                      )}
+                {/* 📚 la librería de esta billetera: presets de fábrica + 💾 guardados */}
+                {onGuardarConfig && (
+                  <div className="mb-2" data-testid="qr-viaje-libreria">
+                    <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                      📚 Librería {esYape ? 'Yape' : 'Plin'} — tocá para cargar
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESETS_QR[wallet].map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => { setTexto(m.texto); setActivoId(m.id); vibrar(20); }}
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all active:scale-95 ${
+                            activoId === m.id
+                              ? esYape
+                                ? 'border-purple-400 bg-purple-500/30 text-purple-200'
+                                : 'border-cyan-400 bg-cyan-500/30 text-cyan-200'
+                              : 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          }`}
+                          data-testid={`qr-viaje-preset-${m.id}`}
+                          title="Mensaje de fábrica (siempre disponible)"
+                        >
+                          {m.nombre}
+                        </button>
+                      ))}
+                      {guardados.map((m) => (
+                        <span
+                          key={m.id}
+                          className={`group inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                            activoId === m.id
+                              ? esYape
+                                ? 'border-purple-400 bg-purple-500/30 text-purple-200'
+                                : 'border-cyan-400 bg-cyan-500/30 text-cyan-200'
+                              : 'border-slate-500 bg-slate-700/60 text-slate-200'
+                          }`}
+                          data-testid={`qr-viaje-guardado-${m.id}`}
+                        >
+                          <button onClick={() => { setTexto(m.texto); setActivoId(m.id); vibrar(20); }} className="max-w-[110px] truncate" title={m.texto}>
+                            💾 {m.nombre}
+                          </button>
+                          <button
+                            onClick={() => borrarDeLibreria(m.id)}
+                            className="text-slate-400 hover:text-red-400"
+                            aria-label={`Borrar ${m.nombre}`}
+                            data-testid={`qr-viaje-borrar-${m.id}`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
+                  </div>
+                )}
+
+                {/* el mensaje (plantilla con etiquetas) */}
+                <textarea
+                  value={textoEditor}
+                  onChange={e => { setTexto(e.target.value); setActivoId(''); }}
+                  rows={8}
+                  className="w-full resize-none rounded-xl border border-slate-600 bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-200 outline-none focus:border-slate-400"
+                  data-testid="qr-viaje-input-msg"
+                />
+                <p className="mt-1 text-[9px] leading-snug text-slate-500">
+                  Etiquetas: <code className={esYape ? 'text-purple-300' : 'text-cyan-300'}>{'{cliente}'}</code>{' '}
+                  <code className={esYape ? 'text-purple-300' : 'text-cyan-300'}>{'{monto}'}</code>{' '}
+                  <code className={esYape ? 'text-purple-300' : 'text-cyan-300'}>{'{direccion}'}</code>{' '}
+                  <code className={esYape ? 'text-purple-300' : 'text-cyan-300'}>{'{numero}'}</code>{' '}
+                  <code className={esYape ? 'text-purple-300' : 'text-cyan-300'}>{'{titular}'}</code> — se cambian solas al enviar
+                </p>
+
+                {/* vista previa con los datos de ESTE viaje */}
+                <div className="mt-1.5 rounded-xl rounded-tl-sm bg-[#005C4B] px-3 py-2 text-[11px] leading-relaxed text-white siempre-blanco" data-testid="qr-viaje-preview">
+                  <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-emerald-200/80">
+                    👀 Así le va a llegar
+                  </p>
+                  <p className="whitespace-pre-wrap">{preview}</p>
+                </div>
+
+                {onGuardarConfig ? (
+                  <>
+                    {/* guardar como TU mensaje de esta billetera */}
                     <button
-                      onClick={() => {
-                        setMensajeEditado(
-                          armarMensajeCobro(
-                            { cliente: viaje.cliente, monto, direccion: viaje.direccion },
-                            config,
-                            wallet,
-                          ),
-                        );
-                        vibrar(30);
-                      }}
-                      className="mt-1.5 w-full rounded-lg bg-emerald-500/15 py-1.5 text-[10px] font-bold text-emerald-300 transition-colors hover:bg-emerald-500/25 active:scale-95"
-                      data-testid="qr-viaje-editar-msg"
+                      onClick={guardarComoMio}
+                      className={`mt-1.5 w-full rounded-lg py-2 text-[11px] font-bold text-white transition-all active:scale-95 ${
+                        esYape ? 'bg-purple-600 hover:bg-purple-700' : 'bg-cyan-600 hover:bg-cyan-700'
+                      }`}
+                      data-testid="qr-viaje-guardar-siempre"
+                      title="De ahora en más, todos los cobros de esta billetera salen con este mensaje"
                     >
-                      ✏️ Editar este mensaje
+                      ✓ Guardar como MI mensaje de {esYape ? 'Yape' : 'Plin'} (sale en todos lados)
                     </button>
+
+                    {/* guardar en la librería */}
+                    {guardandoLib ? (
+                      <div className="mt-1.5 flex gap-1.5">
+                        <input
+                          value={nuevoNombre}
+                          onChange={e => setNuevoNombre(e.target.value)}
+                          placeholder="Nombre (ej: Corto)"
+                          className="flex-1 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-100 outline-none focus:border-slate-400"
+                          data-testid="qr-viaje-input-nombre"
+                          autoFocus
+                        />
+                        <button
+                          onClick={guardarEnLibreria}
+                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                          data-testid="qr-viaje-guardar-lib-ok"
+                        >
+                          <Save className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => { setGuardandoLib(false); setNuevoNombre(''); }}
+                          className="rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-slate-600"
+                          aria-label="Cancelar"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setGuardandoLib(true)}
+                        className="mt-1.5 w-full rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-95"
+                        data-testid="qr-viaje-guardar-libreria"
+                      >
+                        💾 Guardar en la librería (variante para otra vez)
+                      </button>
+                    )}
+
+                    {/* volver al automático */}
+                    {plantillaGuardada && (
+                      <button
+                        onClick={volverAlAutomatico}
+                        className="mt-1.5 w-full rounded-lg bg-slate-800 py-1.5 text-[10px] font-bold text-slate-300 transition-colors hover:bg-slate-700 active:scale-95"
+                        data-testid="qr-viaje-auto-msg"
+                        title="Borra TU mensaje guardado de esta billetera y vuelve al de siempre"
+                      >
+                        ↩️ Volver al mensaje automático de siempre
+                      </button>
+                    )}
                   </>
                 ) : (
-                  <>
-                    <textarea
-                      value={mensajeEditado}
-                      onChange={e => setMensajeEditado(e.target.value)}
-                      rows={6}
-                      className="w-full resize-none rounded-xl border border-emerald-500/40 bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-200 outline-none focus:border-emerald-400"
-                      data-testid="qr-viaje-input-msg"
-                    />
-                    <div className="mt-1.5 flex items-center justify-between gap-2">
-                      <p className="text-[9px] leading-snug text-emerald-400/90">
-                        Tu edición sale con este cobro
-                      </p>
-                      <button
-                        onClick={() => { setMensajeEditado(null); vibrar(30); }}
-                        className="shrink-0 rounded-lg bg-slate-800 px-2 py-1 text-[9px] font-bold text-slate-300 transition-colors hover:bg-slate-700"
-                        data-testid="qr-viaje-auto-msg"
-                      >
-                        ↩️ Automático
-                      </button>
-                    </div>
-                  </>
+                  <p className="mt-1 text-[9px] leading-snug text-slate-500">
+                    Lo que ve arriba es lo que sale en este cobro
+                  </p>
                 )}
               </div>
             )}

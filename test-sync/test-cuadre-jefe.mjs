@@ -286,6 +286,33 @@ const todasQ = aplicarPlantillaCuadre(
 );
 check('todas las variables se reemplazan con pagoRuta', !todasQ.includes('{'), todasQ);
 
+// ── 6. 💜 FASE BC: el DETALLE de pedidos (de 9 / de 12 / fallidos) ──
+console.log('6) FASE BC — detalle de pedidos en el cuadre');
+{
+  // pedido de Rudy (31-oct): "agregar cuántos pedidos son de 9, cuántos
+  // de 12, cuántos fallidos — que sea un poco más detallado"
+  const diaBC = cierre({
+    contado: 300, fondoInicial: 0, netoDelDia: 700, entregas: 10,
+    efectivoCobrado: 400, digitalRider: 300,
+    fallidos: 1,
+    pagoRuta: { activo: true, cantidadNormal: 8, cantidadLejos: 2, tarifaNormal: 9, tarifaLejos: 12, total: 96 },
+  });
+  const msgBC = armarMensajeCuadreJefe(diaBC, 'Rudy');
+  check('la línea del detalle: 8 de S/ 9 + 2 de S/ 12 (lejos) · 10 entregados · fallidos: 1',
+    msgBC.includes('📦 Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) · 10 entregados · ❌ fallidos: 1'),
+    msgBC.split('\n').find((l) => l.includes('📦')));
+  // cierres VIEJOS (sin fallidos) → 0 y sin romper el mensaje de la FASE P
+  const viejoBC = armarMensajeCuadreJefe(cierreRudy, 'Rudy');
+  check('cierre viejo (sin campo fallidos) → dice fallidos: 0 sin romper nada',
+    viejoBC.includes('❌ fallidos: 0'), viejoBC);
+  // variables sueltas para plantillas propias
+  const sueltas = aplicarPlantillaCuadre('nueve: {pedidos9} · doce: {pedidos12} · ❌: {fallidos}', diaBC);
+  check('variables sueltas {pedidos9} {pedidos12} {fallidos}',
+    sueltas === 'nueve: 8 · doce: 2 · ❌: 1', sueltas);
+  check('VARIABLES_CUADRE incluye las 4 nuevas',
+    ['detallePedidos', 'pedidos9', 'pedidos12', 'fallidos'].every((v) => VARIABLES_OK.includes(v)));
+}
+
 // ── resumen ──────────────────────────────────────────────
 console.log(`\n📊 ${ok} ✓ · ${fail} ✗`);
 if (fail > 0) {

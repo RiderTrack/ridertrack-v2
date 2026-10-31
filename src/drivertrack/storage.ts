@@ -4,6 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 
 import { ConfigDT, Gasto, RECARGA_DEFECTO, RecargaSemanal, ResumenDia, TIPOS_GASTO, TipoGasto, Viaje } from './types';
+// 💜 FASE BC: saneo de la librería de mensajes QR
+import { sanearLibreriaQr } from './mensajesQr';
 // FASE BA: 📊 migración del % de inDrive al valor real (14.9%)
 import { migrarPctIndrive } from './services/recarga';
 // FASE C: ☁️ cada cambio en el storage avisa al sync de la nube
@@ -162,9 +164,23 @@ export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
   // backups (TODO pasa por acá). 0 = sin configurar, se respeta.
   const comisiones = { ...CONFIG_DEFECTO.comisiones, ...(c.comisiones ?? {}) };
   const recarga = normalizarRecarga(c.recarga); // FASE K
+  // 💜 FASE BC: mensajes del QR por billetera — recorte defensivo y
+  // librería saneada (lo que venga raro del storage/nube/backup no
+  // rompe: sin ids repetidos, tope 30 por billetera). Las claves
+  // crudas se sacan ANTES del spread para que la basura no quede.
+  const { mensajeQrYape: mqYapeCrudo, mensajeQrPlin: mqPlinCrudo, libreriaQr: libCruda, ...resto } = c;
+  const mensajeQrYape = String(mqYapeCrudo ?? '').slice(0, 1500);
+  const mensajeQrPlin = String(mqPlinCrudo ?? '').slice(0, 1500);
+  const libreriaQr =
+    libCruda && (Array.isArray((libCruda as Record<string, unknown>).yape) || Array.isArray((libCruda as Record<string, unknown>).plin))
+      ? {
+          yape: sanearLibreriaQr((libCruda as Record<string, unknown>).yape),
+          plin: sanearLibreriaQr((libCruda as Record<string, unknown>).plin),
+        }
+      : undefined;
   return {
     ...CONFIG_DEFECTO,
-    ...c,
+    ...resto,
     geminiKey,
     claudeKey,
     comisiones: { ...comisiones, indrive: migrarPctIndrive(comisiones.indrive) }, // FASE BA
@@ -176,6 +192,9 @@ export function normalizarConfig(c: Partial<ConfigDT>): ConfigDT {
     robotUrl: (c.robotUrl ?? '').trim() || 'http://127.0.0.1:3001',
     robotToken: (c.robotToken ?? '').trim() || 'rudy-drivertrack',
     recarga: { ...recarga, pct: migrarPctIndrive(recarga.pct) }, // FASE BA: el contador recalcula vivo
+    ...(mensajeQrYape.trim() ? { mensajeQrYape } : {}), // 💜 FASE BC
+    ...(mensajeQrPlin.trim() ? { mensajeQrPlin } : {}), // 💜 FASE BC
+    ...(libreriaQr ? { libreriaQr } : {}), // 💜 FASE BC
   };
 }
 

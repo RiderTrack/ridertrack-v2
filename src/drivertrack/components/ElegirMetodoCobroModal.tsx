@@ -17,7 +17,7 @@
 // ═════════════════════════════════════════════════════════════
 import { X } from 'lucide-react';
 import { ConfigDT } from '../types';
-import { MetodoCobro, DatosCobro, fmtSoles } from '../utils';
+import { MetodoCobro, DatosCobro, fmtSoles, mensajeCobroFinal } from '../utils';
 
 interface Props {
   datos: DatosCobro; // 💜 FASE BB: puede traer mensajeEditado (tu texto retocado)
@@ -33,6 +33,17 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
   const qrYape = config.yape.qrBase64;
   const qrPlin = config.plin.qrBase64;
   const cliente = datos.cliente.trim() || 'el cliente';
+  // 💜 FASE BC: la vista previa del mensaje que VA A SALIR con cada
+  // opción — muestra TU plantilla guardada de esa billetera (si
+  // guardaste una en el ✏️ del QR) o el automático de siempre. Así
+  // ves de un vistazo que cada billetera sale con SU mensaje.
+  const previa = (metodo?: MetodoCobro) =>
+    mensajeCobroFinal(datos, config, metodo)
+      .split('\n')
+      .filter(l => l.trim())
+      .slice(0, 3)
+      .join(' · ');
+  const tieneTuya = (campo?: string) => !!(campo ?? '').trim();
 
   return (
     <div
@@ -80,9 +91,19 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-violet-500/40 bg-slate-900 text-xl">💜</span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="block text-xs font-black text-purple-300">Solo Yape 💜</span>
+              <span className="block text-xs font-black text-purple-300">
+                Solo Yape 💜
+                {tieneTuya(config.mensajeQrYape) && (
+                  <span className="ml-1.5 rounded border border-emerald-500/40 bg-emerald-500/15 px-1 py-px text-[8px] font-black text-emerald-300">
+                    TU MENSAJE
+                  </span>
+                )}
+              </span>
               <span className="block truncate text-[10px] font-medium text-slate-400">
                 {yape || 'sin número'} {qrYape ? '· con tu QR de Yape' : '· sin QR subido'}
+              </span>
+              <span className="mt-0.5 block truncate text-[9px] italic leading-snug text-slate-500" data-testid="elegir-metodo-preview-yape">
+                💬 {previa('yape')}
               </span>
             </span>
           </button>
@@ -102,9 +123,19 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-sky-500/40 bg-slate-900 text-xl">🔷</span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="block text-xs font-black text-sky-300">Solo Plin 🔷</span>
+              <span className="block text-xs font-black text-sky-300">
+                Solo Plin 🔷
+                {tieneTuya(config.mensajeQrPlin) && (
+                  <span className="ml-1.5 rounded border border-emerald-500/40 bg-emerald-500/15 px-1 py-px text-[8px] font-black text-emerald-300">
+                    TU MENSAJE
+                  </span>
+                )}
+              </span>
               <span className="block truncate text-[10px] font-medium text-slate-400">
                 {plin || 'sin número'} {qrPlin ? '· con tu QR de Plin' : '· sin QR subido'}
+              </span>
+              <span className="mt-0.5 block truncate text-[9px] italic leading-snug text-slate-500" data-testid="elegir-metodo-preview-plin">
+                💬 {previa('plin')}
               </span>
             </span>
           </button>
@@ -125,8 +156,8 @@ export default function ElegirMetodoCobroModal({ datos, config, onElegir, onCerr
         </div>
 
         <p className="border-t border-slate-800 px-4 py-2.5 text-center text-[10px] leading-snug text-slate-500">
-          Cada mensaje lleva ÚNICAMENTE el número (y el QR) del método que elijas — ya no le llega
-          "yape y plin revueltos" al cliente.
+          Cada mensaje lleva ÚNICAMENTE el número (y el QR) del método que elijas. Para cambiar el texto,
+          abrí el botoncito <b className="text-violet-300">QR</b> del viaje → <b>✏️ Mensaje del cobro</b>.
         </p>
       </div>
     </div>

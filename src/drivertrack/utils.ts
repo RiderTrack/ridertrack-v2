@@ -2,6 +2,7 @@
 // 🛠️ DriverTrack — Utilidades (formato, vibración, imagen, compartir)
 // ═══════════════════════════════════════════════════════════
 import type { ConfigDT, Viaje } from './types';
+import { resolverMensajeQr } from './mensajesQr'; // 💜 FASE BC
 
 export function fmtSoles(n: number): string {
   return 'S/ ' + n.toFixed(2);
@@ -278,6 +279,45 @@ export function armarMensajeCobro(
 
   lineas.push('', '¡Gracias! 💚');
   return lineas.join('\n');
+}
+
+/**
+ * 💜 FASE BC: el mensaje que DE VERDAD viaja al cliente — UN solo
+ * resolutor para TODOS los caminos de cobro (QR del viaje, "¿cómo
+ * le cobrás?", Contacto, Caja, fallback WhatsApp). Pedido de Rudy:
+ * "cuando pongo enviar QR me sale enviar QR por yape o enviar QR por
+ * plin y cada uno tiene su propio mensaje — es ahí donde tenemos que
+ * atacar". La cadena, en orden:
+ *   1. tu edición del momento (`mensajeEditado`, el ✏️ del QR) — tal cual;
+ *   2. TU plantilla guardada de esa billetera (config.mensajeQrYape /
+ *      mensajeQrPlin, con etiquetas {cliente} {monto}…) → la editás y
+ *      guardás UNA vez y sale en todos lados (antes el ✏️ del
+ *      formulario quedaba en un mensaje que nadie mandaba);
+ *   3. el automático de siempre (armarMensajeCobro).
+ */
+export function mensajeCobroFinal(
+  datos: DatosCobro,
+  config: ConfigDT,
+  metodo?: MetodoCobro,
+): string {
+  // 1. la edición de un momento manda tal cual (FASE BB intacta)
+  const editado = (datos.mensajeEditado ?? '').trim();
+  if (editado) return editado;
+  // 2. TU plantilla de la billetera (solo yape/plin; "ambos" no tiene)
+  const plantilla = (
+    metodo === 'yape' ? (config.mensajeQrYape ?? '') : metodo === 'plin' ? (config.mensajeQrPlin ?? '') : ''
+  ).trim();
+  if (plantilla) {
+    return resolverMensajeQr(plantilla, {
+      cliente: datos.cliente,
+      monto: datos.monto,
+      direccion: datos.direccion,
+      numero: metodo === 'yape' ? config.yape.numero : metodo === 'plin' ? config.plin.numero : '',
+      titular: metodo === 'yape' ? config.yape.titular : metodo === 'plin' ? config.plin.titular : '',
+    });
+  }
+  // 3. el automático de siempre
+  return armarMensajeCobro(datos, config, metodo);
 }
 
 /** 🟣 FASE R: el QR que viaja con el cobro según el método elegido —

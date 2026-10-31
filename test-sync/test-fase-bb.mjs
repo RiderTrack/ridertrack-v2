@@ -69,41 +69,55 @@ console.log('1) 💜 DatosCobro.mensajeEditado — la fórmula del ejecutarCobro
 }
 
 // ═══════════════════════════════════════════════════════════
-console.log('\n2) ✏️ ViajeForm — la visualización ahora se edita (contrato de fuente)');
+console.log('\n2) ✏️ ViajeForm — la visualización quedó LIMPIA (FASE BC: la edición se fue al QR por billetera)');
 {
   const src = leer('../src/drivertrack/components/ViajeForm.tsx');
-  check('botón ✏️ Editar (boton-editar-mensaje)', src.includes('data-testid="boton-editar-mensaje"'));
-  check('textarea de edición (input-mensaje-editado)', src.includes('data-testid="input-mensaje-editado"'));
-  check('botón ↩️ Automático (boton-auto-mensaje)', src.includes('data-testid="boton-auto-mensaje"'));
-  check('✏️ Editar arranca desde el mensaje automático (no de cero)', /setMensajeEditado\(armarMensaje\(\)\)/.test(src));
-  check('el preview muestra TU edición cuando existe', /if \(mensajeEditado !== null\) return mensajeEditado;/.test(src));
-  check('cobrar() viaja con mensajeEditado', /mensajeEditado: mensajeEditado \?\? undefined/.test(src));
+  check('FASE BC: el ✏️ Editar del formulario YA NO ESTÁ (editaba un mensaje que el flujo real no usaba)', !src.includes('data-testid="boton-editar-mensaje"'));
+  check('FASE BC: el textarea de edición del formulario YA NO ESTÁ', !src.includes('data-testid="input-mensaje-editado"'));
+  check('FASE BC: el ↩️ Automático del formulario YA NO ESTÁ', !src.includes('data-testid="boton-auto-mensaje"'));
+  check('la VISUALIZACIÓN sigue (preview-mensaje, se arma viva)', src.includes('data-testid="preview-mensaje"') && src.includes('<TextoWhatsApp texto={armarMensaje()} />'));
+  check('nota honesta: te manda al QR del viaje para editar por billetera', src.includes('✏️ Mensaje del cobro'));
+  check('cobrar() ya NO viaja con mensajeEditado (el mensaje lo resuelve el shell)', !src.includes('mensajeEditado: mensajeEditado'));
 }
 
 // ═══════════════════════════════════════════════════════════
-console.log('\n3) 💜 QrViajeModal — mensaje editable antes de mandar el QR');
+console.log('\n3) 💜 QrViajeModal — mensaje por BILLETERA editable + guardable + librería (FASE BC)');
 {
   const src = leer('../src/drivertrack/components/QrViajeModal.tsx');
-  check('sección Mensaje del cobro (qr-viaje-mensaje)', src.includes('data-testid="qr-viaje-mensaje"'));
-  check('textarea (qr-viaje-input-msg)', src.includes('data-testid="qr-viaje-input-msg"'));
-  check('editar arranca desde el automático de la billetera mostrada', /setMensajeEditado\(\s*armarMensajeCobro\(/.test(src));
-  check('mandarWhatsApp viaja con mensajeEditado', /mensajeEditado: mensajeEditado \?\? undefined/.test(src));
+  check('sección Mensaje del cobro por billetera (qr-viaje-mensaje)', src.includes('data-testid="qr-viaje-mensaje"'));
+  check('el título dice QUÉ billetera estás editando', src.includes("Mensaje del cobro — {esYape ? '💜 Yape' : '🔷 Plin'}"));
+  check('textarea del editor (qr-viaje-input-msg)', src.includes('data-testid="qr-viaje-input-msg"'));
+  check('📚 librería de variantes por billetera (qr-viaje-libreria)', src.includes('data-testid="qr-viaje-libreria"'));
+  check('presets de fábrica siempre visibles (PRESETS_QR[wallet])', src.includes('PRESETS_QR[wallet].map'));
+  check('💾 guardar en la librería (qr-viaje-guardar-libreria)', src.includes('data-testid="qr-viaje-guardar-libreria"'));
+  check('✓ Guardar como MI mensaje — persiste en la config (qr-viaje-guardar-siempre)', src.includes('data-testid="qr-viaje-guardar-siempre"'));
+  check('guardar como mío escribe el campo de la billetera', /\{ mensajeQrYape: textoEditor \} : \{ mensajeQrPlin: textoEditor \}/.test(src));
+  check('↩️ Volver al automático limpia TU plantilla', src.includes('data-testid="qr-viaje-auto-msg"') && src.includes("mensajeQrYape: ''"));
+  check('cambiar de chip de billetera resetea el editor (cada una tiene SU mensaje)', /setWallet\(w\);[\s\S]*?setTexto\(null\)/.test(src));
+  check('badge TUYO cuando tenés plantilla guardada', src.includes('TUYO'));
   check('badge EDITADO cuando retocaste', src.includes('EDITADO'));
+  check('vista previa resuelta con los datos del viaje (qr-viaje-preview)', src.includes('data-testid="qr-viaje-preview"') && src.includes('Así le va a llegar'));
+  check('al mandar: solo viaja mensajeEditado si RETOCASTE (si no, sale TU plantilla guardada)', /mensajeEditado: tocado \? resolverMensajeQr\(textoEditor, varsViaje\) : undefined/.test(src));
+  check('las etiquetas se resuelven ANTES de viajar (el bot recibe texto final)', src.includes('resolverMensajeQr(textoEditor, varsViaje)'));
+  check('el modal persiste por onGuardarConfig (lo aporta el shell)', src.includes('onGuardarConfig'));
 }
 
 // ═══════════════════════════════════════════════════════════
-console.log('\n4) 🛡️ ejecutarCobro respeta la edición (shell + caja)');
+console.log('\n4) 🛡️ mensajeCobroFinal — UN resolutor para TODOS los caminos (FASE BC)');
 {
   const shell = leer('../src/drivertrack/DriverTrackView.tsx');
   const caja = leer('../src/drivertrack/panels/PanelCajaDT.tsx');
   for (const [nombre, src] of [['DriverTrackView (shell)', shell], ['PanelCajaDT (caja)', caja]]) {
     check(
-      `${nombre}: la fórmula mensajeEditado || automático`,
-      src.includes("(datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config, metodo)"),
+      `${nombre}: ejecutarCobro usa mensajeCobroFinal`,
+      src.includes('const texto = mensajeCobroFinal(datos, config, metodo)'),
     );
   }
   const cajaView = leer('../src/drivertrack/components/CajaView.tsx');
-  check('CajaView (fallback WhatsApp manual) también la respeta', cajaView.includes("(datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config)"));
+  check('CajaView (fallback WhatsApp manual) también usa mensajeCobroFinal', cajaView.includes('mensajeCobroFinal(datos, config)'));
+  check('el shell aporta onGuardarConfig a la lista (persistir TU mensaje)', shell.includes('onGuardarConfig={actualizarConfigDT}'));
+  const elegir = leer('../src/drivertrack/components/ElegirMetodoCobroModal.tsx');
+  check('¿Cómo le cobrás? muestra el mensaje que va a salir por opción', elegir.includes('data-testid="elegir-metodo-preview-yape"') && elegir.includes('data-testid="elegir-metodo-preview-plin"'));
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -173,9 +187,9 @@ console.log('\n7) 🔌 RutaView + acción al bot — TODO viaja pegado (lección
 console.log('\n8) 🔢 versión y changelog');
 {
   const pkg = leer('../package.json');
-  check('package.json → 0.11.28', pkg.includes('"version": "0.11.28"'));
+  check('package.json → 0.11.29', pkg.includes('"version": "0.11.29"'));
   const aj = leer('../src/drivertrack/components/AjustesView.tsx');
-  check('AjustesView muestra v0.11.28 con el resumen de la fase', aj.includes('v0.11.28') && aj.includes('CHICOS DE VENTA CON MENSAJE'));
+  check('AjustesView muestra v0.11.29 con el resumen de la fase', aj.includes('v0.11.29') && aj.includes('LOS MENSAJES DEL QR'));
   const fs2 = leer('../src/services/firestore.ts');
   check('ConfigCuentas tiene ventasMensajes', fs2.includes('ventasMensajes?: MensajeVenta[]'));
 }

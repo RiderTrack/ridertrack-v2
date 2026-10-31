@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, History as HistoryIcon, MessageCircle, Minus, QrCode, Trash2 } from 'lucide-react';
 import { ConfigDT, emojiGasto, Gasto, nombreOrigen, nombreGasto, TIPOS_GASTO, TipoGasto, Viaje } from '../types';
 import { fechaBonita, fechaHoy, horaAhora, resumenDia, totalGastosDia } from '../storage';
-import { armarMensajeCobro, DatosCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
+import { mensajeCobroFinal, DatosCobro, descargarArchivo, fmtSoles, linkWhatsApp, normalizarCelular } from '../utils';
 // FASE K: saldo de la recarga semanal (banner comisión prepagada)
 import { estadoSaldo, textoDias } from '../services/recarga';
 // FASE T: 📜 historial — todos tus días con sus números
@@ -33,6 +33,9 @@ interface Props {
   /** ✏️ Editar viaje ya cargado (pasa through a la lista — mismo
    *  modal de la sección Viajes de inDrive, aplica el shell) */
   onEditar?: (v: Viaje) => void;
+  /** 💜 FASE BC: persiste la config de inDrive (TU mensaje por
+   *  billetera + librería) — pasa through al QR por viaje. */
+  onGuardarConfig?: (c: ConfigDT) => void;
 }
 
 function sumarDias(fecha: string, dias: number): string {
@@ -56,6 +59,7 @@ export default function CajaView({
   onMandarCobro,
   cobroEnCurso = false,
   onEditar,
+  onGuardarConfig,
 }: Props) {
   const [fecha, setFecha] = useState(fechaHoy());
   const resumen = useMemo(() => resumenDia(viajes, fecha), [viajes, fecha]);
@@ -492,12 +496,14 @@ export default function CajaView({
           onMandarCobro ??
           ((datos, cel) => {
             // sin shell-passthrough (no debería pasar): WhatsApp manual
-            // 💜 FASE BB: respeta tu edición si viaja en la acción
-            window.open(linkWhatsApp(normalizarCelular(cel), (datos.mensajeEditado ?? '').trim() || armarMensajeCobro(datos, config)), '_blank');
+            // 💜 FASE BC: el mismo resolutor de siempre (edición → TU
+            // plantilla de la billetera → automático)
+            window.open(linkWhatsApp(normalizarCelular(cel), mensajeCobroFinal(datos, config)), '_blank');
           })
         }
         cobroEnCurso={cobroEnCurso}
         onEditar={onEditar}
+        onGuardarConfig={onGuardarConfig}
       />
 
       {/* FASE T: 📜 el modal con todos los días — tocás uno y la
