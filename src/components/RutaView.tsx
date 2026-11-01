@@ -309,6 +309,55 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const pagoFotoInputRef = useRef<HTMLInputElement>(null);
   const pagoFotoGaleriaRef = useRef<HTMLInputElement>(null);
 
+  // ═══ 🎯 FASE BD (v0.11.30): LAS PALANCAS SE RECUERDAN ═══
+  // Reporte de Rudy (31-oct): «había deshabilitado el grupo de mate y
+  // solo puesto cliente… pero igual lo manda al grupo de mate». La
+  // mitad era el bot (v3.12 lo respeta); la OTRA mitad era que el modal
+  // RESETEABA las palancas en cada envío (MATE volvía a ON y el cliente
+  // a OFF) — había que apagar MATE en CADA comprobante. Ahora la última
+  // elección de cada tipo de foto queda guardada en el celular
+  // (localStorage, mismo patrón que las plantillas de MATE) y el modal
+  // abre con los destinos que dejaste.
+  const DESTINOS_POR_TIPO: Record<string, { mate: boolean; cliente: boolean }> = {
+    comprobante: { mate: true, cliente: false },   // como FASE AY
+    entregado: { mate: true, cliente: true },      // como FASE AY
+    otro: { mate: true, cliente: false },
+  };
+  const leerDestinosPago = (tipo: string): { mate: boolean; cliente: boolean; guardado: boolean } => {
+    const base = DESTINOS_POR_TIPO[tipo] || DESTINOS_POR_TIPO.comprobante;
+    if (!user) return { ...base, guardado: false };
+    try {
+      const raw = localStorage.getItem(`pago_destinos_${user.uid}`);
+      if (!raw) return { ...base, guardado: false };
+      const todo = JSON.parse(raw) || {};
+      const d = todo[tipo];
+      if (!d || typeof d !== 'object') return { ...base, guardado: false };
+      return { mate: d.mate !== false, cliente: !!d.cliente, guardado: true };
+    } catch { return { ...base, guardado: false }; }
+  };
+  const guardarDestinosPago = (tipo: string, mate: boolean, cliente: boolean) => {
+    if (!user) return;
+    try {
+      const raw = localStorage.getItem(`pago_destinos_${user.uid}`);
+      const todo = raw ? (JSON.parse(raw) || {}) : {};
+      todo[tipo] = { mate, cliente };
+      localStorage.setItem(`pago_destinos_${user.uid}`, JSON.stringify(todo));
+    } catch { /* sin espacio: solo no se recuerda, nada se rompe */ }
+  };
+  // cambiar el tipo de foto aplica SUS destinos: con memoria → las dos
+  // palancas como las dejaste en ese tipo; sin memoria → el default de
+  // cliente de FASE AY (MATE no se toca, como siempre).
+  const alCambiarTipoFoto = (tipo: 'comprobante' | 'entregado' | 'otro') => {
+    setPagoFotoTipo(tipo);
+    const d = leerDestinosPago(tipo);
+    if (d.guardado) {
+      setPagoFotoAMate(d.mate);
+      setPagoFotoAlCliente(d.cliente);
+    } else {
+      setPagoFotoAlCliente(d.cliente);
+    }
+  };
+
   // Estados modal 📤 Enviar reporte a MATE (Modal completo tipo Modular)
   const [reporteMateModalId, setReporteMateModalId] = useState<string | number | null>(null);
   const [mateTab, setMateTab] = useState<'estado' | 'mensaje'>('estado');
@@ -2350,7 +2399,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                             <button onClick={() => { abrirWhatsApp(c); setBotModalId(null); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">💬</span> Abrir WhatsApp
                             </button>
-                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoTipo('comprobante'); setPagoFotoAlCliente(false); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
+                            <button onClick={() => { setBotModalId(null); setPagoFotoMonto(String(parseFloat(String(c.cobrar || 0)) || '')); setPagoFotoArchivo(null); setPagoFotoPreview(null); setPagoFotoMetodo('yape'); setPagoFotoTipo('comprobante'); const dBD = leerDestinosPago('comprobante'); if (dBD.guardado) setPagoFotoAMate(dBD.mate); setPagoFotoAlCliente(dBD.cliente); setPagoFotoModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold transition-all active:scale-95">
                               <span className="text-lg">📸</span> Pago con foto
                             </button>
                             <button onClick={() => { setBotModalId(null); setMateTab('estado'); setMateEstadoSel(''); setMateReprogramar(''); setMateMinutos(null); setMateMinutosCustom(''); setMatePlantillaSel(''); setMateMensaje(''); setMateMotivo(''); setMateMostrarAgregarFrase(false); setMateMostrarGuardarPlantilla(false); setMateNuevaFrase(''); setMateNuevoNombrePlantilla(''); setReporteMateModalId(c.id); }} className="flex flex-col items-center gap-1 p-2.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold transition-all active:scale-95">
@@ -2864,15 +2913,15 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           <div className="mb-3">
                             <label className="text-[10px] text-slate-400 uppercase font-bold mb-1 block">Tipo de reporte</label>
                             <div className="grid grid-cols-3 gap-1.5">
-                              <button onClick={() => { setPagoFotoTipo('comprobante'); setPagoFotoAlCliente(false); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'comprobante' ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => alCambiarTipoFoto('comprobante')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'comprobante' ? 'bg-rose-500/20 border-2 border-rose-500 text-rose-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">📸</span>
                                 Comprobante
                               </button>
-                              <button onClick={() => { setPagoFotoTipo('entregado'); setPagoFotoAlCliente(true); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'entregado' ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => alCambiarTipoFoto('entregado')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'entregado' ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">✅</span>
                                 Entregado
                               </button>
-                              <button onClick={() => { setPagoFotoTipo('otro'); setPagoFotoAlCliente(false); }} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'otro' ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              <button onClick={() => alCambiarTipoFoto('otro')} disabled={pagoFotoSubiendo} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50 ${pagoFotoTipo === 'otro' ? 'bg-blue-500/20 border-2 border-blue-500 text-blue-300' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
                                 <span className="text-base">📦</span>
                                 Otro
                               </button>
@@ -3106,8 +3155,12 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                                   setPagoFotoMonto('');
                                   setPagoFotoMetodo('yape');
                                   setPagoFotoTipo('comprobante');
-                                  setPagoFotoAlCliente(false);
-                                  setPagoFotoAMate(true);
+                                  // 🎯 FASE BD: la elección de destinos se
+                                  // GUARDA — el próximo modal abre con estas
+                                  // palancas (se guarda la intención cruda,
+                                  // no la efectiva: un cliente sin celular no
+                                  // te apaga el cliente para los demás).
+                                  guardarDestinosPago(pagoFotoTipo, aMate, pagoFotoAlCliente);
                                 } catch (e: any) {
                                   console.error('❌ Error subiendo foto:', e);
                                   onShowToast?.('❌ Error', e.message || 'No se pudo subir la foto', 'error');

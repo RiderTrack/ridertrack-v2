@@ -187,9 +187,9 @@ console.log('\n7) 🔌 RutaView + acción al bot — TODO viaja pegado (lección
 console.log('\n8) 🔢 versión y changelog');
 {
   const pkg = leer('../package.json');
-  check('package.json → 0.11.29', pkg.includes('"version": "0.11.29"'));
+  check('package.json → 0.11.30', pkg.includes('"version": "0.11.30"'));
   const aj = leer('../src/drivertrack/components/AjustesView.tsx');
-  check('AjustesView muestra v0.11.29 con el resumen de la fase', aj.includes('v0.11.29') && aj.includes('LOS MENSAJES DEL QR'));
+  check('AjustesView muestra v0.11.30 con el resumen de la fase', aj.includes('v0.11.30') && aj.includes('EL COMPROBANTE VA A QUIEN TÚ ELIGES'));
   const fs2 = leer('../src/services/firestore.ts');
   check('ConfigCuentas tiene ventasMensajes', fs2.includes('ventasMensajes?: MensajeVenta[]'));
 }

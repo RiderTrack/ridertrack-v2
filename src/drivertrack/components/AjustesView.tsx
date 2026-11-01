@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.29 (💜🔷 LOS MENSAJES DEL QR, LOS QUE DE VERDAD LLEGAN: en inDrive, el botoncito QR de cada viaje → "✏️ Mensaje del cobro" ahora edita el mensaje de CADA billetera (Yape y Plin, cada uno el suyo) con etiquetas que se llenan solas al enviar; 💾 "Guardar como MI mensaje" lo deja fijito para TODOS los cobros (también desde el menú del robot y la Caja, y viaja a tu otro celular) + 📚 LIBRERÍA de variantes por billetera para cargar en un toque; el ✏️ viejo del formulario se fue (editaba un mensaje que el flujo real no usaba) y ahora el menú "¿Cómo le cobrás?" te muestra el mensaje que va a salir con cada opción · 📦 CAJA: el cuadre al jefe ahora lleva el DETALLE de pedidos — cuántos de S/9, cuántos de S/12 y cuántos fallidos ({'{detallePedidos}'} en la plantilla, y las variables {'{pedidos9}'} {'{pedidos12}'} {'{fallidos}'} para armarla a tu gusto) · Lima, PE
+DriverTrack v0.11.30 (🎯 EL COMPROBANTE VA A QUIEN TÚ ELIGES: la foto de pago puede ir SOLO al cliente, SOLO al grupo MATE o a los dos — el bot v3.12-DESTINOS respeta tus palancas al 100% (con el bot viejo ignoraba «apagar MATE» y mandaba al grupo igual) · 🔒 LAS PALANCAS SE RECUERDAN: el modal ya NO resetea a «MATE prendido» en cada envío — la última elección de cada tipo de foto (comprobante/entregado/otro) queda guardada en tu celular y el próximo abre como lo dejaste · Lima, PE
       </p>
     </div>
   );
