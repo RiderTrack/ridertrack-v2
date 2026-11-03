@@ -42,6 +42,8 @@ import {
   fusionarCierres,
   fusionarGastos,
   gastosDeFecha,
+  // 📅 FASE BE: la fecha del cierre se elige (y se puede cambiar)
+  normalizarFechaCierre,
   nuevoGastoId,
   podarBorrados,
   ResumenCaja,
@@ -466,9 +468,17 @@ export function gastosDeHoy(caja: EstadoCaja): Gasto[] {
 export interface DatosCierre {
   /** S/ contados físicamente al final del día */
   contado: number;
-  /** resumen calculado con los clientes de hoy + gastos */
+  /** resumen calculado con los clientes del día + gastos */
   resumen: ResumenCaja;
   nota?: string;
+  /** 📅 FASE BE: día al que pertenece esta caja (YYYY-MM-DD).
+   *  Default/omitido → HOY (como toda la vida). Reporte de Rudy:
+   *  terminó la ruta del 2-nov, se olvidó de cerrar caja y al
+   *  cerrarla el 3-nov quedaba fechada 3-nov — mal, porque el 3
+   *  era otra ruta nueva. Ahora la UI deja elegir el día y acá
+   *  se sanea (normalizarFechaCierre: real, no futura, ≤ 60 días
+   *  atrás — lo raro cae a HOY y el cierre queda como siempre). */
+  fecha?: string;
   /** 🛵 FASE Q: tu paga por pedidos del día (S/9 normal / S/12
    *  lejano — temporada FASE D). Se congela en el cierre para que
    *  el cuadre al jefe la descuadre siempre con los números del
@@ -488,9 +498,11 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
 
   const r = datos.resumen;
   const contado = Math.max(0, Number(datos.contado) || 0);
+  // 📅 FASE BE: el día de esta caja — hoy si no llega nada útil
+  const fechaCierre = normalizarFechaCierre(datos.fecha, hoyLocal());
 
   const cierre: CierreCaja = {
-    fecha: hoyLocal(),
+    fecha: fechaCierre,
     at: Date.now(),
     fondoInicial: estado.fondo,
     entregas: r.entregas,
@@ -503,7 +515,10 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
     contado,
     diferencia: contado - r.esperado,
     netoDelDia: r.netoDelDia,
-    gastos: gastosDeHoy(estado),
+    // 📅 FASE BE: se congelan los gastos DEL DÍA del cierre (no
+    // los de hoy) — el gasto anotado el 2-nov pertenece a la caja
+    // del 2-nov, la cierres cuando la cierres
+    gastos: gastosDeFecha(estado.gastos, fechaCierre),
     nota: (datos.nota || '').trim().slice(0, 200) || undefined,
     // 💜 FASE BC: los pedidos FALLIDOS del día viajan congelados en el
     // cierre → el cuadre al jefe los muestra ({fallidos} / {detallePedidos})
@@ -513,7 +528,7 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
     ...(datos.pagoRuta ? { pagoRuta: datos.pagoRuta } : {}),
   };
 
-  // un cierre por fecha: el de hoy se reemplaza
+  // un cierre por fecha: el de ese día se reemplaza (nuevo at)
   const cierres = [cierre, ...estado.cierres.filter((c) => c.fecha !== cierre.fecha)].slice(0, MAX_CIERRES);
   // 🔄 FASE W: normalizar aplica tombstones (p. ej. si el otro cel
   // reabrió después — y un re-cierre nuevo siempre sobrevive)
@@ -550,4 +565,52 @@ export async function reabrirCaja(uid: string): Promise<void> {
   marcarGuardoLocal(uid);
   emitir();
   await guardarRemoto(uid);
+}
+
+/**
+ * 📅 FASE BE — cambia la FECHA de un cierre ya guardado (los
+ * números quedan intactos). Para el día en que llegaste cansado,
+ * cerraste la caja y recién después viste que quedó con la fecha
+ * de HOY siendo de AYER (la ruta de ayer). Mueve el cierre:
+ *   · la nueva fecha pasa por normalizarFechaCierre (real, no
+ *     futura, ≤ 60 días atrás)
+ *   · si ya existe un cierre con la nueva fecha → Error claro
+ *     (no pisamos silenciosamente la caja de otro día)
+ *   · 🔄 FASE W: tombstone de la fecha VIEJA (el merge con la
+ *     nube y el otro celular no lo resucita) + `at` nuevo del
+ *     lado de la nueva fecha (sobrevive a cualquier tombstone
+ *     viejo de esa fecha, p. ej. un re-abrir anterior)
+ */
+export async function cambiarFechaCierre(
+  uid: string,
+  fechaVieja: string,
+  fechaNueva: string
+): Promise<CierreCaja> {
+  if (uidActual !== uid) arrancarCaja(uid);
+  uidActual = uidActual || uid;
+
+  const hoy = hoyLocal();
+  const vieja = normalizarFechaCierre(fechaVieja, hoy);
+  const nueva = normalizarFechaCierre(fechaNueva, hoy);
+
+  const cierreViejo = cierreDeFecha(estado.cierres, vieja);
+  if (!cierreViejo) throw new Error('No encontré una caja cerrada con esa fecha');
+  if (nueva === vieja) throw new Error('Elegí una fecha distinta a la que tiene');
+  if (cierreDeFecha(estado.cierres, nueva)) {
+    throw new Error(`Ya cerraste la caja del ${nueva} — borrá esa primero (reabrila) si querés mover esta ahí`);
+  }
+
+  const at = Date.now();
+  const movido: CierreCaja = { ...cierreViejo, fecha: nueva, at };
+  estado = normalizar({
+    ...estado,
+    cierres: [movido, ...estado.cierres.filter((c) => c.fecha !== vieja && c.fecha !== nueva)],
+    // el cierre con la fecha vieja queda "borrado" para la nube
+    borrados: fusionarBorrados(estado.borrados, { gastos: [], cierres: [tombstoneCierre(vieja)] }),
+  });
+  persistirLocal();
+  marcarGuardoLocal(uid);
+  emitir();
+  await guardarRemoto(uid);
+  return movido;
 }

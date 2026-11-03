@@ -27,6 +27,8 @@ import {
   agregarGasto,
   eliminarGasto,
   fijarFondo,
+  // 📅 FASE BE: la fecha del cierre se elige (y se puede cambiar)
+  cambiarFechaCierre,
   cerrarCaja,
   reabrirCaja,
   gastosDeHoy,
@@ -47,6 +49,7 @@ import {
   CATEGORIAS_GASTO,
   CierreCaja,
   Gasto,
+  MAX_DIAS_ATRAS_CIERRE,
   MAX_PLANTILLAS_CUADRE,
   PagoRutaCierre,
   PlantillaCuadre,
@@ -60,7 +63,9 @@ import {
   etiquetaDiferencia,
   fechaCorta,
   formatearSoles,
+  gastosDeFecha,
   horaCorta,
+  normalizarFechaCierre,
   normalizarCelJefe,
   normalizarPlantillasCuadre,
   nuevoPlantillaId,
@@ -78,25 +83,30 @@ function useCaja(): EstadoCaja {
 
 // ── Clientes de HOY (cache compartido — 1 lectura por sesión) ──
 
-/** Cache módulo-level: los registros de HOY se leen UNA vez por
+/** Cache módulo-level: los registros de un día se leen UNA vez por
  *  sesión (leerHistorial lee hasta 40 docs — no lo repetimos en
  *  cada montaje del bloque del menú). Se invalida al finalizar
- *  una ruta (evento rt-ruta-finalizada). */
-let _cacheCerrados: { uid: string; clientes: Cliente[] } | null = null;
-let _cargandoCerrados: Promise<Cliente[]> | null = null;
+ *  una ruta (evento rt-ruta-finalizada). 📅 FASE BE: ahora cachea
+ *  por uid+FECHA — además del de hoy puede leer el de otro día
+ *  (para cerrar la caja de ayer que quedó pendiente). */
+let _cacheCerrados: { uid: string; fecha: string; clientes: Cliente[] } | null = null;
+let _cargandoCerrados: { uid: string; fecha: string; promesa: Promise<Cliente[]> } | null = null;
 
-async function asegurarCerrados(uid: string): Promise<Cliente[]> {
-  if (_cacheCerrados?.uid === uid) return _cacheCerrados.clientes;
-  if (_cargandoCerrados) return _cargandoCerrados;
-  _cargandoCerrados = (async () => {
+/** 📅 FASE BE — los clientes de las rutas FINALIZADAS ese día
+ *  (historial_rutas). Con fecha=hoy es la de toda la vida; con
+ *  otra fecha sirve para cerrar la caja de un día anterior (la
+ *  ruta que finalizaste ayer y no cerraste caja). */
+async function cerradosDeFecha(uid: string, fecha: string): Promise<Cliente[]> {
+  if (_cacheCerrados?.uid === uid && _cacheCerrados.fecha === fecha) return _cacheCerrados.clientes;
+  if (_cargandoCerrados?.uid === uid && _cargandoCerrados.fecha === fecha) return _cargandoCerrados.promesa;
+  const promesa = (async () => {
     try {
-      const hoy = hoyISO(); // ⚡ F3.48: hoy en Lima (antes UTC: la caja de "hoy" cambiaba de día después de 7pm)
       const registros = await leerHistorial(uid, 40);
-      const deHoy: Cliente[] = [];
+      const delDia: Cliente[] = [];
       for (const r of registros) {
-        if (r.fecha !== hoy) continue;
+        if (r.fecha !== fecha) continue;
         for (const c of r.clientes || []) {
-          deHoy.push({
+          delDia.push({
             id: `${r.id}_${c.id}`,
             num: c.num || 0,
             nombre: c.nombre || '',
@@ -122,16 +132,22 @@ async function asegurarCerrados(uid: string): Promise<Cliente[]> {
           });
         }
       }
-      _cacheCerrados = { uid, clientes: deHoy };
-      return deHoy;
+      _cacheCerrados = { uid, fecha, clientes: delDia };
+      return delDia;
     } catch {
       // sin internet → la ruta viva igual muestra el día
-      return _cacheCerrados?.uid === uid ? _cacheCerrados.clientes : [];
+      return _cacheCerrados?.uid === uid && _cacheCerrados.fecha === fecha ? _cacheCerrados.clientes : [];
     } finally {
       _cargandoCerrados = null;
     }
   })();
-  return _cargandoCerrados;
+  _cargandoCerrados = { uid, fecha, promesa };
+  return promesa;
+}
+
+async function asegurarCerrados(uid: string): Promise<Cliente[]> {
+  // ⚡ F3.48: hoy en Lima (antes UTC: la caja de "hoy" cambiaba de día después de 7pm)
+  return cerradosDeFecha(uid, hoyISO());
 }
 
 /** Invalida y vuelve a leer (al finalizar una ruta) */
@@ -290,7 +306,9 @@ interface CajaCardProps {
 }
 
 export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast }) => {
-  const { caja, gastosHoy, resumen, cierreHoy, cargando, pagoRuta, cfgPago } = useResumenCaja(uid);
+  // 📅 FASE BE: también CLIENTES (ruta viva + cerradas de hoy) — el
+  // cierre de otro día usa estos cuando no hay rutas finalizadas
+  const { caja, gastosHoy, resumen, cierreHoy, cargando, pagoRuta, cfgPago, clientes } = useResumenCaja(uid);
   const cerrada = !!cierreHoy;
 
   // 🔄 FASE W: la caja ya se sincroniza EN VIVO entre celulares —
@@ -317,6 +335,57 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   // de OTRO día, leída de su cierre guardado (90 días de historia).
   const [fechaVer, setFechaVer] = useState<string | null>(null);
 
+  // ── 📅 FASE BE: el DÍA de la caja que vas a cerrar ──
+  // Reporte de Rudy: terminó la ruta del 2-nov, se olvidó de cerrar
+  // caja y al cerrarla el 3-nov quedaba fechada 3-nov (mal — el 3
+  // era otra ruta nueva). Ahora el formulario de cierre trae el
+  // día: default HOY (la caja de siempre, cero cambios) y si
+  // elegís otro día, el cierre se guarda con ESA fecha, congela
+  // los gastos de ESE día y usa las rutas finalizadas ese día (si
+  // las hay; si no, lo que la caja está mostrando — la ruta viva).
+  const hoyStr = hoyISO();
+  const [fechaCierre, setFechaCierre] = useState<string>(hoyStr);
+  const esOtroDia = fechaCierre !== hoyStr;
+  const fechaMinCierre = useMemo(() => {
+    const d = new Date(`${hoyStr}T00:00:00`);
+    d.setDate(d.getDate() - MAX_DIAS_ATRAS_CIERRE);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }, [hoyStr]);
+  // gastos DEL DÍA del cierre (hoy = los de siempre)
+  const gastosCierre = useMemo(() => gastosDeFecha(caja.gastos, fechaCierre), [caja.gastos, fechaCierre]);
+  // rutas finalizadas ese día (para cerrar la caja de un día atrás)
+  const [clientesOtroDia, setClientesOtroDia] = useState<Cliente[] | null>(null);
+  useEffect(() => {
+    if (!esOtroDia || !uid) {
+      setClientesOtroDia(null);
+      return;
+    }
+    let vivo = true;
+    void cerradosDeFecha(uid, fechaCierre).then((lista) => {
+      if (vivo) setClientesOtroDia(lista);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [esOtroDia, fechaCierre, uid]);
+  // clientes del cierre: hoy → los de siempre (ruta viva + cerradas
+  // hoy); otro día → las rutas FINALIZADAS ese día si las hay, si no
+  // lo que la caja está mostrando (la ruta viva que quedó sin cerrar)
+  const clientesCierre = esOtroDia
+    ? (clientesOtroDia && clientesOtroDia.length > 0 ? clientesOtroDia : clientes)
+    : clientes;
+  const resumenCierre = useMemo(
+    () => resumenCajaDia(clientesCierre, gastosCierre, caja.fondo),
+    [clientesCierre, gastosCierre, caja.fondo]
+  );
+  // 🛵 FASE Q: la paga se congela con los pedidos del día del cierre
+  const pagoRutaCierre = useMemo(() => calcularPagoPedidos(clientesCierre, cfgPago), [clientesCierre, cfgPago]);
+
+  // ── 📅 FASE BE: cambiarle la fecha a un cierre YA guardado ──
+  const [editandoFechaDe, setEditandoFechaDe] = useState<string | null>(null);
+  const [fechaNueva, setFechaNueva] = useState('');
+
   // ── FASE O: cuadre de entrega + WhatsApp del jefe ──
   const cuadreHoy = cierreHoy ? calcularCuadreEntrega(cierreHoy) : null;
   const [jefe, setJefe] = useState(leerJefe);
@@ -342,6 +411,12 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
   const cierresPorFecha = useMemo(
     () => [...caja.cierres].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)),
     [caja.cierres]
+  );
+  // 📅 FASE BE: ¿ya hay un cierre guardado con el día elegido al
+  // cerrar? (se reemplaza, igual que re-cerrar hoy — conviene saberlo)
+  const cierreEnFechaElegida = useMemo(
+    () => cierresPorFecha.find((c) => c.fecha === fechaCierre) ?? null,
+    [cierresPorFecha, fechaCierre]
   );
   const cierreVer = useMemo(
     () => (fechaVer ? cierresPorFecha.find((c) => c.fecha === fechaVer) ?? null : null),
@@ -414,23 +489,35 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
       // jefe siempre descuadre lo del día — aunque después cambies
       // la config o la ruta. Temporada OFF → sin snapshot → el
       // cuadre queda como en la FASE O/P (sin descuento).
+      // 📅 FASE BE: con los pedidos del DÍA DEL CIERRE (pagoRutaCierre),
+      // no de hoy — si cerrás la caja de ayer, tu paga es la de ayer.
       const pagoRutaSnap: PagoRutaCierre | undefined = cfgPago.activo
         ? {
             activo: true,
-            cantidadNormal: pagoRuta.cantidadNormal,
-            cantidadLejos: pagoRuta.cantidadLejos,
+            cantidadNormal: pagoRutaCierre.cantidadNormal,
+            cantidadLejos: pagoRutaCierre.cantidadLejos,
             tarifaNormal: cfgPago.tarifaNormal,
             tarifaLejos: cfgPago.tarifaLejos,
-            total: pagoRuta.total,
+            total: pagoRutaCierre.total,
           }
         : undefined;
-      const cierre = await cerrarCaja(uid, { contado, resumen, nota: notaCierre, pagoRuta: pagoRutaSnap });
+      // 📅 FASE BE: fechaCierre = el día que elegiste (default hoy) y
+      // resumenCierre = los números de ese día (gastos y rutas de ese
+      // día — no los de hoy)
+      const cierre = await cerrarCaja(uid, {
+        contado,
+        resumen: resumenCierre,
+        nota: notaCierre,
+        pagoRuta: pagoRutaSnap,
+        fecha: fechaCierre,
+      });
       const et = etiquetaDiferencia(cierre.diferencia);
       setContadoInput('');
       setNotaCierre('');
+      setFechaCierre(hoyStr); // 📅 FASE BE: el próximo cierre vuelve a HOY
       onShowToast?.(
         Math.abs(cierre.diferencia) <= 0.01 ? '🔒 Caja cerrada' : cierre.diferencia > 0 ? '🔒 Caja cerrada — sobró plata' : '🔒 Caja cerrada — faltó plata',
-        `Contado ${formatearSoles(cierre.contado)} · ${et.texto}` +
+        `Caja del ${fechaCorta(cierre.fecha)} · contado ${formatearSoles(cierre.contado)} · ${et.texto}` +
           (cierre.pagoRuta?.total ? ` · 🛵 tu paga ${formatearSoles(cierre.pagoRuta.total)} se queda contigo` : ''),
         Math.abs(cierre.diferencia) <= 0.01 ? 'success' : cierre.diferencia > 0 ? 'info' : 'warning'
       );
@@ -485,6 +572,70 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     } catch (e: any) {
       onShowToast?.('No se pudo enviar', e?.message || 'Revisa tu internet e inténtalo de nuevo', 'error');
     }
+  };
+
+  // ── 📅 FASE BE: cambiarle la fecha a un cierre guardado ──
+  const confirmarCambiarFecha = async (fechaVieja: string) => {
+    if (!uid || guardando) return;
+    try {
+      const movido = await cambiarFechaCierre(uid, fechaVieja, fechaNueva);
+      setEditandoFechaDe(null);
+      setFechaNueva('');
+      setFechaCierre(hoyStr); // 📅 FASE BE: el próximo cierre vuelve a HOY
+      // si estabas viendo ese día, seguilo viendo con su fecha nueva
+      if (fechaVer === fechaVieja) setFechaVer(movido.fecha);
+      onShowToast?.(
+        '📅 Fecha cambiada',
+        `La caja quedó fechada ${fechaCorta(movido.fecha)} — hoy vuelve a estar libre para tu ruta nueva`,
+        'success'
+      );
+    } catch (e: any) {
+      onShowToast?.('No se pudo cambiar la fecha', e?.message || 'Quedó en el teléfono — reintenta', 'warning');
+    }
+  };
+
+  /** el mini-form de cambiar fecha (aparece en la caja de hoy
+   *  cerrada y en la vista de otro día — misma pieza) */
+  const formCambiarFecha = (cierre: CierreCaja) => {
+    if (editandoFechaDe !== cierre.fecha) return null;
+    return (
+      <div
+        className="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5"
+        data-testid="form-cambiar-fecha"
+      >
+        <p className="text-[10px] font-bold text-amber-300 leading-snug">
+          📅 ¿De qué día es en realidad esta caja? Los números NO se tocan — solo la fecha.
+        </p>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <input
+            type="date"
+            value={fechaNueva}
+            min={fechaMinCierre}
+            max={hoyStr}
+            onChange={(e) => setFechaNueva(e.target.value)}
+            className={`${inputTexto} flex-1 min-w-0 py-2`}
+            data-testid="input-fecha-nueva"
+          />
+          <button
+            onClick={() => void confirmarCambiarFecha(cierre.fecha)}
+            disabled={!fechaNueva || fechaNueva === cierre.fecha}
+            className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-black transition-all active:scale-[0.98] disabled:opacity-30 flex-shrink-0"
+            data-testid="boton-confirmar-fecha"
+          >
+            ✓ cambiar
+          </button>
+          <button
+            onClick={() => {
+              setEditandoFechaDe(null);
+              setFechaNueva('');
+            }}
+            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-400 text-sm font-bold transition-colors flex-shrink-0"
+          >
+            ✖
+          </button>
+        </div>
+      </div>
+    );
   };
 
   // ── FASE O: guardar número / mandar cuadre al jefe ──
@@ -933,6 +1084,20 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               <Unlock className="w-4 h-4" /> Reabrir
             </button>
           </div>
+          {/* 📅 FASE BE: ¿te olvidaste de cerrar la caja de AYER y la
+              cerraste recién hoy con fecha de hoy? Acá se arregla —
+              cambiás el día y los números quedan exactamente igual */}
+          <button
+            onClick={() => {
+              setEditandoFechaDe(editandoFechaDe === cierreHoy!.fecha ? null : cierreHoy!.fecha);
+              setFechaNueva('');
+            }}
+            className="w-full mt-1.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-[0.98]"
+            data-testid="boton-cambiar-fecha-hoy"
+          >
+            📅 Cambiar la fecha de esta caja
+          </button>
+          {formCambiarFecha(cierreHoy!)}
           {/* ── FASE O/P: WhatsApp directo al jefe + plantillas ── */}
           <div className="mt-2.5 rounded-xl border border-violet-500/40 bg-slate-950/60 p-2.5">
             {jefe && !jefeEdit ? (
@@ -1117,8 +1282,49 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
         <div className="rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-cyan-500/10 via-slate-900/80 to-slate-900/80 p-3.5">
           <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">🔒 Cerrar la caja</p>
           <p className="text-[11px] text-slate-400 leading-relaxed mb-2.5">
-            Al final del día, cuenta la plata que tienes encima y escríbela. La app la compara con lo que <b>deberías</b> tener ({formatearSoles(resumen.esperado)}).
+            Al final del día, cuenta la plata que tienes encima y escríbela. La app la compara con lo que <b>deberías</b> tener ({formatearSoles(resumenCierre.esperado)}).
           </p>
+          {/* 📅 FASE BE: el DÍA de esta caja. Default HOY (la caja de
+              siempre). ¿Te olvidaste de cerrar la caja de AYER y la
+              ruta sigue en la pantalla? Elegí AYER: se guarda con esa
+              fecha, congela los gastos de ese día y HOY queda libre
+              para tu ruta nueva. */}
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span className="text-xs text-slate-500 font-bold">📅 Día de esta caja:</span>
+            <input
+              type="date"
+              value={fechaCierre}
+              min={fechaMinCierre}
+              max={hoyStr}
+              onChange={(e) => setFechaCierre(e.target.value || hoyStr)}
+              className={`${inputTexto} py-1.5`}
+              data-testid="input-fecha-cierre"
+            />
+            {esOtroDia && (
+              <button onClick={() => setFechaCierre(hoyStr)} className="text-[10px] text-cyan-400 underline">
+                volver a hoy
+              </button>
+            )}
+          </div>
+          {esOtroDia && (
+            <div className="mb-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-2.5 py-2" data-testid="banner-otro-dia">
+              <p className="text-[10px] font-bold text-amber-300 leading-snug">
+                📅 Estás cerrando la caja del {fechaCorta(fechaCierre)} — se guarda con ESA fecha y hoy queda libre para tu ruta nueva.
+              </p>
+              <p className="text-[9px] text-amber-200/70 leading-snug mt-0.5">
+                {clientesOtroDia === null
+                  ? 'Buscando las rutas que finalizaste ese día…'
+                  : clientesOtroDia.length > 0
+                    ? `Rutas finalizadas ese día: ${clientesOtroDia.length} clientes · gastos de ese día: ${gastosCierre.length}`
+                    : `Se congela lo que la caja está mostrando (${clientes.length} clientes) · gastos de ese día: ${gastosCierre.length}`}
+              </p>
+              {cierreEnFechaElegida && (
+                <p className="text-[9px] text-red-300 font-bold leading-snug mt-0.5">
+                  ⚠️ Ya existe una caja cerrada el {fechaCorta(fechaCierre)} — si cerrás, la REEMPLAZÁS.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500 font-bold">Contado:</span>
             <input
@@ -1134,16 +1340,17 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
             {(() => {
               const contado = parsearSoles(contadoInput);
               if (contadoInput.trim() === '' || isNaN(contado)) return null;
-              const et = etiquetaDiferencia(contado - resumen.esperado);
+              const et = etiquetaDiferencia(contado - resumenCierre.esperado);
               const color = et.clase === 'ok' ? 'text-emerald-300' : et.clase === 'sobra' ? 'text-amber-300' : 'text-red-300';
               return <span className={`text-sm font-black ${color}`}>{et.texto}</span>;
             })()}
           </div>
           {(() => {
             // FASE O/Q: preview del cuadre mientras escribís el conteo
+            // 📅 FASE BE: con los números del DÍA ELEGIDO (resumenCierre)
             const contado = parsearSoles(contadoInput);
             if (contadoInput.trim() === '' || isNaN(contado)) return null;
-            const q = calcularCuadreEntrega({ contado, fondoInicial: caja.fondo, netoDelDia: resumen.netoDelDia, pagoRuta: pagoRuta.total });
+            const q = calcularCuadreEntrega({ contado, fondoInicial: caja.fondo, netoDelDia: resumenCierre.netoDelDia, pagoRuta: pagoRutaCierre.total });
             return (
               <p className="text-[10px] text-slate-400 leading-relaxed mt-1.5">
                 → cuadre:{' '}
@@ -1176,11 +1383,12 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
             onClick={() => void cerrar()}
             disabled={guardando || contadoInput.trim() === ''}
             className="w-full mt-2.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-2"
+            data-testid="boton-cerrar-caja"
           >
-            <Lock className="w-4 h-4" /> Cerrar caja de hoy
+            <Lock className="w-4 h-4" /> {esOtroDia ? `Cerrar caja del ${fechaCorta(fechaCierre)}` : 'Cerrar caja de hoy'}
           </button>
           <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
-            El cierre congela los números del día (gastos incluidos). Después puedes mandarlo al grupo MATE. ¿Te equivocaste? Reábrela.
+            El cierre congela los números del día elegido (gastos incluidos). Después puedes mandarlo al grupo MATE. ¿Te equivocaste? Reábrela.
           </p>
         </div>
       )}
@@ -1207,6 +1415,19 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
                 </p>
               </div>
             </div>
+            {/* 📅 FASE BE: re-fechar este cierre (¿quedó con el día
+                equivocado?) — los números no se tocan */}
+            <button
+              onClick={() => {
+                setEditandoFechaDe(editandoFechaDe === cierreVer.fecha ? null : cierreVer.fecha);
+                setFechaNueva('');
+              }}
+              className="w-full mt-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-[0.98]"
+              data-testid="boton-cambiar-fecha-dia"
+            >
+              📅 Cambiar la fecha de esta caja
+            </button>
+            {formCambiarFecha(cierreVer)}
           </div>
 
           {/* resumen congelado de ese día */}

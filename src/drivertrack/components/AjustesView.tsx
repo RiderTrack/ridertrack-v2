@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.30 (🎯 EL COMPROBANTE VA A QUIEN TÚ ELIGES: la foto de pago puede ir SOLO al cliente, SOLO al grupo MATE o a los dos — el bot v3.12-DESTINOS respeta tus palancas al 100% (con el bot viejo ignoraba «apagar MATE» y mandaba al grupo igual) · 🔒 LAS PALANCAS SE RECUERDAN: el modal ya NO resetea a «MATE prendido» en cada envío — la última elección de cada tipo de foto (comprobante/entregado/otro) queda guardada en tu celular y el próximo abre como lo dejaste · Lima, PE
+DriverTrack v0.11.31 (📅 LA FECHA DE LA CAJA SE ELIGE: si terminaste tu ruta y se te olvidó cerrar caja, al día siguiente podés elegir el día correcto en el formulario de cierre — se guarda con ESA fecha, congela los gastos de ese día y hoy queda libre para tu ruta nueva · 📅 CAMBIAR LA FECHA DE UNA CAJA YA CERRADA: el botón «Cambiar la fecha de esta caja» re-fechara un cierre sin tocar los números, por si ya la habías cerrado con el día equivocado · Lima, PE
       </p>
     </div>
   );

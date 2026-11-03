@@ -282,6 +282,53 @@ export function cierreDeFecha(cierres: CierreCaja[], fechaISO: string): CierreCa
   return delDia.reduce((a, b) => (b.at > a.at ? b : a));
 }
 
+// ── 📅 FASE BE: la fecha del cierre se elige ────────────────
+
+/** 📅 FASE BE: hasta cuántos días atrás puede ser la fecha de un
+ *  cierre. Más atrás no tiene sentido (los gastos sueltos ya se
+ *  podaron a los 45 días y la ruta de ese día no está en ningún
+ *  lado) — y evita cierres "fantasma" de hace meses por toque
+ *  accidental en el calendario del celular. */
+export const MAX_DIAS_ATRAS_CIERRE = 60;
+
+/**
+ * 📅 FASE BE — sanea la fecha de un cierre. Reporte de Rudy:
+ * «terminé mi ruta el 2 de noviembre pero me olvidé cerrar caja;
+ * al día siguiente la cierro y me queda con la fecha del 3, que
+ * no es correcto porque el 3 es otra ruta nueva». Ahora la fecha
+ * SE ELIGE al cerrar (y se puede cambiar después) — este helper
+ * decide si la fecha que llegó es de verdad un día utilizable:
+ *   · formato YYYY-MM-DD y fecha de calendario REAL (2026-02-31
+ *     no existe) — el <input type="date"> ya lo garantiza en la
+ *     app, esto defiende al servicio de cualquier otra fuente
+ *   · no futura (cerrar la caja de mañana no tiene sentido)
+ *   · a lo sumo MAX_DIAS_ATRAS_CIERRE días atrás
+ * Si algo no cuadra → devuelve `hoy` (el comportamiento de toda
+ * la vida, cero sorpresas). Puro: `hoy` entra por parámetro →
+ * testeable con Node sin relojes falsos.
+ */
+export function normalizarFechaCierre(bruto: unknown, hoy: string): string {
+  const t = typeof bruto === 'string' ? bruto.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return hoy;
+  const [yS, mS, dS] = t.split('-');
+  const y = Number(yS);
+  const mes = Number(mS);
+  const d = Number(dS);
+  // fecha de calendario real (new Date aplana 2026-02-31 → 3-mar)
+  const dt = new Date(y, mes - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mes - 1 || dt.getDate() !== d) return hoy;
+  // YYYY-MM-DD se compara bien como texto (mismo largo, ceros a la izq)
+  if (t > hoy) return hoy; // futuro → hoy
+  if (t < hoy) {
+    const limite = new Date(`${hoy}T00:00:00`);
+    limite.setDate(limite.getDate() - MAX_DIAS_ATRAS_CIERRE);
+    const p = (n: number) => String(n).padStart(2, '0');
+    const limiteISO = `${limite.getFullYear()}-${p(limite.getMonth() + 1)}-${p(limite.getDate())}`;
+    if (t < limiteISO) return hoy; // muy viejo → hoy
+  }
+  return t;
+}
+
 // ── Formato ───────────────────────────────────────────────
 
 /** 12.5 → "S/ 12.50" (sin símbolo raro, siempre 2 decimales) */
