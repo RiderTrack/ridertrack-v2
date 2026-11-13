@@ -545,6 +545,7 @@ export async function finalizarRuta(userId: string, clientes: Cliente[], tiempoR
     // 🛵 FASE D: pago por pedido (temporada) — si el modo estaba activo
     // al cerrar la ruta, el desglose 9/12 queda grabado en el historial
     // (los días de modo OFF no guardan nada = idénticos a antes).
+    // 💰 FASE BF: el desglose ahora incluye los rechazados al medio.
     const cfgPago = cargarConfigPagoPedidos();
     const pagoPedidos = cfgPago.activo
       ? {

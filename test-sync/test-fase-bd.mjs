@@ -69,10 +69,10 @@ check('16. testids de las palancas intactos (regresión FASE AY)',
 // ── 7. versión ──
 const ajustes = leer('../src/drivertrack/components/AjustesView.tsx');
 const pkg = leer('../package.json');
-// 📅 FASE BE: la versión siguió avanzando (0.11.31) — el texto de BD
+// 💰 FASE BF: la versión siguió avanzando (0.11.32) — el texto de BD
 // vive en el historial del repo; el guardian apunta a la versión actual
-check('17. AjustesView dice la versión actual (0.11.31, FASE BE)', /DriverTrack v0\.11\.31/.test(ajustes));
-check('18. package.json 0.11.31', /"version": "0\.11\.31"/.test(pkg));
+check('17. AjustesView dice la versión actual (0.11.32, FASE BF)', /DriverTrack v0\.11\.32/.test(ajustes));
+check('18. package.json 0.11.32', /"version": "0\.11\.32"/.test(pkg));
 
 console.log(`\n${ok} ✓ · ${fail} ✗`);
 process.exit(fail ? 1 : 0);

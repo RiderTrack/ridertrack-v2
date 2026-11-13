@@ -219,6 +219,8 @@ export function armarMensajeResumen(r: ResumenDia, cierre: CierreCaja | null, ri
     const partes: string[] = [];
     if (pp.cantidadNormal > 0) partes.push(`${pp.cantidadNormal} × S/ ${(pp.montoNormal / pp.cantidadNormal).toFixed(0)}`);
     if (pp.cantidadLejos > 0) partes.push(`${pp.cantidadLejos} × S/ ${(pp.montoLejos / pp.cantidadLejos).toFixed(0)} (lejos)`);
+    // 💰 FASE BF: los rechazados en puerta pagan el MEDIO
+    if (pp.cantidadRechazados > 0) partes.push(`${pp.cantidadRechazados} al medio (S/ ${pp.montoRechazados.toFixed(2)})`);
     L.push(`🛵 *Por pedidos*: ${partes.join(' + ')} = ${mon(pp.total)}`);
     const liq = calcularLiquidacion(caja.efectivoCobrado, pp);
     if (liq.empresaTeDebe > 0) {

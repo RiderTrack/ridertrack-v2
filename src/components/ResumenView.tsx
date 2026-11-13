@@ -263,7 +263,7 @@ export const ResumenView: React.FC = () => {
     const seccionNoEntregados = [
       { key: 'fallida', label: '❌ Fallida', count: 0, monto: 0 },
       { key: 'reprogramar', label: '🔄 Reprogramar', count: 0, monto: 0 },
-      { key: 'rechazado', label: '🚫 Rechazado', count: 0, monto: 0 },
+      { key: 'rechazado', label: '🚫 Rechazado (paga el medio)', count: 0, monto: 0 },
       { key: 'cambio', label: '↩️ Devuelto', count: 0, monto: 0 },
       { key: 'ausente', label: '🚶 Ausente', count: 0, monto: 0 },
       { key: 'no-contesta', label: '📵 No Contesta', count: 0, monto: 0 },
@@ -411,6 +411,7 @@ export const ResumenView: React.FC = () => {
                 <p className="mt-1 text-[10px] text-slate-500">
                   {pagoPedidos.pago.entregados} entregados
                   {pagoPedidos.pago.cantidadLejos > 0 && <> · {pagoPedidos.pago.cantidadLejos} lejos</>}
+                  {pagoPedidos.pago.cantidadRechazados > 0 && <> · 💰 {pagoPedidos.pago.cantidadRechazados} al medio</>}
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/60 border border-emerald-500/30">
@@ -427,7 +428,7 @@ export const ResumenView: React.FC = () => {
               </div>
             </div>
             <p className="mt-3 text-[10px] text-slate-500 leading-relaxed">
-              🛵 El trabajo es lo que la empresa te paga por pedidos entregados (S/{cfgPago.tarifaNormal} normal · S/{cfgPago.tarifaLejos} lejos).{' '}
+              🛵 El trabajo es lo que la empresa te paga por pedidos (S/{cfgPago.tarifaNormal} normal · S/{cfgPago.tarifaLejos} lejos · 💰 FASE BF: rechazado en puerta = el MEDIO S/{(cfgPago.tarifaNormal / 2).toFixed(2)}).{' '}
               🏍️ inDrive es tu neto de viajes menos los gastos anotados en la Caja. La plata que cobrás de los
               clientes es de la empresa — va aparte en la liquidación de abajo.
             </p>
@@ -465,6 +466,9 @@ export const ResumenView: React.FC = () => {
                 {pagoPedidos.pago.cantidadNormal} × S/{cfgPago.tarifaNormal}
                 {pagoPedidos.pago.cantidadLejos > 0 && (
                   <> + {pagoPedidos.pago.cantidadLejos} × S/{cfgPago.tarifaLejos} (lejos)</>
+                )}{' '}
+                {pagoPedidos.pago.cantidadRechazados > 0 && (
+                  <> + 💰 {pagoPedidos.pago.cantidadRechazados} rechazados al medio (S/ {pagoPedidos.pago.montoRechazados.toFixed(2)})</>
                 )}{' '}
                 · {pagoPedidos.pago.entregados} entregados
               </div>

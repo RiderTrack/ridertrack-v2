@@ -113,7 +113,7 @@ export default function PanelContabilidadDT() {
       const cfg = cargarConfigPagoPedidos();
       return calcularPagoPedidos(clientes, cfg);
     } catch {
-      return { cantidadNormal: 0, cantidadLejos: 0, entregados: 0, montoNormal: 0, montoLejos: 0, total: 0 };
+      return { cantidadNormal: 0, cantidadLejos: 0, cantidadRechazados: 0, entregados: 0, montoNormal: 0, montoLejos: 0, montoRechazados: 0, total: 0 };
     }
   }, [clientes]);
 

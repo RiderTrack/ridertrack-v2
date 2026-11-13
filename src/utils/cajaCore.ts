@@ -117,11 +117,16 @@ export interface PagoRutaCierre {
   cantidadNormal: number;
   /** pedidos entregados que cobran tarifa lejana (S/12) */
   cantidadLejos: number;
+  /** 💰 FASE BF: rechazados en puerta del día (pagan el MEDIO).
+   *  Opcional — los cierres viejos no lo tienen → los lectores lo tratan como 0. */
+  cantidadRechazados?: number;
+  /** 💰 FASE BF: S/ de los rechazados (la mitad de su tarifa). Opcional. */
+  montoRechazados?: number;
   /** S/ por pedido normal con el que se cerró el día */
   tarifaNormal: number;
   /** S/ por pedido lejano con el que se cerró el día */
   tarifaLejos: number;
-  /** S/ total que te corresponde (normales + lejanos) */
+  /** S/ total que te corresponde (normales + lejanos + medios) */
   total: number;
 }
 
@@ -456,8 +461,8 @@ function pagoRutaTotal(v: unknown): number {
  * S/400 en efectivo y S/300 en yape", pero en la vida real (yapeos,
  * cambios, vueltos) a veces tenés OTRA plata en la mano. Este
  * cálculo parte de lo que CONTASTE al cerrar y reparte el total:
- *   · loTuyo = tu paga por pedidos (S/9 × normales + S/12 × lejanos,
- *     FASE D) — se queda contigo
+ *   · loTuyo = tu paga por pedidos (S/9 × normales + S/12 × lejanos
+ *     + el MEDIO de los rechazados, FASE D/BF) — se queda contigo
  *   · FASE S: tu paga te la descontás del YAPE primero (Rudy: "si
  *     tengo 140 en el Yape le resto mis 72 y me los paso a mi
  *     cuenta") → el efectivo contado va COMPLETO al jefe. Si el
@@ -565,17 +570,18 @@ export const VARIABLES_CUADRE: { clave: string; ej: string }[] = [
   { clave: 'efectivo', ej: 'S/ 300.00' },
   { clave: 'yape', ej: 'S/ 882.37' },
   { clave: 'total', ej: 'S/ 1182.37' },
-  { clave: 'loTuyo', ej: '🛵 Mi paga de la ruta (10 pedidos): S/ 90.00 — ya descontada del Yape (vacío si no hay)' },
+  { clave: 'loTuyo', ej: '🛵 Mi paga de la ruta (10 pedidos + 2 al medio): S/ 99.00 — ya descontada del Yape (vacío si no hay)' },
   { clave: 'teDebe', ej: '⚠️ La empresa me queda debiendo: S/ 40.00 (vacío si no hay)' },
   { clave: 'gastos', ej: '· gastos de la ruta: S/ 20.00 (2) — ya descontados (vacío si no hay)' },
   { clave: 'empresa', ej: '· la empresa cobra directo: S/ 80.00 (vacío si no hay)' },
   { clave: 'nota', ej: '📝 tu nota del cierre (vacío si no hay)' },
   // 💜 FASE BC: el detalle de pedidos que pidió Rudy — “cuántos
   // pedidos son de 9, cuántos de 12, cuántos fallidos”
-  { clave: 'detallePedidos', ej: '📦 Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) · 10 entregados · ❌ fallidos: 1 (vacío si no hubo)' },
+  { clave: 'detallePedidos', ej: '📦 Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) + 1 rechazado al medio (S/ 4.50) · 10 entregados · ❌ fallidos: 1 (vacío si no hubo)' },
   { clave: 'pedidos9', ej: '8 (los de tarifa normal)' },
   { clave: 'pedidos12', ej: '2 (los de distrito lejano)' },
-  { clave: 'fallidos', ej: '1 (fallida, rechazado, cancelado, ausente, no-contesta o reprogramar)' },
+  { clave: 'medios', ej: '1 (rechazados en puerta: pagan la mitad)' },
+  { clave: 'fallidos', ej: '1 (fallida, rechazado, cancelado, ausente, no-contesta o reprogramar — el rechazado te paga el medio)' },
 ];
 
 /**
@@ -590,7 +596,7 @@ export function aplicarPlantillaCuadre(texto: string, cierre: CierreCaja, riderN
   const mon = (n: number) => `S/ ${Math.max(0, n).toFixed(2)}`;
   const gastos = cierre.gastosEfectivo + cierre.gastosDigital;
   const pr = cierre.pagoRuta;
-  const nPedidos = (pr?.cantidadNormal || 0) + (pr?.cantidadLejos || 0);
+  const nPedidos = (pr?.cantidadNormal || 0) + (pr?.cantidadLejos || 0) + (pr?.cantidadRechazados || 0);
   const mapa: Record<string, string> = {
     nombre: riderNombre?.trim() || 'Rider',
     fecha: fechaCorta(cierre.fecha),
@@ -607,13 +613,19 @@ export function aplicarPlantillaCuadre(texto: string, cierre: CierreCaja, riderN
     pedidos9: String(pr?.cantidadNormal ?? 0),
     pedidos12: String(pr?.cantidadLejos ?? 0),
     fallidos: String(cierre.fallidos ?? 0),
+    // 💰 FASE BF: rechazados en puerta (pagan el medio) — para plantillas propias
+    medios: String(pr?.cantidadRechazados ?? 0),
     detallePedidos: (() => {
       const fall = cierre.fallidos ?? 0;
       const entregados = cierre.entregas ?? 0;
       if (entregados <= 0 && fall <= 0) return '';
-      if (pr && (pr.cantidadNormal > 0 || pr.cantidadLejos > 0)) {
+      if (pr && (pr.cantidadNormal > 0 || pr.cantidadLejos > 0 || (pr.cantidadRechazados || 0) > 0)) {
         const partes = [`${pr.cantidadNormal} de S/ ${pr.tarifaNormal.toFixed(0)}`];
         if (pr.cantidadLejos > 0) partes.push(`${pr.cantidadLejos} de S/ ${pr.tarifaLejos.toFixed(0)} (lejos)`);
+        // 💰 FASE BF: los rechazados en puerta pagan el MEDIO
+        if ((pr.cantidadRechazados || 0) > 0) {
+          partes.push(`${pr.cantidadRechazados} rechazado${(pr.cantidadRechazados || 0) === 1 ? '' : 's'} al medio (S/ ${(pr.montoRechazados || 0).toFixed(2)})`);
+        }
         return `📦 Pedidos: ${partes.join(' + ')} · ${entregados} entregados · ❌ fallidos: ${fall}`;
       }
       return `📦 Pedidos: ${entregados} entregados · ❌ fallidos: ${fall}`;

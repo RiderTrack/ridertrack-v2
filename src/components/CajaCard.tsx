@@ -431,7 +431,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     [cierreVer, textoActivo, riderName]
   );
   const nPedidosVer = cierreVer
-    ? (cierreVer.pagoRuta?.cantidadNormal || 0) + (cierreVer.pagoRuta?.cantidadLejos || 0) || cierreVer.entregas
+    ? (cierreVer.pagoRuta?.cantidadNormal || 0) + (cierreVer.pagoRuta?.cantidadLejos || 0) + (cierreVer.pagoRuta?.cantidadRechazados || 0) || cierreVer.entregas
     : 0;
 
   const fondoEfectivo = fondoInput != null ? parsearSoles(fondoInput) : caja.fondo;
@@ -496,6 +496,9 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
             activo: true,
             cantidadNormal: pagoRutaCierre.cantidadNormal,
             cantidadLejos: pagoRutaCierre.cantidadLejos,
+            // 💰 FASE BF: el medio de los rechazados se congela igual
+            cantidadRechazados: pagoRutaCierre.cantidadRechazados,
+            montoRechazados: pagoRutaCierre.montoRechazados,
             tarifaNormal: cfgPago.tarifaNormal,
             tarifaLejos: cfgPago.tarifaLejos,
             total: pagoRutaCierre.total,
@@ -908,9 +911,16 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
         {fila('🧾', 'Total del día', formatearSoles(resumen.cobradoTotal), 'text-white')}
         {fila('💸', `Gastos hoy (${resumen.nGastos})`, formatearSoles(resumen.gastosEfectivo + resumen.gastosDigital), 'text-orange-300')}
         {/* 🛵 FASE Q: tu paga por pedidos — solo con la temporada FASE D
-            activa y entregas hechas; con S/0 la caja se ve igual que siempre */}
+            activa y entregas hechas; con S/0 la caja se ve igual que siempre.
+            💰 FASE BF: los rechazados en puerta pagan el MEDIO y van
+            en la misma cifra (con su renglón aparte en el label). */}
         {pagoRuta.total > 0 &&
-          fila('🛵', `Tu paga (${pagoRuta.entregados} pedidos)`, formatearSoles(pagoRuta.total), 'text-amber-300')}
+          fila('🛵', `Tu paga (${pagoRuta.entregados} pedidos${pagoRuta.cantidadRechazados > 0 ? ` + ${pagoRuta.cantidadRechazados} al medio` : ''})`, formatearSoles(pagoRuta.total), 'text-amber-300')}
+        {pagoRuta.cantidadRechazados > 0 && (
+          <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
+            💰 los rechazados en puerta pagan el MEDIO: S/ {(cfgPago.tarifaNormal / 2).toFixed(2)} normal · S/ {(cfgPago.tarifaLejos / 2).toFixed(2)} lejos — ya está adentro de la cifra de arriba.
+          </p>
+        )}
         <div className="border-t border-slate-700/60 my-1.5" />
         {fila('🧮', 'Deberías tener en el bolsillo', formatearSoles(resumen.esperado), 'text-cyan-300 text-base')}
         <p className="text-[9px] text-slate-600 leading-tight mt-1.5">
@@ -1052,7 +1062,7 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               {/* 🛵 FASE Q/S: tu paga se descuenta ANTES de entregar —
                   FASE S: del YAPE primero, el efectivo va completo */}
               {cuadreHoy.loTuyo > 0 &&
-                fila('🛵', `Te quedás de tu ruta (${(cierreHoy!.pagoRuta?.cantidadNormal || 0) + (cierreHoy!.pagoRuta?.cantidadLejos || 0) || cierreHoy!.entregas} pedidos)`, formatearSoles(cuadreHoy.loTuyo), 'text-amber-300')}
+                fila('🛵', `Te quedás de tu ruta (${(cierreHoy!.pagoRuta?.cantidadNormal || 0) + (cierreHoy!.pagoRuta?.cantidadLejos || 0) + (cierreHoy!.pagoRuta?.cantidadRechazados || 0) || cierreHoy!.entregas} pedidos)`, formatearSoles(cuadreHoy.loTuyo), 'text-amber-300')}
               {fila('🤲', 'Le entregás en efectivo', formatearSoles(cuadreHoy.efectivo), 'text-emerald-300')}
               {fila('📲', cuadreHoy.loTuyo > 0 ? 'Depositás por Yape (tu paga ya restada)' : 'Depositás por Yape', formatearSoles(cuadreHoy.yape), 'text-violet-300')}
               {cuadreHoy.teDebe > 0 &&

@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.31 (📅 LA FECHA DE LA CAJA SE ELIGE: si terminaste tu ruta y se te olvidó cerrar caja, al día siguiente podés elegir el día correcto en el formulario de cierre — se guarda con ESA fecha, congela los gastos de ese día y hoy queda libre para tu ruta nueva · 📅 CAMBIAR LA FECHA DE UNA CAJA YA CERRADA: el botón «Cambiar la fecha de esta caja» re-fechara un cierre sin tocar los números, por si ya la habías cerrado con el día equivocado · Lima, PE
+DriverTrack v0.11.32 (💰 EL RECHAZADO EN PUERTA PAGA EL MEDIO: si llegás a un pedido y el cliente lo rechaza, te paga la mitad de la carrera — S/4.50 los normales de S/9, S/6.00 los lejanos de S/12 · entra solo en tu paga de la caja (renglón «+N al medio»), en el cuadre al jefe y en el resumen del MATE · el chip S/9⇄S/12 de la ruta muestra el MEDIO en los rechazados · los demás fallidos (fallida, ausente, no contesta, cancelado) siguen sin pagar · Lima, PE
       </p>
     </div>
   );

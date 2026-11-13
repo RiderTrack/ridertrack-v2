@@ -10,6 +10,12 @@
 // Reglas:
 //   · Solo cuentan los pedidos ENTREGADOS (ST_ENTREGADOS):
 //     pendientes y fallidos no pagan.
+//   · 💰 FASE BF: el pedido RECHAZADO en puerta (st 'rechazado')
+//     paga el MEDIO: la mitad de su tarifa (S/4.50 normal, S/6.00
+//     lejos). Los demás fallidos (fallida, ausente, no-contesta,
+//     cancelado) siguen en cero — así podés elegir el estado que
+//     refleje lo que de verdad pasó (Rudy: «el cliente lo rechazó
+//     pero me pagó la mitad»).
 //   · "Lejos" se decide así:
 //       1. Marca MANUAL del rider (cliente.lejos === true|false)
 //          → manda sobre todo lo demás.
@@ -20,6 +26,7 @@
 //     exactamente igual que antes de la FASE D (temporada OFF).
 //
 //   total = normales × tarifaNormal + lejanos × tarifaLejos
+//         + rechazados × el MEDIO (FASE BF)
 //   aEntregar = efectivoCobrado − total   (si < 0: la empresa
 //   te debe la diferencia)
 // ═══════════════════════════════════════════════════════════
@@ -60,12 +67,16 @@ export interface ResumenPagoPedidos {
   cantidadNormal: number;
   /** pedidos entregados que cobran tarifa lejos */
   cantidadLejos: number;
-  /** entregados totales (normal + lejos) */
+  /** 💰 FASE BF: pedidos rechazados en puerta (pagan el MEDIO) */
+  cantidadRechazados: number;
+  /** entregados totales (normal + lejos) — los rechazados van aparte */
   entregados: number;
   /** S/ de los normales */
   montoNormal: number;
   /** S/ de los lejanos */
   montoLejos: number;
+  /** 💰 FASE BF: S/ de los rechazados (la mitad de su tarifa) */
+  montoRechazados: number;
   /** S/ total que te corresponde por pedidos hoy */
   total: number;
 }
@@ -111,15 +122,16 @@ export function esLejos(cliente: ClientePagoLike, config: ConfigPagoPedidos): bo
 
 /**
  * Calcular el pago por pedidos del día.
- * Solo ENTREGADOS pagan; con activo=false devuelve todo en cero.
+ * Entregados pagan entero; 💰 FASE BF: el rechazado en puerta paga
+ * el MEDIO (la mitad de su tarifa). Con activo=false → todo en cero.
  */
 export function calcularPagoPedidos(
   clientes: ClientePagoLike[],
   config: ConfigPagoPedidos
 ): ResumenPagoPedidos {
   const res: ResumenPagoPedidos = {
-    cantidadNormal: 0, cantidadLejos: 0, entregados: 0,
-    montoNormal: 0, montoLejos: 0, total: 0,
+    cantidadNormal: 0, cantidadLejos: 0, cantidadRechazados: 0, entregados: 0,
+    montoNormal: 0, montoLejos: 0, montoRechazados: 0, total: 0,
   };
   if (!config.activo) return res;
 
@@ -128,7 +140,14 @@ export function calcularPagoPedidos(
 
   for (const c of clientes || []) {
     const st = String(c?.st || 'pendiente');
-    if (!ST_ENTREGADOS.includes(st)) continue; // pendientes/fallidos no pagan
+    // 💰 FASE BF: rechazado en puerta → paga el MEDIO (la mitad de
+    // su tarifa, lejos incluido). NO cuenta como entregado.
+    if (st === 'rechazado') {
+      res.cantidadRechazados++;
+      res.montoRechazados += (esLejos(c, config) ? tarifaLejos : tarifaNormal) / 2;
+      continue;
+    }
+    if (!ST_ENTREGADOS.includes(st)) continue; // pendientes/otros fallidos no pagan
     res.entregados++;
     if (esLejos(c, config)) {
       res.cantidadLejos++;
@@ -140,7 +159,8 @@ export function calcularPagoPedidos(
   }
   res.montoNormal = redondear(res.montoNormal);
   res.montoLejos = redondear(res.montoLejos);
-  res.total = redondear(res.montoNormal + res.montoLejos);
+  res.montoRechazados = redondear(res.montoRechazados);
+  res.total = redondear(res.montoNormal + res.montoLejos + res.montoRechazados);
   return res;
 }
 

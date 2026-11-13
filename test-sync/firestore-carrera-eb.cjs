@@ -402,9 +402,11 @@ function calcularPagoPedidos(clientes, config) {
   const res = {
     cantidadNormal: 0,
     cantidadLejos: 0,
+    cantidadRechazados: 0,
     entregados: 0,
     montoNormal: 0,
     montoLejos: 0,
+    montoRechazados: 0,
     total: 0
   };
   if (!config.activo) return res;
@@ -412,6 +414,11 @@ function calcularPagoPedidos(clientes, config) {
   const tarifaLejos = numeroValido(config.tarifaLejos) ? config.tarifaLejos : PAGO_PEDIDOS_DEFAULT.tarifaLejos;
   for (const c of clientes || []) {
     const st = String(c?.st || "pendiente");
+    if (st === "rechazado") {
+      res.cantidadRechazados++;
+      res.montoRechazados += (esLejos(c, config) ? tarifaLejos : tarifaNormal) / 2;
+      continue;
+    }
     if (!ST_ENTREGADOS3.includes(st)) continue;
     res.entregados++;
     if (esLejos(c, config)) {
@@ -424,7 +431,8 @@ function calcularPagoPedidos(clientes, config) {
   }
   res.montoNormal = redondear(res.montoNormal);
   res.montoLejos = redondear(res.montoLejos);
-  res.total = redondear(res.montoNormal + res.montoLejos);
+  res.montoRechazados = redondear(res.montoRechazados);
+  res.total = redondear(res.montoNormal + res.montoLejos + res.montoRechazados);
   return res;
 }
 var LS_KEY = "rt_pago_pedidos";

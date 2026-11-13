@@ -735,7 +735,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
         </button>
 
         {/* 🛵 FASE D: Cobro por pedido (temporada) — la empresa te
-            paga por pedido: S/9 normal, S/12 distrito lejano */}
+            paga por pedido: S/9 normal, S/12 distrito lejano; 💰 FASE BF:
+            rechazado en puerta = el MEDIO (S/4.50 / S/6.00) */}
         <button
           onClick={() => setPagoAbierto((v) => !v)}
           className="text-left p-4 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all active:scale-95 group"
@@ -750,7 +751,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast, onNavig
                 Cobro por pedido {cfgPago.activo && <span className="text-amber-400">· ACTIVO</span>}
               </div>
               <div className="text-[11px] text-slate-400">
-                Temporada: S/{cfgPago.tarifaNormal} por pedido, S/{cfgPago.tarifaLejos} en distrito lejano
+                Temporada: S/{cfgPago.tarifaNormal} por pedido, S/{cfgPago.tarifaLejos} en distrito lejano, S/{(cfgPago.tarifaNormal / 2).toFixed(2)} si lo rechazan en puerta (el medio)
               </div>
             </div>
             <ChevronRight className={`w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-all ${pagoAbierto ? 'rotate-90' : ''}`} />

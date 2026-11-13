@@ -314,24 +314,25 @@ var VARIABLES_CUADRE = [
   { clave: "efectivo", ej: "S/ 300.00" },
   { clave: "yape", ej: "S/ 882.37" },
   { clave: "total", ej: "S/ 1182.37" },
-  { clave: "loTuyo", ej: "\u{1F6F5} Mi paga de la ruta (10 pedidos): S/ 90.00 \u2014 ya descontada del Yape (vac\xEDo si no hay)" },
+  { clave: "loTuyo", ej: "\u{1F6F5} Mi paga de la ruta (10 pedidos + 2 al medio): S/ 99.00 \u2014 ya descontada del Yape (vac\xEDo si no hay)" },
   { clave: "teDebe", ej: "\u26A0\uFE0F La empresa me queda debiendo: S/ 40.00 (vac\xEDo si no hay)" },
   { clave: "gastos", ej: "\xB7 gastos de la ruta: S/ 20.00 (2) \u2014 ya descontados (vac\xEDo si no hay)" },
   { clave: "empresa", ej: "\xB7 la empresa cobra directo: S/ 80.00 (vac\xEDo si no hay)" },
   { clave: "nota", ej: "\u{1F4DD} tu nota del cierre (vac\xEDo si no hay)" },
   // 💜 FASE BC: el detalle de pedidos que pidió Rudy — “cuántos
   // pedidos son de 9, cuántos de 12, cuántos fallidos”
-  { clave: "detallePedidos", ej: "\u{1F4E6} Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) \xB7 10 entregados \xB7 \u274C fallidos: 1 (vac\xEDo si no hubo)" },
+  { clave: "detallePedidos", ej: "\u{1F4E6} Pedidos: 8 de S/ 9 + 2 de S/ 12 (lejos) + 1 rechazado al medio (S/ 4.50) \xB7 10 entregados \xB7 \u274C fallidos: 1 (vac\xEDo si no hubo)" },
   { clave: "pedidos9", ej: "8 (los de tarifa normal)" },
   { clave: "pedidos12", ej: "2 (los de distrito lejano)" },
-  { clave: "fallidos", ej: "1 (fallida, rechazado, cancelado, ausente, no-contesta o reprogramar)" }
+  { clave: "medios", ej: "1 (rechazados en puerta: pagan la mitad)" },
+  { clave: "fallidos", ej: "1 (fallida, rechazado, cancelado, ausente, no-contesta o reprogramar \u2014 el rechazado te paga el medio)" }
 ];
 function aplicarPlantillaCuadre(texto, cierre, riderNombre) {
   const q = calcularCuadreEntrega(cierre);
   const mon = (n) => `S/ ${Math.max(0, n).toFixed(2)}`;
   const gastos = cierre.gastosEfectivo + cierre.gastosDigital;
   const pr = cierre.pagoRuta;
-  const nPedidos = (pr?.cantidadNormal || 0) + (pr?.cantidadLejos || 0);
+  const nPedidos = (pr?.cantidadNormal || 0) + (pr?.cantidadLejos || 0) + (pr?.cantidadRechazados || 0);
   const mapa = {
     nombre: riderNombre?.trim() || "Rider",
     fecha: fechaCorta(cierre.fecha),
@@ -348,13 +349,18 @@ function aplicarPlantillaCuadre(texto, cierre, riderNombre) {
     pedidos9: String(pr?.cantidadNormal ?? 0),
     pedidos12: String(pr?.cantidadLejos ?? 0),
     fallidos: String(cierre.fallidos ?? 0),
+    // 💰 FASE BF: rechazados en puerta (pagan el medio) — para plantillas propias
+    medios: String(pr?.cantidadRechazados ?? 0),
     detallePedidos: (() => {
       const fall = cierre.fallidos ?? 0;
       const entregados = cierre.entregas ?? 0;
       if (entregados <= 0 && fall <= 0) return "";
-      if (pr && (pr.cantidadNormal > 0 || pr.cantidadLejos > 0)) {
+      if (pr && (pr.cantidadNormal > 0 || pr.cantidadLejos > 0 || (pr.cantidadRechazados || 0) > 0)) {
         const partes = [`${pr.cantidadNormal} de S/ ${pr.tarifaNormal.toFixed(0)}`];
         if (pr.cantidadLejos > 0) partes.push(`${pr.cantidadLejos} de S/ ${pr.tarifaLejos.toFixed(0)} (lejos)`);
+        if ((pr.cantidadRechazados || 0) > 0) {
+          partes.push(`${pr.cantidadRechazados} rechazado${(pr.cantidadRechazados || 0) === 1 ? "" : "s"} al medio (S/ ${(pr.montoRechazados || 0).toFixed(2)})`);
+        }
         return `\u{1F4E6} Pedidos: ${partes.join(" + ")} \xB7 ${entregados} entregados \xB7 \u274C fallidos: ${fall}`;
       }
       return `\u{1F4E6} Pedidos: ${entregados} entregados \xB7 \u274C fallidos: ${fall}`;

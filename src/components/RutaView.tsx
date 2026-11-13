@@ -559,7 +559,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
   const estadosFallidos = [
     ['fallida', '❌', 'Fallida'],
     ['reprogramar', '🔄', 'Reprog.'],
-    ['rechazado', '🚫', 'Rechazado'],
+    ['rechazado', '🚫', 'Rechazado · medio'],
     ['ausente', '🚶', 'Ausente'],
     ['no-contesta', '📵', 'N.Cont.'],
     ['cancelado', '✖', 'Cancelado'],
@@ -778,7 +778,7 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
         'yape-plin': 'Yape/Plin', 'transferencia': 'Transferencia', 'pos': 'POS',
         'pago-link': 'Pago Link', 'jose-smith': 'J.Smith', 'cambio': 'Cambio', 'mixto': 'Mixto',
         'empresa': 'Empresa', 'fallida': 'Fallida', 'reprogramar': 'Reprogramado',
-        'rechazado': 'Rechazado', 'ausente': 'Ausente', 'no-contesta': 'No contesta', 'cancelado': 'Cancelado',
+        'rechazado': 'Rechazado (paga el medio)', 'ausente': 'Ausente', 'no-contesta': 'No contesta', 'cancelado': 'Cancelado',
       };
       return pagos[st] || st;
     };
@@ -2086,19 +2086,29 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                         e.stopPropagation();
                         const actual = esLejos(c, cfgPago);
                         toggleLejos(c.id, actual);
+                        // 💰 FASE BF: si el pedido está RECHAZADO, el toggle
+                        // mueve el MEDIO (la mitad de la tarifa)
                         onShowToast?.(
                           actual ? '🛵 Pago normal' : '🛵 Pago LEJOS',
-                          actual
-                            ? `${c.nombre || 'Cliente'} vuelve a S/${cfgPago.tarifaNormal}`
-                            : `${c.nombre || 'Cliente'} ahora cobra S/${cfgPago.tarifaLejos}`,
+                          c.st === 'rechazado'
+                            ? actual
+                              ? `${c.nombre || 'Cliente'} rechazado: te pagan el medio S/${(cfgPago.tarifaNormal / 2).toFixed(2)}`
+                              : `${c.nombre || 'Cliente'} rechazado y LEJOS: te pagan el medio S/${(cfgPago.tarifaLejos / 2).toFixed(2)}`
+                            : actual
+                              ? `${c.nombre || 'Cliente'} vuelve a S/${cfgPago.tarifaNormal}`
+                              : `${c.nombre || 'Cliente'} ahora cobra S/${cfgPago.tarifaLejos}`,
                           'info'
                         );
                       }}
                       data-testid={`btn-lejos-${c.id}`}
                       title={
-                        esLejos(c, cfgPago)
-                          ? `Cobra S/${cfgPago.tarifaLejos} (lejos) — tocá para volver a S/${cfgPago.tarifaNormal}`
-                          : `Cobra S/${cfgPago.tarifaNormal} — tocá si es distrito lejano (S/${cfgPago.tarifaLejos})`
+                        c.st === 'rechazado'
+                          ? esLejos(c, cfgPago)
+                            ? `Rechazado en puerta: paga el MEDIO S/${(cfgPago.tarifaLejos / 2).toFixed(2)} (lejano) — tocá para volver al medio de S/${(cfgPago.tarifaNormal / 2).toFixed(2)}`
+                            : `Rechazado en puerta: paga el MEDIO S/${(cfgPago.tarifaNormal / 2).toFixed(2)} — tocá si era lejano (medio S/${(cfgPago.tarifaLejos / 2).toFixed(2)})`
+                          : esLejos(c, cfgPago)
+                            ? `Cobra S/${cfgPago.tarifaLejos} (lejos) — tocá para volver a S/${cfgPago.tarifaNormal}`
+                            : `Cobra S/${cfgPago.tarifaNormal} — tocá si es distrito lejano (S/${cfgPago.tarifaLejos})`
                       }
                       className={`shrink-0 px-2 py-1.5 rounded-lg border text-[11px] font-black transition-all active:scale-90 ${
                         esLejos(c, cfgPago)
@@ -2106,7 +2116,9 @@ export const RutaView: React.FC<RutaViewProps> = ({ onShowToast }) => {
                           : 'bg-slate-900/60 border-slate-600 text-slate-400'
                       }`}
                     >
-                      S/{esLejos(c, cfgPago) ? cfgPago.tarifaLejos : cfgPago.tarifaNormal}
+                      {c.st === 'rechazado'
+                        ? <>S/{((esLejos(c, cfgPago) ? cfgPago.tarifaLejos : cfgPago.tarifaNormal) / 2).toFixed(2)} <span className="text-[8px] font-bold opacity-70">medio</span></>
+                        : <>S/{esLejos(c, cfgPago) ? cfgPago.tarifaLejos : cfgPago.tarifaNormal}</>}
                     </button>
                   )}
 

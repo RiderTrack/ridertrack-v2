@@ -81,7 +81,7 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
   // Estados de resolución REALES del ecosistema (st de Firestore)
   const resolutionStatuses = [
     { id: 'cancelado', label: 'Cancelado por Cliente', icon: XCircle },
-    { id: 'rechazado', label: 'Rechazado en Puerta', icon: AlertTriangle },
+    { id: 'rechazado', label: 'Rechazado en Puerta (paga el medio)', icon: AlertTriangle },
     { id: 'fallida', label: 'Entrega Fallida', icon: AlertTriangle },
     { id: 'ausente', label: 'Cliente Ausente', icon: UserX },
     { id: 'no-contesta', label: 'No Contesta', icon: PhoneOff },
