@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 💜 YAPE — SERVICIO (FASE BG · v0.11.33)
+// 💜 YAPE — SERVICIO (FASE BH · v0.11.34)
 // Tus dos Yapes (el personal y el de la empresa) en un toque.
 //
 // DÓNDE VIVE TODO (mismo patrón que caja.ts):
@@ -28,6 +28,7 @@ import {
   BORRADO_YAPE_VACIO,
   CuentaYape,
   MovimientoYape,
+  OrigenYape,
   TipoMovYape,
   compactarMovs,
   filtrarBorradosYape,
@@ -331,6 +332,9 @@ export interface DatosMovimiento {
    * mueven las dos — la cuenta se ignora */
   cuenta?: CuentaYape;
   monto: number;
+  /** 💜 FASE BH: origen del chape personal (inDriver / empresa
+   * — "me llamaron, ¿de dónde?"). Se ignora en los demás tipos. */
+  origen?: OrigenYape;
   nota?: string;
 }
 
@@ -352,6 +356,11 @@ export async function agregarMovimiento(uid: string, datos: DatosMovimiento): Pr
     tipo: datos.tipo,
     monto,
   };
+  // 💜 FASE BH: el origen solo viaja en los chapes personales
+  if (datos.tipo === 'chape' && mov.cuenta === 'personal' &&
+      (datos.origen === 'indriver' || datos.origen === 'empresa')) {
+    mov.origen = datos.origen;
+  }
   const nota = (datos.nota || '').trim().slice(0, 80);
   if (nota) mov.nota = nota;
 

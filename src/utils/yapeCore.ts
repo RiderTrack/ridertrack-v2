@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 💜 YAPE CORE — RiderTrack V2 (FASE BG · v0.11.33)
+// 💜 YAPE CORE — RiderTrack V2 (FASE BH · v0.11.34)
 // Tus dos Yapes en un solo vistazo: el PERSONAL (tu cuenta) y
 // el de la EMPRESA. Núcleo PURO de cálculo, sin Firebase ni
 // React (mismo patrón que cajaCore) → se testea con Node
@@ -7,15 +7,25 @@
 //
 // La plata se anota como MOVIMIENTOS y el saldo SIEMPRE sale de
 // la suma (nada se guarda suelto → nunca se des-cuadra):
-//   · 💜 chape     → te yapearon plata (de una carrera…) → tu Yape +
+//   · 💜 chape     → te yapearon plata → tu Yape + (o el de la
+//                    empresa, si un cliente pagó productos)
 //   · 💸 gasto     → gastaste de un Yape (gasolina, comida…) → −
-//   · 🏦 deposito  → pasaste plata de TU Yape al de la empresa
-//                    (lo que ganó la empresa contigo) → tú − / empresa +
+//   · 🏦 deposito  → 💜 FASE BH: pasaste la plata del Yape de la
+//                    EMPRESA a la cuenta de la empresa (ellos)
+//                    → empresa −. Los depósitos viejos (≤0.11.33)
+//                    se guardaron con cuenta=personal y conservan
+//                    su efecto antiguo (−tuyas / +empresa) → el
+//                    saldo de lo ya anotado NUNCA se rompe
 //   · 💵 retiro    → sacaste plata del Yape de la empresa al tuyo
 //   · ⚙️ ajuste    → "fijar saldo": cuadra con la app de Yape
 //
-//   saldo personal = chapes + retiros − gastos − depósitos + ajustes
-//   saldo empresa  = depósitos − retiros − gastos + ajustes
+//   saldo personal = yapes + retiros − gastos − depósitos viejos + ajustes
+//   saldo empresa  = yapes de clientes + depósitos viejos −
+//                    depósitos − retiros − gastos + ajustes
+//
+// ⚠️ NOMBRES INTERNOS: el tipo 'chape' se llama así por
+// compatibilidad con la data ya guardada (v0.11.33) — en
+// pantalla siempre dice «te yapearon».
 // ═══════════════════════════════════════════════════════════
 
 import { fechaLocalDe } from './cajaCore';
@@ -28,6 +38,13 @@ export type CuentaYape = 'personal' | 'empresa';
 /** qué le pasó a la plata */
 export type TipoMovYape = 'chape' | 'gasto' | 'deposito' | 'retiro' | 'ajuste';
 
+/** 💜 FASE BH: de dónde salió la plata que te yapearon al
+ *  Yape PERSONAL — "me llamaron, ¿de inDriver o de la
+ *  empresa?". Solo aplica a chapes de la cuenta personal
+ *  (los clientes que pagan productos van al Yape de la
+ *  empresa y no llevan origen). */
+export type OrigenYape = 'indriver' | 'empresa';
+
 /** Un movimiento de plata en los Yapes */
 export interface MovimientoYape {
   /** id único (prefijo anti-colisión con la nube) */
@@ -39,6 +56,8 @@ export interface MovimientoYape {
   tipo: TipoMovYape;
   /** S/ del movimiento (positivo; el ajuste puede ser negativo) */
   monto: number;
+  /** 💜 FASE BH: origen del chape (solo chapes personales) */
+  origen?: OrigenYape;
   /** concepto libre corto ("de la carrera de San Juan", "gasolina") */
   nota?: string;
 }
@@ -47,10 +66,20 @@ export interface MovimientoYape {
 export interface ResumenYape {
   saldoPersonal: number;
   saldoEmpresa: number;
-  /** 💜 S/ que te chapearon HOY */
+  /** 💜 S/ que te yapearon HOY (todas las cuentas) */
   hoyChapes: number;
-  /** cuántos chapes HOY */
+  /** cuántos yapes HOY (todas las cuentas) */
   hoyNChapes: number;
+  /** 💜 FASE BH — split de los yapes personales de HOY:
+   *  de inDriver (carreras) vs de tu trabajo en la empresa */
+  hoyChapesIndriver: number;
+  hoyNChapesIndriver: number;
+  hoyChapesTrabajo: number;
+  hoyNChapesTrabajo: number;
+  /** 🛍️ FASE BH — clientes que pagaron productos de HOY al
+   *  Yape de la empresa */
+  hoyChapesClientes: number;
+  hoyNChapesClientes: number;
   /** 🏦 S/ depositados a la empresa HOY */
   hoyDepositado: number;
   /** 💵 S/ retirados de la empresa HOY */
@@ -70,14 +99,21 @@ export function efectoDe(m: MovimientoYape): { personal: number; empresa: number
   const monto = Number(m.monto) || 0;
   switch (m.tipo) {
     case 'chape':
-      // te yapearon → entra a TU Yape
-      return { personal: monto, empresa: 0 };
+      // te yapearon → entra a esa cuenta (💜 FASE BH: puede ser
+      // un cliente pagando productos al Yape de la empresa)
+      return m.cuenta === 'empresa' ? { personal: 0, empresa: monto } : { personal: monto, empresa: 0 };
     case 'gasto':
       // gastaste de esa cuenta
       return m.cuenta === 'empresa' ? { personal: 0, empresa: -monto } : { personal: -monto, empresa: 0 };
     case 'deposito':
-      // pasaste plata de tu Yape al de la empresa
-      return { personal: -monto, empresa: monto };
+      // 💜 FASE BH: pasaste la plata del Yape de la EMPRESA a la
+      // cuenta de la empresa (ellos) → se descuenta del Yape de
+      // la empresa. Los depósitos VIEJOS (v0.11.33, cuenta=
+      // 'personal') conservan su efecto antiguo → el saldo de lo
+      // ya anotado no se rompe al actualizar.
+      return m.cuenta === 'empresa'
+        ? { personal: 0, empresa: -monto }
+        : { personal: -monto, empresa: monto };
     case 'retiro':
       // sacaste plata del Yape de la empresa al tuyo
       return { personal: monto, empresa: -monto };
@@ -109,6 +145,12 @@ export function resumenYape(movs: MovimientoYape[], hoyISO: string): ResumenYape
   const saldos = saldosYape(movs);
   let hoyChapes = 0;
   let hoyNChapes = 0;
+  let hoyChapesIndriver = 0;
+  let hoyNChapesIndriver = 0;
+  let hoyChapesTrabajo = 0;
+  let hoyNChapesTrabajo = 0;
+  let hoyChapesClientes = 0;
+  let hoyNChapesClientes = 0;
   let hoyDepositado = 0;
   let hoyRetirado = 0;
   let hoyGastoPersonal = 0;
@@ -120,6 +162,17 @@ export function resumenYape(movs: MovimientoYape[], hoyISO: string): ResumenYape
     if (m.tipo === 'chape') {
       hoyChapes += monto;
       hoyNChapes++;
+      // 💜 FASE BH: split por cuenta y origen
+      if (m.cuenta === 'empresa') {
+        hoyChapesClientes += monto;
+        hoyNChapesClientes++;
+      } else if (m.origen === 'empresa') {
+        hoyChapesTrabajo += monto;
+        hoyNChapesTrabajo++;
+      } else {
+        hoyChapesIndriver += monto;
+        hoyNChapesIndriver++;
+      }
     } else if (m.tipo === 'deposito') hoyDepositado += monto;
     else if (m.tipo === 'retiro') hoyRetirado += monto;
     else if (m.tipo === 'gasto') {
@@ -132,6 +185,12 @@ export function resumenYape(movs: MovimientoYape[], hoyISO: string): ResumenYape
     saldoEmpresa: saldos.empresa,
     hoyChapes,
     hoyNChapes,
+    hoyChapesIndriver,
+    hoyNChapesIndriver,
+    hoyChapesTrabajo,
+    hoyNChapesTrabajo,
+    hoyChapesClientes,
+    hoyNChapesClientes,
     hoyDepositado,
     hoyRetirado,
     hoyGastoPersonal,
@@ -146,7 +205,7 @@ export function resumenYape(movs: MovimientoYape[], hoyISO: string): ResumenYape
 export function infoTipoYape(tipo: TipoMovYape): { icono: string; nombre: string } {
   switch (tipo) {
     case 'chape':
-      return { icono: '💜', nombre: 'Te chapearon' };
+      return { icono: '💜', nombre: 'Te yapearon' };
     case 'gasto':
       return { icono: '💸', nombre: 'Gasto' };
     case 'deposito':
@@ -217,6 +276,9 @@ export function compactarMovs(movs: MovimientoYape[]): MovimientoYape[] {
 
 const TIPOS_VALIDOS: TipoMovYape[] = ['chape', 'gasto', 'deposito', 'retiro', 'ajuste'];
 
+/** 💜 FASE BH: orígenes válidos de un chape personal */
+const ORIGENES_VALIDOS: OrigenYape[] = ['indriver', 'empresa'];
+
 /** id de movimiento aleatorio (prefijo anti-colisión con remoto) */
 export function nuevoMovId(): string {
   return `y${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -249,6 +311,12 @@ function sanearMov(bruto: unknown): MovimientoYape | null {
   };
   const nota = String(o.nota || '').trim().slice(0, 80);
   if (nota) fuera.nota = nota;
+  // 💜 FASE BH: el origen solo viaja en los chapes personales
+  // (inDriver / tu trabajo); basura → se cae, no se inventa
+  if (tipo === 'chape' && cuenta === 'personal') {
+    const origen = (ORIGENES_VALIDOS as string[]).includes(String(o.origen)) ? (o.origen as OrigenYape) : null;
+    if (origen) fuera.origen = origen;
+  }
   return fuera;
 }
 

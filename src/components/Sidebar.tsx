@@ -43,9 +43,9 @@ import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
 // F3.39/3.40: 💰 caja del día — BOTÓN de menú (badge con el
 // esperado); el gestor completo vive en su modal
 import { CajaMenuBoton, CajaCard } from './CajaCard';
-// 💜 FASE BG: MIS YAPES — botón de menú (badge con tu saldo) y
+// 💜 FASE BG/BH: MIS YAPES — botón de menú (badge con tu saldo) y
 // el gestor completo en su modal: los dos Yapes (el tuyo y el
-// de la empresa), chapes del día, depósitos y gastos
+// de la empresa), yapes del día, depósitos y gastos
 import { YapeMenuBoton, YapeCard } from './YapeCard';
 // FASE C: la CAJA de inDrive (gastos en mano + neto libre) vive
 // dentro del mismo modal del Caja del día, abajo de la del trabajo
@@ -471,7 +471,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         isOpen={yapeGestionAbierto}
         onClose={() => setYapeGestionAbierto(false)}
         title="💜 Mi Yape"
-        subtitle="Tus dos Yapes: saldo, chapes, depósitos y gastos"
+        subtitle="Tus dos Yapes: saldo, yapes, depósitos y gastos"
         maxWidth="lg"
       >
         <YapeCard uid={uid} onShowToast={onShowToast} />

@@ -1,15 +1,21 @@
 // ═══════════════════════════════════════════════════════════
-// 💜 MI YAPE — UI (FASE BG · v0.11.33)
+// 💜 MI YAPE — UI (FASE BH · v0.11.34)
 // Tus dos Yapes vigilados sin abrir la app de Yape: el
 // PERSONAL (tu cuenta) y el de la EMPRESA. Dos piezas (patrón
 // F3.39/3.40 de la caja):
 //   · YapeCard      → gestor COMPLETO: saldos de las dos
-//                     cuentas, lo que pasó HOY (chapes,
+//                     cuentas, lo que pasó HOY (yapes de
+//                     inDriver / de tu trabajo / de clientes,
 //                     depósitos, gastos), anotar en 2 toques y
 //                     el historial de movimientos. Vive en el
 //                     MODAL del menú hamburguesa ☰.
 //   · YapeMenuBoton → fila del menú ☰ (icono + "Mi Yape" +
 //                     badge con tu saldo) — toca y abre.
+//
+// 💜 FASE BH: se dice «me yapearon» (el typo corregido), el depósito a la
+// empresa se DESCUENTA del Yape de la empresa, el chape lleva
+// origen (inDriver / tu trabajo / cliente) y los números van
+// BLANCOS y GRANDES para verse al sol.
 //
 // La plata vive en usuarios/{uid}.yape (servicio FASE W: se
 // sincroniza EN VIVO entre tus celulares, sin reglas nuevas).
@@ -34,6 +40,7 @@ import {
 import {
   CuentaYape,
   MovimientoYape,
+  OrigenYape,
   ResumenYape,
   TipoMovYape,
   infoTipoYape,
@@ -70,11 +77,23 @@ function parsearSoles(texto: string): number {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** fila icono + label + valor (la misma de la caja) */
+/** fila icono + label + valor (la misma de la caja) — 💜 FASE
+ *  BH: labels más claros y valores con color -400 (al sol los
+ *  -300 pastel se lavaban) */
 const fila = (icono: string, label: string, valor: string, extra = '') => (
   <div className="flex items-center justify-between py-1">
-    <span className="text-xs text-slate-400 truncate">{icono} {label}</span>
+    <span className="text-xs text-slate-200 truncate">{icono} {label}</span>
     <span className={`text-sm font-black tabular-nums ${extra || 'text-white'}`}>{valor}</span>
+  </div>
+);
+
+/** 💜 FASE BH: sub-fila del split de HOY (inDriver / trabajo /
+ *  clientes) — más chica e indentada, con número BLANCO y
+ *  negrita para verse al sol */
+const filaSub = (label: string, valor: string, extra = '') => (
+  <div className="flex items-center justify-between py-0.5 pl-1">
+    <span className="text-[11px] text-slate-300 truncate">{label}</span>
+    <span className={`text-xs font-black tabular-nums ${extra || 'text-white'}`}>{valor}</span>
   </div>
 );
 
@@ -100,10 +119,12 @@ const TarjetaCuenta: React.FC<{
       }`}
       data-testid={`yape-card-${cuenta}`}
     >
-      <p className={`text-[10px] uppercase tracking-wider font-bold ${esEmpresa ? 'text-sky-300' : 'text-violet-300'}`}>
+      <p className={`text-[10px] uppercase tracking-wider font-bold ${esEmpresa ? 'text-sky-400' : 'text-violet-400'}`}>
         {esEmpresa ? '🔷 Yape de la empresa' : '💜 Tu Yape (personal)'}
       </p>
-      <p className={`text-2xl font-black tabular-nums mt-1 ${esEmpresa ? 'text-sky-200' : 'text-violet-200'}`} data-testid={`yape-saldo-${cuenta}`}>
+      {/* 💜 FASE BH: el saldo BLANCO y GRANDE — al sol se tiene
+          que ver de una (los pastel -200 se lavaban) */}
+      <p className="text-3xl font-black tabular-nums mt-1 text-white" data-testid={`yape-saldo-${cuenta}`}>
         {formatearSoles(saldo)}
       </p>
       {fijando ? (
@@ -138,7 +159,7 @@ const TarjetaCuenta: React.FC<{
       ) : (
         <button
           onClick={onAbrirFijar}
-          className="mt-2 text-[10px] text-slate-500 hover:text-slate-300 underline transition-colors"
+          className="mt-2 text-[10px] text-slate-400 hover:text-slate-200 underline transition-colors"
           title="Cuadra este saldo con lo que muestra la app de Yape (crea un ajuste, el historial no se toca)"
           data-testid={`yape-abrir-fijar-${cuenta}`}
         >
@@ -202,6 +223,11 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
   // ── form de anotar ──
   const [tipo, setTipo] = useState<TipoMovYape>('chape');
   const [cuentaGasto, setCuentaGasto] = useState<CuentaYape>('personal');
+  // 💜 FASE BH: el chape también elige cuenta (¿te yapearon al
+  // tuyo o PAGÓ UN CLIENTE al de la empresa?) y, si es al
+  // tuyo, de dónde vino la plata (inDriver / tu trabajo)
+  const [cuentaChape, setCuentaChape] = useState<CuentaYape>('personal');
+  const [origenChape, setOrigenChape] = useState<OrigenYape>('indriver');
   const [montoInput, setMontoInput] = useState('');
   const [notaInput, setNotaInput] = useState('');
   const [guardando, setGuardando] = useState(false);
@@ -220,15 +246,35 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
     setGuardando(true);
     try {
       const info = infoTipoYape(tipo);
+      // 💜 FASE BH: cuenta/origen según lo que se está anotando:
+      //   · chape    → la cuenta elegida (+ origen si es personal)
+      //   · gasto    → la cuenta elegida
+      //   · deposito → SIEMPRE empresa (se descuenta del Yape
+      //                de la empresa — la plata es de ellos)
+      const cuentaFinal: CuentaYape =
+        tipo === 'gasto' ? cuentaGasto : tipo === 'chape' ? cuentaChape : tipo === 'deposito' ? 'empresa' : 'personal';
+      const origenFinal: OrigenYape | undefined =
+        tipo === 'chape' && cuentaChape === 'personal' ? origenChape : undefined;
       await agregarMovimiento(uid, {
         tipo,
-        cuenta: tipo === 'gasto' ? cuentaGasto : 'personal',
+        cuenta: cuentaFinal,
         monto,
+        origen: origenFinal,
         nota: notaInput,
       });
       setMontoInput('');
       setNotaInput('');
-      onShowToast?.(`${info.icono} Anotado`, `${info.nombre} — ${formatearSoles(monto)}`, 'success');
+      const detalle =
+        tipo === 'chape'
+          ? cuentaChape === 'empresa'
+            ? ' · cliente al Yape de la empresa'
+            : origenChape === 'indriver'
+              ? ' · de inDriver'
+              : ' · de tu trabajo'
+          : tipo === 'deposito'
+            ? ' · se descontó del Yape de la empresa'
+            : '';
+      onShowToast?.(`${info.icono} Anotado`, `${info.nombre}${detalle} — ${formatearSoles(monto)}`, 'success');
     } catch (e: any) {
       onShowToast?.('No se pudo anotar', e?.message || 'Quedó en el teléfono — reintenta', 'warning');
     } finally {
@@ -270,48 +316,63 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
     }
   };
 
-  /** una fila del historial */
+  /** una fila del historial — 💜 FASE BH: colores -400 y
+   *  nombres BLANCOS (al sol los pastel se lavaban) */
   const filaMov = (m: MovimientoYape, esHoy: boolean) => {
     const info = infoTipoYape(m.tipo);
     const monto = Math.abs(Number(m.monto) || 0);
     let montoTxt = '';
-    let color = 'text-slate-200';
+    let color = 'text-white';
     if (m.tipo === 'chape') {
       montoTxt = `+ ${formatearSoles(monto)}`;
-      color = 'text-emerald-300';
+      color = 'text-emerald-400';
     } else if (m.tipo === 'gasto') {
       montoTxt = `− ${formatearSoles(monto)}`;
-      color = 'text-red-300';
+      color = 'text-red-400';
     } else if (m.tipo === 'deposito') {
-      montoTxt = `↗ ${formatearSoles(monto)}`;
-      color = 'text-amber-300';
+      montoTxt = `− ${formatearSoles(monto)}`;
+      color = 'text-amber-400';
     } else if (m.tipo === 'retiro') {
-      montoTxt = `↘ ${formatearSoles(monto)}`;
-      color = 'text-sky-300';
+      montoTxt = `+ ${formatearSoles(monto)}`;
+      color = 'text-sky-400';
     } else {
       montoTxt = `${m.monto >= 0 ? '+' : '−'} ${formatearSoles(monto)}`;
-      color = 'text-slate-400';
+      color = 'text-white';
     }
     const sub =
       m.tipo === 'deposito'
-        ? ' · −tu Yape / +empresa'
+        ? m.cuenta === 'empresa'
+          ? ' · del Yape de la empresa'
+          : ' · (versión anterior: −tuyo / +empresa)'
         : m.tipo === 'retiro'
           ? ' · −empresa / +tu Yape'
           : m.tipo === 'gasto' && m.cuenta === 'empresa'
             ? ' · del Yape de la empresa'
             : '';
+    // 💜 FASE BH: el chape muestra de dónde vino
+    const origenTxt =
+      m.tipo === 'chape'
+        ? m.cuenta === 'empresa'
+          ? ' · 🛍 cliente'
+          : m.origen === 'indriver'
+            ? ' · 🚗 inDriver'
+            : m.origen === 'empresa'
+              ? ' · 🏢 tu trabajo'
+              : ''
+        : '';
     return (
       <div key={m.id} className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-2 py-1.5" data-testid={`yape-mov-${m.id}`}>
         <span className="text-sm w-5 text-center flex-shrink-0">{info.icono}</span>
-        <span className="text-[11px] text-slate-400 tabular-nums flex-shrink-0">
+        <span className="text-[11px] text-slate-300 tabular-nums flex-shrink-0">
           {esHoy ? horaCorta(m.ts) : fechaCorta(fechaLocalDe(m.ts))}
         </span>
-        <span className="text-xs text-slate-200 font-medium truncate flex-1 min-w-0">
+        <span className="text-xs text-white font-medium truncate flex-1 min-w-0">
           {m.tipo === 'gasto' ? (m.cuenta === 'empresa' ? 'Gasto empresa' : 'Gasto') : info.nombre}
-          {sub && <span className="text-slate-500">{sub}</span>}
-          {m.nota ? <span className="text-slate-500"> · {m.nota}</span> : null}
+          {origenTxt && <span className="text-slate-400 font-bold">{origenTxt}</span>}
+          {sub && <span className="text-slate-400">{sub}</span>}
+          {m.nota ? <span className="text-slate-400"> · {m.nota}</span> : null}
         </span>
-        <span className={`text-xs font-bold tabular-nums flex-shrink-0 ${color}`}>{montoTxt}</span>
+        <span className={`text-xs font-black tabular-nums flex-shrink-0 ${color}`}>{montoTxt}</span>
         <button
           onClick={() => void quitar(m.id)}
           className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-slate-700/50 transition-colors flex-shrink-0"
@@ -398,39 +459,104 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
 
       {/* ── lo que pasó HOY ── */}
       <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
-        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">📆 Hoy</p>
+        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-300 mb-1.5">📆 Hoy</p>
         {resumen.hoyN === 0 ? (
-          <p className="text-[10px] text-slate-600">Todavía no anotaste nada hoy.</p>
+          <p className="text-[10px] text-slate-500">Todavía no anotaste nada hoy.</p>
         ) : (
           <>
-            {fila('💜', `Te chapearon (${resumen.hoyNChapes})`, `+ ${formatearSoles(resumen.hoyChapes)}`, 'text-emerald-300')}
-            {resumen.hoyDepositado > 0 && fila('🏦', 'Depositaste a la empresa', formatearSoles(resumen.hoyDepositado), 'text-amber-300')}
-            {resumen.hoyRetirado > 0 && fila('💵', 'Retiraste de la empresa', formatearSoles(resumen.hoyRetirado), 'text-sky-300')}
-            {resumen.hoyGastoPersonal > 0 && fila('💸', 'Gastaste (tu Yape)', `− ${formatearSoles(resumen.hoyGastoPersonal)}`, 'text-red-300')}
-            {resumen.hoyGastoEmpresa > 0 && fila('💸', 'Gastaste (empresa)', `− ${formatearSoles(resumen.hoyGastoEmpresa)}`, 'text-red-300')}
+            {/* 💜 FASE BH: "me llamaron, ¿de inDriver o de la
+                empresa?" — el split al toque */}
+            {resumen.hoyNChapes > 0 && (
+              <>
+                {fila('💜', `Te yapearon (${resumen.hoyNChapes})`, `+ ${formatearSoles(resumen.hoyChapes)}`, 'text-emerald-400')}
+                <div className="rounded-lg bg-slate-800/60 px-2 py-0.5 my-0.5">
+                  {filaSub('🚗 de inDriver', `+ ${formatearSoles(resumen.hoyChapesIndriver)}`, 'text-emerald-400')}
+                  {filaSub('🏢 de tu trabajo', `+ ${formatearSoles(resumen.hoyChapesTrabajo)}`, 'text-emerald-400')}
+                  {resumen.hoyChapesClientes > 0 &&
+                    filaSub('🛍 clientes → Yape empresa', `+ ${formatearSoles(resumen.hoyChapesClientes)}`, 'text-emerald-400')}
+                </div>
+              </>
+            )}
+            {resumen.hoyDepositado > 0 &&
+              fila('🏦', 'Depositaste a la empresa', formatearSoles(resumen.hoyDepositado), 'text-amber-400')}
+            {resumen.hoyRetirado > 0 &&
+              fila('💵', 'Retiraste de la empresa', formatearSoles(resumen.hoyRetirado), 'text-sky-400')}
+            {resumen.hoyGastoPersonal > 0 &&
+              fila('💸', 'Gastaste (tu Yape)', `− ${formatearSoles(resumen.hoyGastoPersonal)}`, 'text-red-400')}
+            {resumen.hoyGastoEmpresa > 0 &&
+              fila('💸', 'Gastaste (empresa)', `− ${formatearSoles(resumen.hoyGastoEmpresa)}`, 'text-red-400')}
           </>
         )}
       </div>
 
       {/* ── anotar ── */}
       <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-3">
-        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2 flex items-center gap-1">
+        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-300 mb-2 flex items-center gap-1">
           <Coins className="w-3 h-3 text-violet-400" /> Anotar en 2 toques
         </p>
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setTipo('chape')} className={btnChip(tipo === 'chape')} data-testid="yape-chip-chape">
-            💜 Me chapearon
+            💜 Me yapearon
           </button>
           <button onClick={() => setTipo('gasto')} className={btnChip(tipo === 'gasto')} data-testid="yape-chip-gasto">
             💸 Gasté
           </button>
           <button onClick={() => setTipo('deposito')} className={btnChip(tipo === 'deposito')} data-testid="yape-chip-deposito">
-            🏦 Deposité a empresa
+            🏦 Deposité a la empresa
           </button>
           <button onClick={() => setTipo('retiro')} className={btnChip(tipo === 'retiro')} data-testid="yape-chip-retiro">
-            💵 Retiré de empresa
+            💵 Retiré de la empresa
           </button>
         </div>
+        {/* 💜 FASE BH — el yape elige cuenta: ¿te yapearon al
+            tuyo o PAGÓ UN CLIENTE al Yape de la empresa? Y si
+            es al tuyo, ¿de inDriver o de tu trabajo? */}
+        {tipo === 'chape' && (
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-slate-400 font-bold">¿a cuál Yape?</span>
+              <button
+                onClick={() => setCuentaChape('personal')}
+                className={cuentaChape === 'personal' ? 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-violet-600 border-violet-500 text-white' : 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-300'}
+                data-testid="yape-chape-cuenta-personal"
+              >
+                💜 el tuyo
+              </button>
+              <button
+                onClick={() => setCuentaChape('empresa')}
+                className={cuentaChape === 'empresa' ? 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-sky-600 border-sky-500 text-white' : 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-300'}
+                data-testid="yape-chape-cuenta-empresa"
+              >
+                🔷 empresa (clientes)
+              </button>
+            </div>
+            {cuentaChape === 'personal' && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-slate-400 font-bold">¿de dónde?</span>
+                <button
+                  onClick={() => setOrigenChape('indriver')}
+                  className={origenChape === 'indriver' ? 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-emerald-600 border-emerald-500 text-white' : 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-300'}
+                  data-testid="yape-chape-origen-indriver"
+                >
+                  🚗 inDriver
+                </button>
+                <button
+                  onClick={() => setOrigenChape('empresa')}
+                  className={origenChape === 'empresa' ? 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-amber-600 border-amber-500 text-white' : 'px-2 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-300'}
+                  data-testid="yape-chape-origen-empresa"
+                >
+                  🏢 mi trabajo
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {/* 💜 FASE BH: el depósito sale del Yape de la EMPRESA */}
+        {tipo === 'deposito' && (
+          <p className="text-[10px] text-slate-400 mt-2">
+            🔷 Se descuenta del <b>Yape de la empresa</b> (la plata de los clientes es de ellos — al final de la ruta le pasás lo juntado)
+          </p>
+        )}
         {tipo === 'gasto' && (
           <div className="flex items-center gap-1.5 mt-2">
             <span className="text-[10px] text-slate-500 font-bold">¿de cuál Yape?</span>
@@ -466,12 +592,14 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
             className={`${inputTexto} flex-1 min-w-0`}
             placeholder={
               tipo === 'chape'
-                ? '¿de qué carrera? (opcional)'
+                ? cuentaChape === 'empresa'
+                  ? '¿qué pagó el cliente? (opcional)'
+                  : origenChape === 'indriver'
+                    ? '¿de qué carrera? (opcional)'
+                    : '¿qué te pagó la empresa? (opcional)'
                 : tipo === 'gasto'
                   ? '¿en qué? (opcional — gasolina, comida…)'
-                  : tipo === 'deposito'
-                    ? 'nota (opcional)'
-                    : 'nota (opcional)'
+                  : 'nota (opcional)'
             }
             value={notaInput}
             onChange={(e) => setNotaInput(e.target.value)}
@@ -496,7 +624,7 @@ export const YapeCard: React.FC<YapeCardProps> = ({ uid, onShowToast }) => {
         <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">💜 Movimientos de hoy</p>
         {vacio ? (
           <p className="text-[10px] text-slate-600 leading-relaxed">
-            Sin movimientos aún. Empezá con <b>✏️ fijar saldo</b> (lo que tenés ahora en la app de Yape) y después anotá cada chape, gasto o depósito — el balance se arma solo.
+            Sin movimientos aún. Empezá con <b>✏️ fijar saldo</b> (lo que tenés ahora en la app de Yape) y después anotá cada yape, gasto o depósito — el balance se arma solo.
           </p>
         ) : movsHoy.length === 0 ? (
           <p className="text-[10px] text-slate-600">Nada anotado hoy — abajo están los días anteriores.</p>
@@ -567,7 +695,7 @@ export const YapeMenuBoton: React.FC<YapeMenuBotonProps> = ({ uid, colapsado, on
       title={
         colapsado
           ? 'Mi Yape'
-          : `Tu Yape 💜 ${formatearSoles(saldos.personal)} · empresa 🔷 ${formatearSoles(saldos.empresa)} — toca para anotar chapes, gastos y depósitos`
+          : `Tu Yape 💜 ${formatearSoles(saldos.personal)} · empresa 🔷 ${formatearSoles(saldos.empresa)} — toca para anotar yapes, gastos y depósitos`
       }
       className="group relative flex items-center w-full px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 active:scale-[0.98]"
       data-testid="yape-menu-boton"

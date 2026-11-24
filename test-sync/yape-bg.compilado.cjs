@@ -143,11 +143,11 @@ function efectoDe(m) {
   const monto = Number(m.monto) || 0;
   switch (m.tipo) {
     case "chape":
-      return { personal: monto, empresa: 0 };
+      return m.cuenta === "empresa" ? { personal: 0, empresa: monto } : { personal: monto, empresa: 0 };
     case "gasto":
       return m.cuenta === "empresa" ? { personal: 0, empresa: -monto } : { personal: -monto, empresa: 0 };
     case "deposito":
-      return { personal: -monto, empresa: monto };
+      return m.cuenta === "empresa" ? { personal: 0, empresa: -monto } : { personal: -monto, empresa: monto };
     case "retiro":
       return { personal: monto, empresa: -monto };
     case "ajuste":
@@ -203,6 +203,7 @@ function compactarMovs(movs) {
   return fuera.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 var TIPOS_VALIDOS = ["chape", "gasto", "deposito", "retiro", "ajuste"];
+var ORIGENES_VALIDOS = ["indriver", "empresa"];
 function nuevoMovId() {
   return `y${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -227,6 +228,10 @@ function sanearMov(bruto) {
   };
   const nota = String(o.nota || "").trim().slice(0, 80);
   if (nota) fuera.nota = nota;
+  if (tipo === "chape" && cuenta === "personal") {
+    const origen = ORIGENES_VALIDOS.includes(String(o.origen)) ? o.origen : null;
+    if (origen) fuera.origen = origen;
+  }
   return fuera;
 }
 function normalizarMovs(bruto) {
@@ -471,6 +476,9 @@ async function agregarMovimiento(uid, datos) {
     tipo: datos.tipo,
     monto
   };
+  if (datos.tipo === "chape" && mov.cuenta === "personal" && (datos.origen === "indriver" || datos.origen === "empresa")) {
+    mov.origen = datos.origen;
+  }
   const nota = (datos.nota || "").trim().slice(0, 80);
   if (nota) mov.nota = nota;
   estado = normalizar({ ...estado, movs: [mov, ...estado.movs] });

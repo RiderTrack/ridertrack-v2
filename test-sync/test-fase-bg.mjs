@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// 💜 TEST FASE BG — v0.11.33
+// 💜 TEST FASE BG — v0.11.34
 // 1) MI YAPE: los dos Yapes (personal + empresa) — saldos,
 //    chapes, depósitos, gastos, fijar-saldo, sync vivo.
 // 2) REABRIR la caja de DÍAS PASADOS (ayer, anteayer…).
@@ -16,7 +16,7 @@
 //       cierre de ese día + tombstone + anti-resurrección +
 //       regresión (sin fecha → HOY, fecha inexistente → no-op)
 //   G5. contrato de fuente: YapeCard/Sidebar/caja.ts/CajaCard
-//       + versiones 0.11.33
+//       + versiones 0.11.34
 // ═══════════════════════════════════════════════════════════
 import { createRequire } from 'module';
 import path from 'path';
@@ -410,8 +410,10 @@ console.log('\n▶ G5 — contrato de fuente (YapeCard / Sidebar / caja.ts / Caj
   ok('SV yape: escucha en vivo (FASE W)', svYape.includes('onSnapshot'));
   ok('SV yape: fijarSaldo exportado', /export async function fijarSaldo/.test(svYape));
 
-  ok('package.json → 0.11.33', pkg.includes('"version": "0.11.33"'));
-  ok('AjustesView muestra v0.11.33 con MI YAPE y REABRIR', aj.includes('v0.11.33') && aj.includes('MI YAPE') && aj.includes('REABRIR CAJA DE DÍAS PASADOS'));
+  ok('package.json → 0.11.34', pkg.includes('"version": "0.11.34"'));
+  // 💜 FASE BH: la versión siguió avanzando (0.11.34) — el texto de BG
+  // vive en el historial del repo; el guardian apunta a la actual
+  ok('AjustesView muestra v0.11.34 con MI YAPE', aj.includes('v0.11.34') && aj.includes('MI YAPE'));
 }
 
 console.log(`\n═══ FASE BG: ${pass} ✓ · ${fail} ✗ ═══`);

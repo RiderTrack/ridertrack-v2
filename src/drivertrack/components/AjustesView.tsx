@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.33 (💜 MI YAPE: nueva sección en el menú ☰ junto a la Caja — tus DOS Yapes vigilados sin abrir la app de Yape: el saldo de tu cuenta personal y el de la empresa, los chapes de cada carrera del día, lo que depositaste a la empresa y lo que gastaste, con «fijar saldo» para cuadrar con la app real · se sincroniza en vivo entre tus celulares · 🔓 REABRIR CAJA DE DÍAS PASADOS: la vista de otro día (chips de fecha) ahora tiene «Reabrir esta caja» — el de ayer o anteayer ya no queda cerrado para siempre, corregís el conteo o los gastos y la volvés a cerrar · Lima, PE
+DriverTrack v0.11.34 (💜 MI YAPE MEJORADO: ya no dice «chapearon» — dice «te yapearon»; el DEPÓSITO a la empresa ahora se DESCUENTA del Yape de la empresa (la plata de los clientes es de ellos); cada yape se anota con su origen — 🚗 de inDriver, 🏢 de tu trabajo o 🛍 de un cliente al Yape de la empresa — y el panel de HOY muestra el desglose al toque; números BLANCOS y más GRANDES para verse con el sol encima · Lima, PE
       </p>
     </div>
   );

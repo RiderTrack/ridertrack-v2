@@ -71,11 +71,11 @@ function efectoDe(m) {
   const monto = Number(m.monto) || 0;
   switch (m.tipo) {
     case "chape":
-      return { personal: monto, empresa: 0 };
+      return m.cuenta === "empresa" ? { personal: 0, empresa: monto } : { personal: monto, empresa: 0 };
     case "gasto":
       return m.cuenta === "empresa" ? { personal: 0, empresa: -monto } : { personal: -monto, empresa: 0 };
     case "deposito":
-      return { personal: -monto, empresa: monto };
+      return m.cuenta === "empresa" ? { personal: 0, empresa: -monto } : { personal: -monto, empresa: monto };
     case "retiro":
       return { personal: monto, empresa: -monto };
     case "ajuste":
@@ -99,6 +99,12 @@ function resumenYape(movs, hoyISO) {
   const saldos = saldosYape(movs);
   let hoyChapes = 0;
   let hoyNChapes = 0;
+  let hoyChapesIndriver = 0;
+  let hoyNChapesIndriver = 0;
+  let hoyChapesTrabajo = 0;
+  let hoyNChapesTrabajo = 0;
+  let hoyChapesClientes = 0;
+  let hoyNChapesClientes = 0;
   let hoyDepositado = 0;
   let hoyRetirado = 0;
   let hoyGastoPersonal = 0;
@@ -110,6 +116,16 @@ function resumenYape(movs, hoyISO) {
     if (m.tipo === "chape") {
       hoyChapes += monto;
       hoyNChapes++;
+      if (m.cuenta === "empresa") {
+        hoyChapesClientes += monto;
+        hoyNChapesClientes++;
+      } else if (m.origen === "empresa") {
+        hoyChapesTrabajo += monto;
+        hoyNChapesTrabajo++;
+      } else {
+        hoyChapesIndriver += monto;
+        hoyNChapesIndriver++;
+      }
     } else if (m.tipo === "deposito") hoyDepositado += monto;
     else if (m.tipo === "retiro") hoyRetirado += monto;
     else if (m.tipo === "gasto") {
@@ -122,6 +138,12 @@ function resumenYape(movs, hoyISO) {
     saldoEmpresa: saldos.empresa,
     hoyChapes,
     hoyNChapes,
+    hoyChapesIndriver,
+    hoyNChapesIndriver,
+    hoyChapesTrabajo,
+    hoyNChapesTrabajo,
+    hoyChapesClientes,
+    hoyNChapesClientes,
     hoyDepositado,
     hoyRetirado,
     hoyGastoPersonal,
@@ -132,7 +154,7 @@ function resumenYape(movs, hoyISO) {
 function infoTipoYape(tipo) {
   switch (tipo) {
     case "chape":
-      return { icono: "\u{1F49C}", nombre: "Te chapearon" };
+      return { icono: "\u{1F49C}", nombre: "Te yapearon" };
     case "gasto":
       return { icono: "\u{1F4B8}", nombre: "Gasto" };
     case "deposito":
@@ -182,6 +204,7 @@ function compactarMovs(movs) {
   return fuera.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 var TIPOS_VALIDOS = ["chape", "gasto", "deposito", "retiro", "ajuste"];
+var ORIGENES_VALIDOS = ["indriver", "empresa"];
 function nuevoMovId() {
   return `y${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -206,6 +229,10 @@ function sanearMov(bruto) {
   };
   const nota = String(o.nota || "").trim().slice(0, 80);
   if (nota) fuera.nota = nota;
+  if (tipo === "chape" && cuenta === "personal") {
+    const origen = ORIGENES_VALIDOS.includes(String(o.origen)) ? o.origen : null;
+    if (origen) fuera.origen = origen;
+  }
   return fuera;
 }
 function normalizarMovs(bruto) {
