@@ -187,10 +187,10 @@ console.log('\n7) 🔌 RutaView + acción al bot — TODO viaja pegado (lección
 console.log('\n8) 🔢 versión y changelog');
 {
   const pkg = leer('../package.json');
-  // 💰 FASE BF: versión actual 0.11.32
-check('package.json → 0.11.32', pkg.includes('"version": "0.11.32"'));
+  // 💜 FASE BG: versión actual 0.11.33
+check('package.json → 0.11.33', pkg.includes('"version": "0.11.33"'));
   const aj = leer('../src/drivertrack/components/AjustesView.tsx');
-  check('AjustesView muestra la versión actual (0.11.32, FASE BF)', aj.includes('v0.11.32') && aj.includes('PAGA EL MEDIO'));
+  check('AjustesView muestra la versión actual (0.11.33, FASE BG)', aj.includes('v0.11.33') && aj.includes('MI YAPE'));
   const fs2 = leer('../src/services/firestore.ts');
   check('ConfigCuentas tiene ventasMensajes', fs2.includes('ventasMensajes?: MensajeVenta[]'));
 }

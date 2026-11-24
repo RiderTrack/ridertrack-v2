@@ -500,6 +500,8 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
   const contado = Math.max(0, Number(datos.contado) || 0);
   // 📅 FASE BE: el día de esta caja — hoy si no llega nada útil
   const fechaCierre = normalizarFechaCierre(datos.fecha, hoyLocal());
+  // 💜 FASE BG: la nota SANEADA (viaja solo si quedó algo — ver abajo)
+  const nota = (datos.nota || '').trim().slice(0, 200);
 
   const cierre: CierreCaja = {
     fecha: fechaCierre,
@@ -519,7 +521,13 @@ export async function cerrarCaja(uid: string, datos: DatosCierre): Promise<Cierr
     // los de hoy) — el gasto anotado el 2-nov pertenece a la caja
     // del 2-nov, la cierres cuando la cierres
     gastos: gastosDeFecha(estado.gastos, fechaCierre),
-    nota: (datos.nota || '').trim().slice(0, 200) || undefined,
+    // 💜 FASE BG (bug viejo, encontrado por el E2E de esta fase):
+    // la nota vacía viajaba como `undefined` → Firestore RECHAZA
+    // cualquier write con un campo undefined → el cierre quedaba
+    // SOLO en el teléfono: nunca llegaba a la nube ni al otro
+    // celular (y cualquier otro write de la caja del mismo día
+    // también rebotaba). Ahora el campo viaja SOLO SI EXISTE.
+    ...(nota ? { nota } : {}),
     // 💜 FASE BC: los pedidos FALLIDOS del día viajan congelados en el
     // cierre → el cuadre al jefe los muestra ({fallidos} / {detallePedidos})
     fallidos: r.fallidos || 0,
@@ -545,20 +553,30 @@ export function cierreDeHoy(caja: EstadoCaja): CierreCaja | null {
   return cierreDeFecha(caja.cierres, hoyLocal());
 }
 
-/** Reabre la caja de hoy (borra el cierre para corregirlo) —
+/** Reabre la caja de HOY (borra el cierre para corregirlo) —
  * 🔄 FASE W: tombstone por fecha → el merge no lo resucita, y
- * si volvés a cerrar el nuevo cierre (at posterior) sobrevive */
-export async function reabrirCaja(uid: string): Promise<void> {
+ * si volvés a cerrar el nuevo cierre (at posterior) sobrevive
+ * 💜 FASE BG: ahora también la de OTRO día — reabrirCaja(uid,
+ * '2026-11-22') borra el cierre de ESA fecha (ayer,
+ * anteayer…). Pasando el día ya NO se pierde la opción: el
+ * cierre sigue guardado 90 días y se puede reabrir igual. Sin
+ * fecha (o con una fecha sin cierre) → HOY como toda la vida,
+ * cero cambios para el flujo de siempre. */
+export async function reabrirCaja(uid: string, fecha?: string): Promise<void> {
   if (uidActual !== uid) arrancarCaja(uid);
   uidActual = uidActual || uid;
 
-  const hoy = hoyLocal();
-  const cierreViejo = cierreDeFecha(estado.cierres, hoy);
+  // 💜 FASE BG: el día a reabrir se valida CONTRA LO QUE EXISTE
+  // (no se normaliza aparte): solo se borra un cierre que de
+  // verdad esté guardado con esa fecha — una fecha basura o sin
+  // cierre es un no-op, nunca toca el día equivocado
+  const dia = typeof fecha === 'string' && fecha.trim() ? fecha.trim() : hoyLocal();
+  const cierreViejo = cierreDeFecha(estado.cierres, dia);
   if (!cierreViejo) return;
   estado = {
     ...estado,
-    cierres: estado.cierres.filter((c) => c.fecha !== hoy),
-    borrados: fusionarBorrados(estado.borrados, { gastos: [], cierres: [tombstoneCierre(hoy)] }),
+    cierres: estado.cierres.filter((c) => c.fecha !== dia),
+    borrados: fusionarBorrados(estado.borrados, { gastos: [], cierres: [tombstoneCierre(dia)] }),
   };
   estado = normalizar(estado);
   persistirLocal();

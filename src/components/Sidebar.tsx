@@ -43,6 +43,10 @@ import { MantenimientoMenuBoton, MantenimientoCard } from './MantenimientoCard';
 // F3.39/3.40: 💰 caja del día — BOTÓN de menú (badge con el
 // esperado); el gestor completo vive en su modal
 import { CajaMenuBoton, CajaCard } from './CajaCard';
+// 💜 FASE BG: MIS YAPES — botón de menú (badge con tu saldo) y
+// el gestor completo en su modal: los dos Yapes (el tuyo y el
+// de la empresa), chapes del día, depósitos y gastos
+import { YapeMenuBoton, YapeCard } from './YapeCard';
 // FASE C: la CAJA de inDrive (gastos en mano + neto libre) vive
 // dentro del mismo modal del Caja del día, abajo de la del trabajo
 import PanelCajaDT from '../drivertrack/panels/PanelCajaDT';
@@ -113,6 +117,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [mantGestionAbierto, setMantGestionAbierto] = useState(false);
   // F3.39: 💰 modal del gestor de caja (menú hamburguesa)
   const [cajaGestionAbierto, setCajaGestionAbierto] = useState(false);
+  // 💜 FASE BG: modal del gestor de los Yapes (menú hamburguesa)
+  const [yapeGestionAbierto, setYapeGestionAbierto] = useState(false);
   // F3.40: 🛣️ modal de kilometraje (stats + calibración) — antes
   // era un bloque grande abajo; ahora es un botón como los demás
   const [odoGestionAbierto, setOdoGestionAbierto] = useState(false);
@@ -123,11 +129,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // F3.40: abre un gestor cerrando el drawer móvil primero (el
   // drawer va en z-[1200], tapa los modales z-50)
-  const abrirGestion = (cual: 'odo' | 'mant' | 'caja' | 'res' | 'pod') => {
+  const abrirGestion = (cual: 'odo' | 'mant' | 'caja' | 'yape' | 'res' | 'pod') => {
     if (isMobileOpen) onCloseMobile();
     if (cual === 'odo') setOdoGestionAbierto(true);
     else if (cual === 'mant') setMantGestionAbierto(true);
     else if (cual === 'caja') setCajaGestionAbierto(true);
+    else if (cual === 'yape') setYapeGestionAbierto(true);
     else if (cual === 'res') setResGestionAbierto(true);
     else setPodGestionAbierto(true);
   };
@@ -284,6 +291,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <OdometroMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('odo')} />
                 <MantenimientoMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('mant')} />
                 <CajaMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('caja')} />
+                {/* 💜 FASE BG: tus dos Yapes vigilados — al lado de la
+                    caja, misma fila, mismo patrón */}
+                <YapeMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('yape')} />
                 {/* F3.41: 📊 resumen del día → grupo MATE de un toque */}
                 <ResumenMenuBoton uid={uid} colapsado={isCollapsed} onAbrir={() => abrirGestion('res')} />
                 {/* F3.42: 🎙️ el podcast — tu día contado en voz alta */}
@@ -452,6 +462,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <PanelCajaDT />
         </div>
+      </Modal>
+
+      {/* 💜 FASE BG: GESTOR DE LOS YAPES — modal que abre desde
+          el menú hamburguesa, al lado de la caja. Mismo patrón:
+          UNA sola renderización fuera de sidebarContent. */}
+      <Modal
+        isOpen={yapeGestionAbierto}
+        onClose={() => setYapeGestionAbierto(false)}
+        title="💜 Mi Yape"
+        subtitle="Tus dos Yapes: saldo, chapes, depósitos y gastos"
+        maxWidth="lg"
+      >
+        <YapeCard uid={uid} onShowToast={onShowToast} />
       </Modal>
 
       {/* 🛣️ F3.40: KILOMETRAJE — stats (Hoy/Ayer/7d/Total) + la

@@ -1566,7 +1566,7 @@ export default function AjustesView({
       </p>
 
       <p className="pb-2 text-center text-[10px] text-slate-500" data-testid="version-app">
-DriverTrack v0.11.32 (💰 EL RECHAZADO EN PUERTA PAGA EL MEDIO: si llegás a un pedido y el cliente lo rechaza, te paga la mitad de la carrera — S/4.50 los normales de S/9, S/6.00 los lejanos de S/12 · entra solo en tu paga de la caja (renglón «+N al medio»), en el cuadre al jefe y en el resumen del MATE · el chip S/9⇄S/12 de la ruta muestra el MEDIO en los rechazados · los demás fallidos (fallida, ausente, no contesta, cancelado) siguen sin pagar · Lima, PE
+DriverTrack v0.11.33 (💜 MI YAPE: nueva sección en el menú ☰ junto a la Caja — tus DOS Yapes vigilados sin abrir la app de Yape: el saldo de tu cuenta personal y el de la empresa, los chapes de cada carrera del día, lo que depositaste a la empresa y lo que gastaste, con «fijar saldo» para cuadrar con la app real · se sincroniza en vivo entre tus celulares · 🔓 REABRIR CAJA DE DÍAS PASADOS: la vista de otro día (chips de fecha) ahora tiene «Reabrir esta caja» — el de ayer o anteayer ya no queda cerrado para siempre, corregís el conteo o los gastos y la volvés a cerrar · Lima, PE
       </p>
     </div>
   );

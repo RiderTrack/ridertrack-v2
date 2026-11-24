@@ -515,6 +515,7 @@ async function cerrarCaja(uid, datos) {
   const r = datos.resumen;
   const contado = Math.max(0, Number(datos.contado) || 0);
   const fechaCierre = normalizarFechaCierre(datos.fecha, hoyLocal());
+  const nota = (datos.nota || "").trim().slice(0, 200);
   const cierre = {
     fecha: fechaCierre,
     at: Date.now(),
@@ -533,7 +534,13 @@ async function cerrarCaja(uid, datos) {
     // los de hoy) — el gasto anotado el 2-nov pertenece a la caja
     // del 2-nov, la cierres cuando la cierres
     gastos: gastosDeFecha(estado.gastos, fechaCierre),
-    nota: (datos.nota || "").trim().slice(0, 200) || void 0,
+    // 💜 FASE BG (bug viejo, encontrado por el E2E de esta fase):
+    // la nota vacía viajaba como `undefined` → Firestore RECHAZA
+    // cualquier write con un campo undefined → el cierre quedaba
+    // SOLO en el teléfono: nunca llegaba a la nube ni al otro
+    // celular (y cualquier otro write de la caja del mismo día
+    // también rebotaba). Ahora el campo viaja SOLO SI EXISTE.
+    ...nota ? { nota } : {},
     // 💜 FASE BC: los pedidos FALLIDOS del día viajan congelados en el
     // cierre → el cuadre al jefe los muestra ({fallidos} / {detallePedidos})
     fallidos: r.fallidos || 0,
@@ -552,16 +559,16 @@ async function cerrarCaja(uid, datos) {
 function cierreDeHoy(caja) {
   return cierreDeFecha(caja.cierres, hoyLocal());
 }
-async function reabrirCaja(uid) {
+async function reabrirCaja(uid, fecha) {
   if (uidActual !== uid) arrancarCaja(uid);
   uidActual = uidActual || uid;
-  const hoy = hoyLocal();
-  const cierreViejo = cierreDeFecha(estado.cierres, hoy);
+  const dia = typeof fecha === "string" && fecha.trim() ? fecha.trim() : hoyLocal();
+  const cierreViejo = cierreDeFecha(estado.cierres, dia);
   if (!cierreViejo) return;
   estado = {
     ...estado,
-    cierres: estado.cierres.filter((c) => c.fecha !== hoy),
-    borrados: fusionarBorrados(estado.borrados, { gastos: [], cierres: [tombstoneCierre(hoy)] })
+    cierres: estado.cierres.filter((c) => c.fecha !== dia),
+    borrados: fusionarBorrados(estado.borrados, { gastos: [], cierres: [tombstoneCierre(dia)] })
   };
   estado = normalizar(estado);
   persistirLocal();

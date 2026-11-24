@@ -597,6 +597,33 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
     }
   };
 
+  // ── 💜 FASE BG: reabrir la caja de OTRO día (ayer,
+  // anteayer…) — pasando el día la opción ya NO desaparece ──
+  const reabrirDia = async (cierre: CierreCaja) => {
+    if (!uid) return;
+    if (
+      !confirm(
+        `¿Reabrir la caja del ${fechaCorta(cierre.fecha)}?\n\nEl cierre se borra para que corrijas el conteo, los gastos o lo vuelvas a cerrar.`
+      )
+    )
+      return;
+    try {
+      await reabrirCaja(uid, cierre.fecha);
+      // volvé a HOY y dejá el form listo para re-cerrar ese día:
+      // fecha elegida + el conteo viejo pre-cargado
+      setFechaVer(null);
+      setFechaCierre(cierre.fecha);
+      setContadoInput(String(cierre.contado || ''));
+      onShowToast?.(
+        '🔓 Caja reabierta',
+        `La del ${fechaCorta(cierre.fecha)} quedó libre — corrigé y volvé a cerrarla`,
+        'info'
+      );
+    } catch {
+      onShowToast?.('No se pudo reabrir', 'Quedó en el teléfono — reintenta', 'warning');
+    }
+  };
+
   /** el mini-form de cambiar fecha (aparece en la caja de hoy
    *  cerrada y en la vista de otro día — misma pieza) */
   const formCambiarFecha = (cierre: CierreCaja) => {
@@ -1438,6 +1465,18 @@ export const CajaCard: React.FC<CajaCardProps> = ({ uid, riderName, onShowToast 
               📅 Cambiar la fecha de esta caja
             </button>
             {formCambiarFecha(cierreVer)}
+            {/* 💜 FASE BG: reabrir ESTA caja — el mismo Reabrir que
+                tiene la de HOY, ahora también acá: "quisiera reabrir
+                los del día de ayer o antes de ayer". El cierre se
+                borra y el form de cierre queda listo con ese día */}
+            <button
+              onClick={() => void reabrirDia(cierreVer)}
+              className="w-full mt-1.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 text-xs font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
+              title="Borrar el cierre de este día para corregirlo y volver a cerrarlo"
+              data-testid="boton-reabrir-dia"
+            >
+              <Unlock className="w-3.5 h-3.5" /> Reabrir esta caja
+            </button>
           </div>
 
           {/* resumen congelado de ese día */}

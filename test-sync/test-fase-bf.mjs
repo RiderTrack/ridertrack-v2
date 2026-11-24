@@ -187,9 +187,11 @@ console.log('8) contratos de fuente');
   const fsx = leer('../src/services/firestore.ts');
   check('firestore: el comentario del snapshot del historial', fsx.includes('el desglose ahora incluye los rechazados al medio'));
   const aj = leer('../src/drivertrack/components/AjustesView.tsx');
-  check('AjustesView: v0.11.32 + PAGA EL MEDIO', aj.includes('v0.11.32') && aj.includes('PAGA EL MEDIO'));
+  // 💜 FASE BG: la versión siguió avanzando (0.11.33) — el texto de BF
+  // vive en el historial del repo; el guardian apunta a la actual
+  check('AjustesView: versión actual (0.11.33)', aj.includes('v0.11.33'));
   const pkg = leer('../package.json');
-  check('package.json 0.11.32', pkg.includes('"version": "0.11.32"'));
+  check('package.json 0.11.33', pkg.includes('"version": "0.11.33"'));
 }
 
 // ── resumen ──────────────────────────────────────────────
